@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Bot,
+  CheckCheck,
   ChevronDown,
+  Copy,
   Instagram,
   KeyRound,
   Loader2,
   MessageCircle,
   Phone,
   Plus,
+  ShieldCheck,
   UserRound,
   Zap,
 } from 'lucide-react';
@@ -21,24 +24,56 @@ import { InstagramCard } from './InstagramCard';
 // um número de WhatsApp da organização —
 //   · provider 'zernio'  — API oficial da Meta via Zernio (janela de 24h)
 //   · provider 'uazapi'  — instância UAZAPI própria (sem janela)
+//   · provider 'meta'    — API oficial da Meta DIRETO, sem intermediário
 // Cada número pode ser vinculado a um membro: conversas que chegam por aquele
 // número são atribuídas automaticamente a ele (sem vínculo, vale o round-robin).
 
 interface ChannelRow {
   id: string;
-  provider: 'zernio' | 'uazapi';
+  provider: 'zernio' | 'uazapi' | 'meta';
   label: string;
   phone: string | null;
   zernio_account_id: string | null;
+  meta_waba_id: string | null;
+  meta_phone_number_id: string | null;
   assigned_member: string | null;
   is_active: boolean;
   ai_enabled: boolean;
+}
+
+// Status do número lido da Graph API (GET /api/meta-connect).
+interface MetaChannelStatus {
+  id: string;
+  connected: boolean;
+  status: string | null;
+  verifiedName: string | null;
+  qualityRating: string | null;
 }
 
 type ConnState = boolean | null; // null = carregando
 
 const ZERNIO_COLOR = '#25D366';
 const UAZAPI_COLOR = '#2DD4BF';
+const META_COLOR = '#0866FF';
+
+// Identificadores da conta Meta da clínica (Odontologia), confirmados na tela
+// do Gerenciador em 05/09/2026. Não são segredo — só pré-preenchem o
+// formulário; o operador pode trocar qualquer um deles.
+const META_DEFAULTS = {
+  label: 'WhatsApp Odonto (oficial)',
+  phone: '+5573998040599',
+  wabaId: '1500039648549092',
+  phoneNumberId: '1308096539052095',
+};
+
+// Fallback: a URL real vem do backend (montada a partir do SUPABASE_URL).
+const META_WEBHOOK_URL_FALLBACK =
+  'https://feptvmsjzreovfynrlql.supabase.co/functions/v1/meta-webhook';
+
+// Mesma pintura dos inputs das outras seções, extraída porque o formulário da
+// Meta tem sete campos.
+const FIELD_CLASS =
+  'w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:border-[var(--accent-primary)] focus:outline-none';
 
 function StatusBadge({ active }: { active: boolean }) {
   return (
@@ -95,13 +130,29 @@ export function ChannelsSettings() {
   const [zernioKey, setZernioKey] = useState('');
   const [zernioKeyExists, setZernioKeyExists] = useState(false);
   const [savingZernioKey, setSavingZernioKey] = useState(false);
+  // Canal Meta direto (provider 'meta'). Identificadores pré-preenchidos, os
+  // três segredos sempre em branco — o CRM nunca devolve valor de segredo.
+  const [showMetaForm, setShowMetaForm] = useState(false);
+  const [metaForm, setMetaForm] = useState({
+    ...META_DEFAULTS,
+    token: '',
+    appSecret: '',
+    verifyToken: '',
+  });
+  const [savingMeta, setSavingMeta] = useState(false);
+  const [metaSecrets, setMetaSecrets] = useState({ appSecret: false, verifyToken: false });
+  const [metaWebhookUrl, setMetaWebhookUrl] = useState(META_WEBHOOK_URL_FALLBACK);
+  const [metaStatus, setMetaStatus] = useState<Record<string, MetaChannelStatus>>({});
+  const [webhookCopied, setWebhookCopied] = useState(false);
 
   const loadChannels = useCallback(async () => {
     const supabase = getSupabase();
     const { data, error } = await supabase
       .schema('whatsapp_hub')
       .from('channels')
-      .select('id, provider, label, phone, zernio_account_id, assigned_member, is_active, ai_enabled')
+      .select(
+        'id, provider, label, phone, zernio_account_id, meta_waba_id, meta_phone_number_id, assigned_member, is_active, ai_enabled',
+      )
       .order('created_at');
     if (error) {
       toast.error('Falha ao carregar os números', { description: error.message });
@@ -124,24 +175,51 @@ export function ChannelsSettings() {
     }
   }, [session]);
 
-  const loadZernioKeyStatus = useCallback(async () => {
+  // Quais segredos já estão no cofre da org (só o "existe", nunca o valor).
+  const loadCredentialStatus = useCallback(async () => {
     if (!session) return;
     try {
-      const res = await fetch('/api/credentials?keys=zernio_api_key', {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
+      const res = await fetch(
+        '/api/credentials?keys=zernio_api_key,meta_app_secret,meta_webhook_verify_token',
+        { headers: { Authorization: `Bearer ${session.access_token}` } },
+      );
       const body = (await res.json()) as Record<string, { exists?: boolean }>;
       setZernioKeyExists(Boolean(body?.zernio_api_key?.exists));
+      setMetaSecrets({
+        appSecret: Boolean(body?.meta_app_secret?.exists),
+        verifyToken: Boolean(body?.meta_webhook_verify_token?.exists),
+      });
     } catch {
       // status informativo — falha aqui não bloqueia a edição.
+    }
+  }, [session]);
+
+  // Status dos números Meta direto na Graph API (nome verificado e qualidade).
+  const loadMetaStatus = useCallback(async () => {
+    if (!session) return;
+    try {
+      const res = await fetch('/api/meta-connect', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const body = (await res.json()) as {
+        webhookUrl?: string;
+        channels?: MetaChannelStatus[];
+      };
+      if (body.webhookUrl) setMetaWebhookUrl(body.webhookUrl);
+      setMetaStatus(
+        Object.fromEntries((body.channels ?? []).map((c) => [c.id, c])),
+      );
+    } catch {
+      // status informativo — a listagem do canal vem do banco, não daqui.
     }
   }, [session]);
 
   useEffect(() => {
     void loadChannels();
     void loadInstagramStatus();
-    void loadZernioKeyStatus();
-  }, [loadChannels, loadInstagramStatus, loadZernioKeyStatus]);
+    void loadCredentialStatus();
+    void loadMetaStatus();
+  }, [loadChannels, loadInstagramStatus, loadCredentialStatus, loadMetaStatus]);
 
   const zernioChannels = useMemo(
     () => (channels ?? []).filter((c) => c.provider === 'zernio'),
@@ -149,6 +227,10 @@ export function ChannelsSettings() {
   );
   const uazapiChannels = useMemo(
     () => (channels ?? []).filter((c) => c.provider === 'uazapi'),
+    [channels],
+  );
+  const metaChannels = useMemo(
+    () => (channels ?? []).filter((c) => c.provider === 'meta'),
     [channels],
   );
   const activeCount = (channels ?? []).filter((c) => c.is_active).length;
@@ -307,13 +389,86 @@ export function ChannelsSettings() {
     }
   };
 
+  // Cria (ou revalida) o canal Meta direto. O backend testa o par
+  // Phone Number ID + token na Graph API antes de gravar qualquer coisa.
+  const saveMetaChannel = async () => {
+    if (!session) return;
+    setSavingMeta(true);
+    try {
+      const existing = metaChannels.find(
+        (c) => c.meta_phone_number_id === metaForm.phoneNumberId.trim(),
+      );
+      const res = await fetch('/api/meta-connect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          channelId: existing?.id,
+          label: metaForm.label.trim() || undefined,
+          phone: metaForm.phone.trim() || undefined,
+          wabaId: metaForm.wabaId.trim(),
+          phoneNumberId: metaForm.phoneNumberId.trim(),
+          token: metaForm.token.trim(),
+          appSecret: metaForm.appSecret.trim(),
+          verifyToken: metaForm.verifyToken.trim(),
+        }),
+      });
+      const body = await res.json();
+      if (!res.ok || !body.success) {
+        throw new Error(body.message ?? 'Falha ao conectar o número na Meta.');
+      }
+      if (body.webhookUrl) setMetaWebhookUrl(body.webhookUrl);
+      // Segredo digitado nunca fica em memória depois de salvo.
+      setMetaForm((f) => ({ ...f, token: '', appSecret: '', verifyToken: '' }));
+      toast.success('Número conectado na Meta.', {
+        description: [
+          body.verifiedName ? `Nome verificado: ${body.verifiedName}` : null,
+          body.qualityRating ? `qualidade ${body.qualityRating}` : null,
+        ]
+          .filter(Boolean)
+          .join(' · ') || undefined,
+      });
+      if (body.wabaWarning) {
+        toast.warning('Conta do WhatsApp (WABA) não confirmada', {
+          description: String(body.wabaWarning),
+        });
+      }
+      void loadChannels();
+      void loadCredentialStatus();
+      void loadMetaStatus();
+    } catch (err) {
+      toast.error('Falha ao conectar na Meta', {
+        description: err instanceof Error ? err.message : 'Erro interno',
+      });
+    } finally {
+      setSavingMeta(false);
+    }
+  };
+
+  const copyWebhookUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(metaWebhookUrl);
+      setWebhookCopied(true);
+      window.setTimeout(() => setWebhookCopied(false), 2000);
+      toast.success('URL do webhook copiada.');
+    } catch {
+      toast.error('Não foi possível copiar. Selecione a URL e copie manualmente.');
+    }
+  };
+
   const findOperator = (userId: string | null) =>
     userId ? operators.find((o) => o.user_id === userId) : undefined;
 
-  // Card de um número — usado nas duas seções (Zernio e UAZAPI).
+  // Card de um número — usado nas três seções (Zernio, UAZAPI e Meta).
   const renderChannelCard = (channel: ChannelRow) => {
     const owner = findOperator(channel.assigned_member);
-    const accent = channel.provider === 'uazapi' ? UAZAPI_COLOR : ZERNIO_COLOR;
+    const accent = channel.provider === 'uazapi'
+      ? UAZAPI_COLOR
+      : channel.provider === 'meta'
+        ? META_COLOR
+        : ZERNIO_COLOR;
     return (
       <div
         key={channel.id}
@@ -418,7 +573,7 @@ export function ChannelsSettings() {
       </header>
 
       {/* Resumo — quantos números por provedor */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="glass-card p-4">
           <div className="text-label">Ativos</div>
           <div className="mt-1 text-2xl font-extrabold text-[var(--color-text-primary)]">
@@ -445,6 +600,15 @@ export function ChannelsSettings() {
             {loading ? '-' : uazapiChannels.length}
           </div>
           <div className="text-[11px] text-[var(--color-text-secondary)]">sem janela de 24h</div>
+        </div>
+        <div className="glass-card p-4">
+          <div className="flex items-center gap-1.5 text-label">
+            <ShieldCheck className="h-3 w-3" style={{ color: META_COLOR }} /> Meta
+          </div>
+          <div className="mt-1 text-2xl font-extrabold" style={{ color: META_COLOR }}>
+            {loading ? '-' : metaChannels.length}
+          </div>
+          <div className="text-[11px] text-[var(--color-text-secondary)]">direto na Meta</div>
         </div>
       </div>
 
@@ -687,6 +851,235 @@ export function ChannelsSettings() {
             </div>
           ) : (
             <div className="space-y-3">{uazapiChannels.map(renderChannelCard)}</div>
+          )}
+        </div>
+      </section>
+
+      {/* ── Meta Cloud API direto (card único) ── */}
+      <section>
+        <div className="glass-card space-y-4 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border"
+                style={{ borderColor: 'rgba(8,102,255,0.25)', background: 'rgba(8,102,255,0.08)' }}
+              >
+                <ShieldCheck className="h-5 w-5" style={{ color: META_COLOR }} />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
+                  WhatsApp — API oficial da Meta (direto)
+                </h3>
+                <p className="text-[11px] text-[var(--color-text-secondary)]">
+                  Sem intermediário: o CRM fala direto com a Meta. Fora da janela de 24h só
+                  sai mensagem com template aprovado.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                style={{ background: 'rgba(8,102,255,0.1)', color: META_COLOR }}
+              >
+                <ShieldCheck className="h-3 w-3" />
+                {loading
+                  ? '-'
+                  : `${metaChannels.filter((c) => c.is_active).length} de ${metaChannels.length}`}{' '}
+                números ativos
+              </span>
+              <button
+                onClick={() => setShowMetaForm((v) => !v)}
+                className="inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-xs font-semibold transition"
+                style={{
+                  borderColor: 'rgba(8,102,255,0.35)',
+                  background: 'rgba(8,102,255,0.08)',
+                  color: META_COLOR,
+                }}
+              >
+                <Plus className="h-3.5 w-3.5" /> Conectar número
+              </button>
+            </div>
+          </div>
+
+          {/* Formulário do canal Meta — identificadores já preenchidos com os
+              dados da conta da clínica; segredos sempre em branco. */}
+          {showMetaForm ? (
+            <div className="space-y-3 rounded-xl border border-[rgba(212,165,116,0.15)] bg-white/[0.02] p-4">
+              <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">
+                Dados do número na Meta
+              </h4>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-1.5">
+                  <span className="block text-label">Nome do canal</span>
+                  <input
+                    value={metaForm.label}
+                    onChange={(e) => setMetaForm((f) => ({ ...f, label: e.target.value }))}
+                    placeholder="Ex.: WhatsApp Odonto (oficial)"
+                    className={FIELD_CLASS}
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="block text-label">Número</span>
+                  <input
+                    value={metaForm.phone}
+                    onChange={(e) => setMetaForm((f) => ({ ...f, phone: e.target.value }))}
+                    placeholder="+55 73 99804-0599"
+                    className={FIELD_CLASS}
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="block text-label">ID da conta (WABA)</span>
+                  <input
+                    value={metaForm.wabaId}
+                    onChange={(e) => setMetaForm((f) => ({ ...f, wabaId: e.target.value }))}
+                    placeholder="ID da conta do WhatsApp Business"
+                    className={FIELD_CLASS}
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="block text-label">ID do número (Phone Number ID)</span>
+                  <input
+                    value={metaForm.phoneNumberId}
+                    onChange={(e) => setMetaForm((f) => ({ ...f, phoneNumberId: e.target.value }))}
+                    placeholder="ID do número na Meta"
+                    className={FIELD_CLASS}
+                  />
+                </label>
+              </div>
+
+              <div className="space-y-3 border-t border-[rgba(212,165,116,0.08)] pt-3">
+                <label className="space-y-1.5">
+                  <span className="block text-label">Token de acesso</span>
+                  <input
+                    value={metaForm.token}
+                    onChange={(e) => setMetaForm((f) => ({ ...f, token: e.target.value }))}
+                    type="password"
+                    autoComplete="off"
+                    placeholder="Cole o token permanente do Usuário do Sistema"
+                    className={FIELD_CLASS}
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="block text-label">Chave secreta do app (App Secret)</span>
+                  <input
+                    value={metaForm.appSecret}
+                    onChange={(e) => setMetaForm((f) => ({ ...f, appSecret: e.target.value }))}
+                    type="password"
+                    autoComplete="off"
+                    placeholder={
+                      metaSecrets.appSecret
+                        ? '•••••••••••• (configurado)'
+                        : '32 caracteres do App Secret'
+                    }
+                    className={FIELD_CLASS}
+                  />
+                </label>
+                <label className="space-y-1.5">
+                  <span className="block text-label">
+                    Senha de verificação do webhook (Verify Token)
+                  </span>
+                  <input
+                    value={metaForm.verifyToken}
+                    onChange={(e) => setMetaForm((f) => ({ ...f, verifyToken: e.target.value }))}
+                    type="password"
+                    autoComplete="off"
+                    placeholder={
+                      metaSecrets.verifyToken
+                        ? '•••••••••••• (configurado)'
+                        : 'Senha que você repete no painel da Meta'
+                    }
+                    className={FIELD_CLASS}
+                  />
+                </label>
+                <p className="text-[11px] text-[var(--color-text-secondary)]">
+                  Os três campos acima ficam cifrados no banco e nunca voltam para a tela.
+                  Numa edição, deixe em branco o que não quiser trocar.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setShowMetaForm(false)}
+                  className="rounded-lg border border-[rgba(212,165,116,0.2)] px-4 py-2 text-sm text-[var(--color-text-secondary)]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => void saveMetaChannel()}
+                  disabled={savingMeta || !metaForm.phoneNumberId.trim()}
+                  className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-[#182940] to-[#D4A574] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                >
+                  {savingMeta ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Salvar e testar conexão
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {/* URL do webhook — a Meta não aceita cadastro por API: é colada à mão. */}
+          <div
+            className="rounded-xl border p-4"
+            style={{ borderColor: 'rgba(8,102,255,0.25)', background: 'rgba(8,102,255,0.06)' }}
+          >
+            <div className="text-label">URL do webhook</div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded-lg bg-[rgba(15,18,35,0.8)] px-3 py-2 font-mono text-[11px] text-[var(--color-text-primary)]">
+                {metaWebhookUrl}
+              </code>
+              <button
+                onClick={() => void copyWebhookUrl()}
+                className="inline-flex shrink-0 items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold transition"
+                style={{
+                  borderColor: 'rgba(8,102,255,0.35)',
+                  background: 'rgba(8,102,255,0.08)',
+                  color: META_COLOR,
+                }}
+              >
+                {webhookCopied ? (
+                  <CheckCheck className="h-3.5 w-3.5" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+                {webhookCopied ? 'Copiada' : 'Copiar'}
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-[var(--color-text-secondary)]">
+              Cole esta URL na Meta em <strong>Configuração da API → Etapa 3</strong> e assine
+              os campos <code className="font-mono">messages</code> e{' '}
+              <code className="font-mono">message_template_status_update</code>.
+            </p>
+          </div>
+
+          {/* Números conectados direto na Meta */}
+          {loading ? (
+            <div className="flex items-center gap-3 text-sm text-[var(--color-text-secondary)]">
+              <Loader2 className="h-4 w-4 animate-spin" /> Carregando números...
+            </div>
+          ) : metaChannels.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-[rgba(148,163,184,0.25)] p-4 text-sm text-[var(--color-text-secondary)]">
+              Nenhum número conectado direto na Meta. Clique em "Conectar número" e informe o
+              token de acesso.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {metaChannels.map((channel) => {
+                const st = metaStatus[channel.id];
+                return (
+                  <div key={channel.id} className="space-y-1">
+                    {renderChannelCard(channel)}
+                    {st ? (
+                      <p className="px-1 text-[11px] text-[var(--color-text-secondary)]">
+                        {st.connected
+                          ? `Meta: ${st.verifiedName ?? 'sem nome verificado'}${
+                              st.qualityRating ? ` · qualidade ${st.qualityRating}` : ''
+                            }${st.status ? ` · ${st.status}` : ''}`
+                          : `Meta não respondeu: ${st.status ?? 'erro'}`}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </section>

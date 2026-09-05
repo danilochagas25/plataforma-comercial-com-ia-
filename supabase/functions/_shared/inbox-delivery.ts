@@ -22,6 +22,7 @@ import {
   sendInboxMessage,
 } from './zernio.ts';
 import { uazapiSendMedia, uazapiSendText } from './uazapi.ts';
+import { metaSendMedia, metaSendText } from './meta-cloud.ts';
 import { getSendContextForConversation } from './channels.ts';
 
 type Admin = ReturnType<typeof getAdminClient>;
@@ -37,7 +38,8 @@ export interface InboxTarget {
   channelId?: string | null;
   // Conta Zernio que RECEBEU a conversa (fallback legado).
   zernioAccountId?: string | null;
-  // Provedor da conversa: 'zernio' (Meta oficial / Instagram) × 'uazapi'.
+  // Provedor da conversa: 'zernio' (Meta via Zernio / Instagram) × 'uazapi'
+  // (instância própria) × 'meta' (Cloud API direta).
   provider?: string | null;
 }
 
@@ -66,6 +68,36 @@ export async function sendInboxWithResolve(
     provider: target.provider ?? null,
     zernio_account_id: target.zernioAccountId ?? null,
   });
+
+  // Conversa Meta: envio direto na Cloud API (graph.facebook.com). A Meta não
+  // tem entidade "conversa" com id endereçável — o destino é o TELEFONE, então
+  // não há resolve/auto-heal como no Zernio. Só texto e mídia livres: template
+  // (fora da janela de 24h) é outro caminho, não passa por aqui.
+  if (sendCtx.provider === 'meta') {
+    if (target.channel !== 'whatsapp') {
+      throw new Error('Canal Meta atende somente WhatsApp.');
+    }
+    if (!target.phone) throw new Error('Conversa Meta sem telefone.');
+    const mctx = sendCtx.meta;
+    if (payload.attachmentUrl) {
+      const type = payload.attachmentType === 'image'
+        ? 'image'
+        : payload.attachmentType === 'video'
+          ? 'video'
+          : payload.attachmentType === 'audio' || payload.voiceNote
+            ? 'audio'
+            : 'document';
+      const sent = await metaSendMedia(mctx, {
+        phone: target.phone,
+        type,
+        link: payload.attachmentUrl,
+        caption: payload.text,
+      });
+      return sent.messageId;
+    }
+    const sent = await metaSendText(mctx, { phone: target.phone, text: payload.text ?? '' });
+    return sent.messageId;
+  }
 
   // Conversa UAZAPI: envio direto pela API da instância (sem Zernio). O
   // telefone é o destino; mídia vai como URL (upload já feito pelo caller).

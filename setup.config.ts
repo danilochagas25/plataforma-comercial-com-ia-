@@ -128,6 +128,48 @@ export const setupConfig: SetupConfig = {
       },
     },
     {
+      // Canal Meta Cloud API direto (provider 'meta'). O TOKEN DE ACESSO nao
+      // entra aqui: ele fica cifrado na linha do canal
+      // (whatsapp_hub.channels.meta_token_encrypted), gravado por
+      // api/meta-connect. Aqui ficam so os dois segredos do webhook, que a
+      // Edge Function meta-webhook le do cofre da org.
+      key: 'meta_app_secret',
+      label: 'Meta App Secret',
+      placeholder: '32 caracteres hexadecimais',
+      inputType: 'password',
+      docsUrl: 'https://developers.facebook.com/apps/',
+      helpText:
+        'Chave secreta do app da Meta. Valida a assinatura do webhook (X-Hub-Signature-256). Cifrada no banco (CRYPTO_KEY).',
+      validate: async (value) => {
+        const v = value.trim();
+        if (!v) return ok; // opcional: sem app secret o webhook so nao valida assinatura
+        return /^[a-f0-9]{32}$/i.test(v)
+          ? ok
+          : {
+              ok: false,
+              message: 'O App Secret da Meta tem 32 caracteres hexadecimais (0-9, a-f).',
+            };
+      },
+    },
+    {
+      key: 'meta_webhook_verify_token',
+      label: 'Meta Webhook Verify Token',
+      placeholder: 'senha de verificacao do webhook',
+      inputType: 'password',
+      helpText:
+        'Senha que voce inventa e repete no painel da Meta (Configuracao da API, Etapa 3). A Meta devolve esse valor no desafio de verificacao.',
+      validate: async (value) => {
+        const v = value.trim();
+        if (!v) return ok; // opcional ate configurar o webhook
+        if (/\s/.test(v)) {
+          return { ok: false, message: 'A senha de verificacao nao pode ter espacos.' };
+        }
+        return v.length >= 8
+          ? ok
+          : { ok: false, message: 'A senha de verificacao precisa de pelo menos 8 caracteres.' };
+      },
+    },
+    {
       key: 'openai_api_key',
       label: 'OpenAI API Key',
       placeholder: 'sk-...',

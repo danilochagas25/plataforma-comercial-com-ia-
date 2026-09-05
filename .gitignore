@@ -71,3 +71,18 @@ tests/.artifacts/
 
 # arquivos de preview local, nunca versionar
 public/__preview-*
+
+# ----------------------------------------------------------------------------
+# Documentos locais — NUNCA versionar.
+# Motivo (05/09/2026): um .docx com o token permanente da Meta foi salvo dentro
+# da pasta do projeto. Não chegou a ser commitado, mas passaria num `git add .`.
+# Aqui também caem exports do WebDental, que trazem nome, telefone e endereço
+# de paciente — dado pessoal sensível não entra em repositório.
+# ----------------------------------------------------------------------------
+*.docx
+*.doc
+*.rtf
+*.pdf
+*.xlsx
+*.xls
+~$*
