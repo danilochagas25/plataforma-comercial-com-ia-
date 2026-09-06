@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, Bot, Check, CheckCheck, Clock, FileText, Smartphone, StickyNote, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/app/providers/AuthProvider';
+import { createSignedMediaUrl, parseStorageRef } from '@/lib/inbox-media';
 import type { Message } from '@/types/inbox';
 import type { ThreadMessage } from '@/hooks/useMessages';
 
@@ -13,6 +14,53 @@ function resolveMediaUrl(url: string, accessToken: string | null): string {
   if (!accessToken) return url;
   if (!/^https:\/\/zernio\.com\/api\/v1\//i.test(url)) return url;
   return `/api/zernio-media?url=${encodeURIComponent(url)}&t=${encodeURIComponent(accessToken)}`;
+}
+
+// Resolve `media_url` para algo que a tag <img>/<audio>/<video> consiga abrir.
+//
+// Canal Meta: a foto e o áudio do paciente ficam num bucket PRIVADO da nossa
+// base (whatsapp-hub-inbox-media, retenção de 12 meses). media_url guarda a
+// REFERÊNCIA '<bucket>/<org>/<conversa>/<mensagem>.<ext>', não uma URL — e
+// bucket privado não abre sem assinatura. Quem assina é o próprio usuário
+// logado; a policy `wh_inbox_media_org_read` só libera admin e recepção,
+// dentro da própria organização.
+//
+// Estados: 'loading' (assinando), string (pronta) ou null (a mídia expirou no
+// expurgo dos 12 meses, ou o perfil não tem acesso) → o balão cai no
+// placeholder, sem quebrar a tela.
+function useResolvedMedia(rawUrl: string, accessToken: string | null) {
+  const isStorage = parseStorageRef(rawUrl) !== null;
+  const [signed, setSigned] = useState<string | null>(null);
+  const [signing, setSigning] = useState(isStorage);
+
+  useEffect(() => {
+    const ref = parseStorageRef(rawUrl);
+    if (!ref) {
+      setSigned(null);
+      setSigning(false);
+      return;
+    }
+    let alive = true;
+    setSigning(true);
+    createSignedMediaUrl(ref)
+      .then((url) => {
+        if (!alive) return;
+        setSigned(url);
+        setSigning(false);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setSigned(null);
+        setSigning(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [rawUrl]);
+
+  if (isStorage) return { url: signed, loading: signing };
+  const isHttp = /^https?:\/\//i.test(rawUrl);
+  return { url: isHttp ? resolveMediaUrl(rawUrl, accessToken) : null, loading: false };
 }
 
 interface MessageThreadProps {
@@ -98,19 +146,27 @@ const MEDIA_RECEIVED: Record<string, string> = {
   document: 'Documento recebido',
 };
 
-// Renderiza mídia quando `media_url` já é uma URL http(s). No modelo Zernio,
-// tanto a mídia inbound (URL do attachment no webhook) quanto a outbound do
-// operador (URL do /media/upload-direct) chegam já como URL — o placeholder
-// abaixo só aparece em linhas antigas sem URL resolvida.
+// Renderiza mídia de duas origens: URL http(s) (modelo Zernio/UAZAPI) e o
+// bucket privado da nossa base (canal Meta direto), este último por URL
+// assinada. O placeholder abaixo cobre o que sobra: linha antiga sem mídia,
+// arquivo já expurgado aos 12 meses, ou perfil sem acesso ao bucket.
 function MediaContent({ message }: { message: Message }) {
   const { session } = useAuth();
   const rawUrl = message.media_url ?? '';
-  const url = resolveMediaUrl(rawUrl, session?.access_token ?? null);
-  const isHttp = /^https?:\/\//i.test(rawUrl);
+  const { url, loading } = useResolvedMedia(rawUrl, session?.access_token ?? null);
   const label = MEDIA_LABEL[message.content_type] ?? 'Mídia';
   const caption = message.content?.trim();
 
-  if (isHttp) {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 italic opacity-70">
+        <Clock className="h-3 w-3 animate-pulse" />
+        Carregando {label.toLowerCase()}…
+      </div>
+    );
+  }
+
+  if (url) {
     if (message.content_type === 'image') {
       return (
         <div className="space-y-1">
@@ -120,10 +176,22 @@ function MediaContent({ message }: { message: Message }) {
       );
     }
     if (message.content_type === 'audio') {
-      return <audio controls src={url} className="max-w-full" />;
+      return (
+        <div className="space-y-1">
+          <audio controls src={url} className="max-w-full" />
+          {/* Áudio de paciente vira texto pelo transcribe-audio (Whisper); o
+              content transcrito aparece embaixo do player. */}
+          {caption && <div className="whitespace-pre-wrap break-words">{caption}</div>}
+        </div>
+      );
     }
     if (message.content_type === 'video') {
-      return <video controls src={url} className="max-h-64 rounded-lg" />;
+      return (
+        <div className="space-y-1">
+          <video controls src={url} className="max-h-64 rounded-lg" />
+          {caption && <div className="whitespace-pre-wrap break-words">{caption}</div>}
+        </div>
+      );
     }
     return (
       <a href={url} target="_blank" rel="noopener noreferrer" className="underline break-all">
@@ -132,13 +200,11 @@ function MediaContent({ message }: { message: Message }) {
     );
   }
 
-  // Sem URL resolvida — placeholder informativo (ver débito técnico: pipeline
-  // de download de mídia da Meta ainda não implementado).
   const received = MEDIA_RECEIVED[message.content_type] ?? 'Mídia recebida';
   return (
     <div className="italic opacity-80">
       {received}
-      {caption ? `: ${caption}` : ' (visualização indisponível nesta versão).'}
+      {caption ? `: ${caption}` : ' (arquivo indisponível).'}
     </div>
   );
 }

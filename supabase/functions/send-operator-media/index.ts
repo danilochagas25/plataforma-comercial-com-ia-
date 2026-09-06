@@ -7,9 +7,12 @@
 //     com attachmentUrl pela inbox 1:1 e persiste media_url = url do Zernio,
 //     que o thread usa para renderizar. A ZERNIO_API_KEY nunca toca o browser.
 //   meta (Cloud API direta) → sobe os bytes para a própria Meta
-//     (POST /{phone_number_id}/media) e envia por media id. Não existe host de
-//     mídia nosso nesse caminho, então media_url fica null e o thread mostra o
-//     placeholder (mesma limitação do inbound — pendência #21 do MEMORIA.md).
+//     (POST /{phone_number_id}/media) e envia por media id. Nenhuma URL
+//     pública nossa entra no caminho. Uma CÓPIA do arquivo é guardada no
+//     bucket PRIVADO whatsapp-hub-inbox-media e media_url recebe a referência
+//     '<bucket>/<org>/<conversa>/<mensagem>.<ext>' — assim o histórico do
+//     atendimento fica completo no thread (pendência #36 do MEMORIA.md),
+//     com a mesma retenção de 12 meses da mídia recebida.
 //
 // Notas privadas NÃO passam por aqui — são texto e nunca vão ao provedor.
 // ============================================================================
@@ -21,6 +24,7 @@ import { ZernioError, uploadMediaDirect } from '../_shared/zernio.ts';
 import { getSendContextForConversation, loadOrgZernioContext } from '../_shared/channels.ts';
 import { MetaCloudError, metaSendMedia, metaUploadMedia } from '../_shared/meta-cloud.ts';
 import { sendInboxWithResolve } from '../_shared/inbox-delivery.ts';
+import { inboxMediaBuildRef, inboxMediaUpload } from '../_shared/inbox-media.ts';
 
 const MAX_BYTES = 25 * 1024 * 1024;
 
@@ -159,8 +163,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 3. Persiste a linha (media_url = url do Zernio quando houver; null no
-    //    canal Meta, onde o arquivo vive na Meta e não numa URL nossa).
+    // 3. Persiste a linha (media_url = url do Zernio quando houver; no canal
+    //    Meta entra depois, com a referência da cópia no bucket privado).
     const { data: inserted, error: insErr } = await admin
       .from('messages')
       .insert({
@@ -179,6 +183,35 @@ Deno.serve(async (req) => {
       .select('id')
       .single();
     if (insErr) return jsonResponse({ ok: false, error: insErr.message }, { status: 500 });
+    const messageId = (inserted as { id: string }).id;
+
+    // 3b. Canal Meta: guarda a cópia do que o operador mandou, para o balão
+    //     mostrar a mídia em vez do placeholder. A mensagem JÁ foi enviada e
+    //     gravada — falhar aqui só custa a miniatura, nunca o envio.
+    if (sendCtx.provider === 'meta') {
+      try {
+        const ref = inboxMediaBuildRef({
+          orgId: caller.orgId,
+          conversationId,
+          messageId,
+          mimeType: mime,
+          filename,
+        });
+        await inboxMediaUpload(admin, ref, bytes, mime);
+        const { error: refErr } = await admin
+          .from('messages')
+          .update({ media_url: ref.ref })
+          .eq('id', messageId);
+        if (refErr) throw new Error(refErr.message);
+        mediaUrl = ref.ref;
+      } catch (err) {
+        console.error(JSON.stringify({
+          event: 'operator_media_store_failed',
+          message_id: messageId,
+          message: err instanceof Error ? err.message : String(err),
+        }));
+      }
+    }
 
     await admin
       .from('conversations')
@@ -192,7 +225,7 @@ Deno.serve(async (req) => {
 
     return jsonResponse({
       ok: true,
-      message_id: (inserted as { id: string }).id,
+      message_id: messageId,
       media_url: mediaUrl,
       provider: sendCtx.provider,
       sent_to_zernio: true,

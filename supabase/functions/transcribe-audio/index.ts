@@ -2,15 +2,25 @@
 // transcribe-audio  (trigger target)
 // ----------------------------------------------------------------------------
 // Called by the `on_audio_inbound` trigger whenever a contact sends an audio
-// message. No modelo Zernio, o webhook ja entrega a URL do attachment direto em
-// messages.media_url (nao ha mais lookup de media id na Graph API). O fluxo:
+// message. O fluxo:
 //
 //   1. Load the message. Bail if it isn't an inbound audio row.
-//   2. Download the audio bytes from media_url (URL do Zernio).
+//   2. Download the audio bytes de messages.media_url.
 //   3. POST the bytes to OpenAI's Whisper `/v1/audio/transcriptions` endpoint
 //      as multipart/form-data.
 //   4. Update message.content with the transcription so the Inbox can render
 //      text + preserve media_url for replay.
+//
+// DOIS FORMATOS de media_url (06/09/2026):
+//   · URL http(s)  → modelo Zernio/UAZAPI: o webhook já entrega a URL do
+//     attachment, baixável sem header nenhum.
+//   · Referência de Storage '<bucket>/<org>/<conversa>/<mensagem>.<ext>' →
+//     canal Meta direto: o meta-webhook baixa a mídia da Meta e guarda no
+//     bucket PRIVADO whatsapp-hub-inbox-media. `fetch` simples NÃO funciona
+//     nesse caso (401/400) — o download sai pela service role, que não passa
+//     por RLS. Quem chama aqui, no caminho Meta, é o próprio meta-webhook
+//     depois de gravar a mídia (o gatilho on_audio_inbound é AFTER INSERT e
+//     exige media_url NOT NULL, que só aparece no UPDATE seguinte).
 //
 // On any failure we write a marker into content so the operator sees something
 // actionable instead of a blank audio bubble.
@@ -20,6 +30,7 @@ import { getAdminClient } from '../_shared/supabase-admin.ts';
 import { loadAppCredentials } from '../_shared/tenant-credentials.ts';
 import { jsonResponse, preflight } from '../_shared/cors.ts';
 import { requireServiceRole } from '../_shared/auth.ts';
+import { inboxMediaDownload, inboxMediaParseRef } from '../_shared/inbox-media.ts';
 
 interface MessageRow {
   id: string;
@@ -30,10 +41,23 @@ interface MessageRow {
   content: string | null;
 }
 
-async function downloadAudio(url: string): Promise<{ blob: Blob; mime: string }> {
+type TranscribeAdmin = ReturnType<typeof getAdminClient>;
+
+async function downloadAudio(
+  admin: TranscribeAdmin,
+  mediaUrl: string,
+): Promise<{ blob: Blob; mime: string }> {
+  // Bucket privado (canal Meta): baixa pela service role. `fetch` na URL do
+  // objeto privado devolveria 400/401 — foi o que travou esta função quando a
+  // guarda de mídia entrou.
+  const ref = inboxMediaParseRef(mediaUrl);
+  if (ref) {
+    const { blob, mimeType } = await inboxMediaDownload(admin, ref);
+    return { blob, mime: mimeType || 'audio/ogg' };
+  }
   // A URL do Zernio (media/upload-direct ou attachment do webhook) e
   // diretamente baixavel — sem Bearer da Meta.
-  const res = await fetch(url);
+  const res = await fetch(mediaUrl);
   if (!res.ok) throw new Error(`Download do audio ${res.status}`);
   const blob = await res.blob();
   const mime = res.headers.get('content-type') ?? 'audio/ogg';
@@ -136,7 +160,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { blob, mime } = await downloadAudio(message.media_url);
+    const { blob, mime } = await downloadAudio(admin, message.media_url);
     const transcript = await transcribeWithWhisper(creds.openai_api_key, blob, mime);
 
     await admin

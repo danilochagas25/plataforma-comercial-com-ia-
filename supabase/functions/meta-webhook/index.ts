@@ -31,6 +31,12 @@
 // A criação de contato/conversa/mensagem segue o MESMO caminho do
 // zernio-webhook — o que muda aqui é só o formato do payload e a resolução do
 // canal. O INSERT em messages dispara a IA pelo trigger do banco.
+//
+// MÍDIA (06/09/2026): a Meta manda só o media_id. Depois de responder 200, a
+// função baixa o arquivo e guarda no bucket PRIVADO whatsapp-hub-inbox-media
+// (retenção de 12 meses, expurgo automático — decisão do dono, MEMORIA.md
+// #21/#23). messages.media_url passa a guardar a referência
+// '<bucket>/<org>/<conversa>/<mensagem>.<ext>', não uma URL.
 // ============================================================================
 
 import { getAdminClient } from '../_shared/supabase-admin.ts';
@@ -40,8 +46,19 @@ import {
   getChannelByMetaPhoneNumberId,
   type ChannelRow,
 } from '../_shared/channels.ts';
-import { metaTimingSafeEqual, verifyMetaSignature } from '../_shared/meta-cloud.ts';
+import {
+  metaContextFromChannel,
+  metaDownloadMedia,
+  metaResolveMediaUrl,
+  metaTimingSafeEqual,
+  verifyMetaSignature,
+} from '../_shared/meta-cloud.ts';
 import { phoneBrNormalize, phoneBrVariants } from '../_shared/phone-br.ts';
+import {
+  INBOX_MEDIA_MAX_BYTES,
+  inboxMediaBuildRef,
+  inboxMediaUpload,
+} from '../_shared/inbox-media.ts';
 
 type AdminClient = ReturnType<typeof getAdminClient>;
 type DeliveryStatus = 'sent' | 'delivered' | 'read' | 'failed';
@@ -216,45 +233,185 @@ async function findOrCreateConversation(
 // location, contacts, button, interactive, reaction, order, system, unknown.
 // Mídia vem como { id, mime_type, sha256, caption? } — SEM url (ver
 // metaResolveMediaUrl em _shared/meta-cloud.ts).
-function decodeInbound(message: Record<string, unknown>): {
+interface DecodedInbound {
   contentType: 'text' | 'image' | 'audio' | 'video' | 'document';
   content: string | null;
   mediaId: string | null;
-} {
+  /** mime_type declarado pela Meta (pode vir 'audio/ogg; codecs=opus'). */
+  mimeType: string | null;
+  /** filename do documento — usado para preservar a extensão original. */
+  filename: string | null;
+}
+
+function decodeInbound(message: Record<string, unknown>): DecodedInbound {
   const type = (str(message, ['type']) ?? '').toLowerCase();
   const media = asObj(message[type]);
   const caption = str(media, ['caption']);
   const mediaId = str(media, ['id']);
+  const mimeType = str(media, ['mime_type']);
+  const filename = str(media, ['filename']);
+  const noMedia = { mediaId: null, mimeType: null, filename: null };
 
   switch (type) {
     case 'text':
-      return { contentType: 'text', content: str(asObj(message.text), ['body']) ?? '', mediaId: null };
+      return { contentType: 'text', content: str(asObj(message.text), ['body']) ?? '', ...noMedia };
     case 'image':
     case 'sticker':
-      return { contentType: 'image', content: caption, mediaId };
+      return { contentType: 'image', content: caption, mediaId, mimeType, filename };
     case 'audio':
     case 'voice':
-      return { contentType: 'audio', content: null, mediaId };
+      return { contentType: 'audio', content: null, mediaId, mimeType, filename };
     case 'video':
-      return { contentType: 'video', content: caption, mediaId };
+      return { contentType: 'video', content: caption, mediaId, mimeType, filename };
     case 'document':
-      return { contentType: 'document', content: caption ?? str(media, ['filename']), mediaId };
+      return {
+        contentType: 'document',
+        content: caption ?? filename,
+        mediaId,
+        mimeType,
+        filename,
+      };
     case 'button':
       // Resposta de botão de template: { button: { text, payload } }.
-      return { contentType: 'text', content: str(asObj(message.button), ['text', 'payload']), mediaId: null };
+      return { contentType: 'text', content: str(asObj(message.button), ['text', 'payload']), ...noMedia };
     case 'interactive': {
       // Lista/botão interativo: { interactive: { button_reply|list_reply: { title } } }.
       const inter = asObj(message.interactive);
       const reply = asObj(inter.button_reply ?? inter.list_reply);
-      return { contentType: 'text', content: str(reply, ['title', 'id']), mediaId: null };
+      return { contentType: 'text', content: str(reply, ['title', 'id']), ...noMedia };
     }
     case 'reaction':
-      return { contentType: 'text', content: str(asObj(message.reaction), ['emoji']), mediaId: null };
+      return { contentType: 'text', content: str(asObj(message.reaction), ['emoji']), ...noMedia };
     default:
       // location, contacts, order, system, unknown — registra como texto para o
       // operador ver que algo chegou, sem inventar conteúdo.
-      return { contentType: 'text', content: `[mensagem do tipo ${type || 'desconhecido'}]`, mediaId: null };
+      return { contentType: 'text', content: `[mensagem do tipo ${type || 'desconhecido'}]`, ...noMedia };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Guarda da mídia recebida (bucket privado whatsapp-hub-inbox-media)
+// ---------------------------------------------------------------------------
+// A Meta entrega só o media_id. Buscar a URL, baixar os bytes e subir no
+// Storage leva segundos — tempo demais para o caminho crítico do webhook, que
+// precisa devolver 200 rápido (se demorar, a Meta REENTREGA o evento). Por
+// isso roda depois da resposta, via EdgeRuntime.waitUntil.
+//
+// Reentrega NÃO duplica mensagem: `claimEvent('meta:msg:<wamid>')` já foi
+// gravado ANTES do insert, então o segundo POST sai em `return` antes de
+// tocar em contato, conversa ou mensagem. O upload usa upsert, então repetir
+// só regrava o mesmo arquivo.
+//
+// Falha aqui NÃO perde a mensagem: a linha já está gravada; a mídia é
+// complemento. O erro sai em log estruturado (sem token, sem URL assinada).
+async function persistInboundMedia(
+  admin: AdminClient,
+  orgId: string,
+  channelRow: ChannelRow,
+  input: {
+    messageId: string;
+    conversationId: string;
+    contentType: string;
+    mediaId: string;
+    mimeType: string | null;
+    filename: string | null;
+  },
+): Promise<void> {
+  try {
+    const ctx = await metaContextFromChannel(channelRow);
+    const resolved = await metaResolveMediaUrl(ctx, input.mediaId);
+    if (!resolved.url) throw new Error('Meta não devolveu a URL da mídia');
+    if (resolved.fileSize !== null && resolved.fileSize > INBOX_MEDIA_MAX_BYTES) {
+      console.log(JSON.stringify({
+        event: 'meta_inbound_media_too_large',
+        org_id: orgId,
+        message_id: input.messageId,
+        file_size: resolved.fileSize,
+      }));
+      return;
+    }
+
+    const { bytes, mimeType } = await metaDownloadMedia(ctx, resolved.url);
+    if (bytes.byteLength > INBOX_MEDIA_MAX_BYTES) {
+      console.log(JSON.stringify({
+        event: 'meta_inbound_media_too_large',
+        org_id: orgId,
+        message_id: input.messageId,
+        file_size: bytes.byteLength,
+      }));
+      return;
+    }
+
+    const effectiveMime = input.mimeType ?? resolved.mimeType ?? mimeType;
+    const ref = inboxMediaBuildRef({
+      orgId,
+      conversationId: input.conversationId,
+      messageId: input.messageId,
+      mimeType: effectiveMime,
+      filename: input.filename,
+    });
+    await inboxMediaUpload(admin, ref, bytes, effectiveMime);
+
+    const { error: updErr } = await admin
+      .from('messages')
+      .update({ media_url: ref.ref })
+      .eq('id', input.messageId);
+    if (updErr) throw new Error(`update media_url: ${updErr.message}`);
+
+    console.log(JSON.stringify({
+      event: 'meta_inbound_media_stored',
+      org_id: orgId,
+      message_id: input.messageId,
+      content_type: input.contentType,
+      bytes: bytes.byteLength,
+    }));
+
+    // Com a mídia no lugar, acorda quem depende dela. O gatilho
+    // on_audio_inbound é AFTER INSERT e exige media_url NOT NULL — como o
+    // valor só aparece agora, no UPDATE, ele nunca dispara sozinho.
+    if (input.contentType === 'audio') {
+      await invokeEdge('transcribe-audio', input.messageId);
+    } else if (input.contentType === 'image') {
+      // A IA descreve a foto por visão; no INSERT ela pulou (sem media_url).
+      await invokeEdge('process-ai-message', input.messageId);
+    }
+  } catch (err) {
+    console.error(JSON.stringify({
+      event: 'meta_inbound_media_store_failed',
+      org_id: orgId,
+      message_id: input.messageId,
+      content_type: input.contentType,
+      message: err instanceof Error ? err.message : String(err),
+    }));
+  }
+}
+
+async function invokeEdge(slug: string, messageId: string): Promise<void> {
+  const url = Deno.env.get('SUPABASE_URL');
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  if (!url || !key) return;
+  try {
+    await fetch(`${url}/functions/v1/${slug}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message_id: messageId }),
+    });
+  } catch (err) {
+    console.error(JSON.stringify({
+      event: 'meta_inbound_media_invoke_failed',
+      slug,
+      message_id: messageId,
+      message: err instanceof Error ? err.message : String(err),
+    }));
+  }
+}
+
+// Mantém o isolate vivo até o trabalho terminar, DEPOIS de a resposta ter
+// saído. Fora do runtime da Supabase (teste local) a promise simplesmente
+// segue rodando por conta própria — ela nunca rejeita (o catch é interno).
+function afterResponse(work: Promise<unknown>): void {
+  (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } })
+    .EdgeRuntime?.waitUntil?.(work);
 }
 
 async function handleInboundMessage(
@@ -304,35 +461,42 @@ async function handleInboundMessage(
     if (dup) return;
   }
 
-  const { contentType, content, mediaId } = decodeInbound(message);
-  // Mídia inbound: a Meta entrega só o id, e a URL do GET /{media_id} exige
-  // Bearer e expira em ~5min — guardar essa URL em media_url não serve para o
-  // front. Enquanto não houver rehospedagem em Storage, media_url fica null e
-  // o id é registrado no log. Pendência aberta no MEMORIA.md.
-  if (mediaId) {
-    console.log(JSON.stringify({
-      event: 'meta_inbound_media_unresolved',
-      org_id: orgId,
-      media_id: mediaId,
-      content_type: contentType,
-    }));
-  }
+  const { contentType, content, mediaId, mimeType, filename } = decodeInbound(message);
 
-  const { error: insErr } = await admin.from('messages').insert({
-    org_id: orgId,
-    conversation_id: conversationId,
-    direction: 'inbound',
-    sender_type: 'contact',
-    content_type: contentType,
-    content,
-    media_url: null,
-    zernio_message_id: wamid,
-    is_private_note: false,
-  });
+  // A mensagem entra SEMPRE com media_url null. A mídia (foto/áudio/vídeo/
+  // documento) é baixada da Meta e guardada no bucket privado depois da
+  // resposta — ver persistInboundMedia. Assim o webhook devolve 200 rápido e
+  // a Meta não reentrega por timeout.
+  const { data: insertedMsg, error: insErr } = await admin
+    .from('messages')
+    .insert({
+      org_id: orgId,
+      conversation_id: conversationId,
+      direction: 'inbound',
+      sender_type: 'contact',
+      content_type: contentType,
+      content,
+      media_url: null,
+      zernio_message_id: wamid,
+      is_private_note: false,
+    })
+    .select('id')
+    .single();
   if (insErr) {
     if ((insErr as { code?: string }).code === '23505') return; // corrida de dedup
     errors.push(`message insert: ${insErr.message}`);
     return;
+  }
+
+  if (mediaId && insertedMsg) {
+    afterResponse(persistInboundMedia(admin, orgId, channelRow, {
+      messageId: (insertedMsg as { id: string }).id,
+      conversationId,
+      contentType,
+      mediaId,
+      mimeType,
+      filename,
+    }));
   }
 
   await admin.rpc('increment_unread_count', { p_conversation_id: conversationId });

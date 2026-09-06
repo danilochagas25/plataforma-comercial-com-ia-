@@ -89,10 +89,12 @@ Nenhuma até agora.
 
 | 06/09/2026 | `20260906200000_phone_br_canonical.sql` (aplicada via MCP `apply_migration`, nome no controle: `phone_br_canonical`) | (1) nova função `whatsapp_hub.phone_br_canonical(text)` — IMMUTABLE/STRICT, `SET search_path = ''` — devolve a forma canônica do telefone (celular BR **com** o nono dígito; fixo e estrangeiro intactos). (2) **Junção automática dos contatos duplicados**: 1 grupo, 2 contatos → 1 (sobrevivente = o mais antigo). Conversas do grupo fundidas (mensagens e notificações reapontadas antes de qualquer DELETE), `unread_count` somado, `last_message_at` = o maior. Todas as 10 FKs de `contacts` reapontadas; `custom_fields` fundido (sobrevivente vence a chave). (3) Todos os telefones restantes passaram para a forma canônica (2 linhas corrigidas). (4) Novo índice único parcial `contacts_org_phone_canonical_key (org_id, phone_br_canonical(phone)) WHERE phone IS NOT NULL`. **Contagens: contatos 4→3 · conversas 4→3 · mensagens 9→9 · campaign_contacts 1→1 · notificações 5→5.** O bloco tem guarda: levanta exceção e desfaz tudo se mensagem, deal ou linha de campanha sumir. Nenhuma policy RLS tocada. | **Danilo, 06/09/2026** ("não só junte os contatos, faça que o próprio CRM já faça isso automaticamente") | Parcial: `BEGIN; DROP INDEX IF EXISTS whatsapp_hub.contacts_org_phone_canonical_key; DROP FUNCTION IF EXISTS whatsapp_hub.phone_br_canonical(text); COMMIT;` — **a junção em si NÃO é reversível por SQL** (as linhas perdedoras deixaram de existir). Desfazer a junção exige restaurar backup PITR do Supabase para antes de 06/09/2026 ~19h UTC. Por isso a detecção foi rodada em modo leitura antes e o bloco tem guarda de contagem. |
 
+| 06/09/2026 | `20260906230000_inbox_media_bucket.sql` (aplicada via MCP `apply_migration`, nome no controle: `inbox_media_bucket`) | (1) Bucket **PRIVADO** `whatsapp-hub-inbox-media` em `storage.buckets` (`public=false`, `file_size_limit` 25MB, 27 MIME permitidos: imagem/áudio/vídeo/documento do WhatsApp + `application/octet-stream`). (2) Policy RLS `wh_inbox_media_org_read` em `storage.objects` — **SELECT** para `authenticated` quando `whatsapp_hub.current_user_role() IN ('admin','operator')` **e** `(storage.foldername(name))[1] = current_org_id()::text`. **Nenhuma policy de INSERT/UPDATE/DELETE** para `authenticated`: quem escreve e apaga é a service role (Edge Functions), que não passa por RLS. (3) Cron `wh-purge-inbox-media` (jobid 7) às **03:20 UTC = 00:20 de Itabuna**, chamando `whatsapp_hub._cron_invoke_edge('purge-inbox-media')`. Nenhuma tabela de domínio tocada, nenhum dado alterado, nenhuma outra policy mexida. | **Danilo, 06/09/2026** (decisão D1.1/D1.2: mídia de paciente na nossa base, bucket privado, admin+recepção, expurgo automático em 12 meses) | `BEGIN; SELECT cron.unschedule('wh-purge-inbox-media'); DROP POLICY IF EXISTS wh_inbox_media_org_read ON storage.objects; SELECT set_config('storage.allow_delete_query','true',true); DELETE FROM storage.objects WHERE bucket_id='whatsapp-hub-inbox-media'; DELETE FROM storage.buckets WHERE id='whatsapp-hub-inbox-media'; COMMIT;` — ⚠️ apagar o bucket **destrói a mídia de paciente guardada**; antes de reverter, zerar `messages.media_url` das linhas que apontam para ele (`UPDATE whatsapp_hub.messages SET media_url=NULL WHERE media_url LIKE 'whatsapp-hub-inbox-media/%'`). Reverter só o cron/policy é seguro e não perde arquivo. |
+
 > **Correção 05/09/2026:** a frase "Nenhuma até agora" acima deixou de valer nesta
 > data. O banco passou a ter 1 migração aplicada por este projeto (linha acima).
 >
-> **Atualização 06/09/2026:** são **2** migrações aplicadas por este projeto.
+> **Atualização 06/09/2026:** são **3** migrações aplicadas por este projeto.
 
 ---
 
@@ -124,6 +126,7 @@ Nenhuma até agora.
 | 32 | **URGENTE — responder a mensagem de paciente que já chegou no CRM** e definir quem monitora | Atendimento real | 06/09/2026 |
 | 33 | Verificar, na 1ª campanha, se pacientes antigos da recepção ficam com o estado "não está mais no WhatsApp" | Taxa de resposta | 06/09/2026 |
 | 34 | 🔴 **Nono dígito BR: a Meta entrega telefone sem o 9 e o CRM DUPLICA contato/conversa** — normalizar antes de qualquer campanha | **A campanha inteira** | 06/09/2026 |
+| 34b | Nono dígito — **corrigido e publicado em 06/09** (`bf4e681`). Só fecha com o Danilo validando pela tela | — | aguarda teste |
 | 31b | **#31 tem código, falta o Danilo usar.** Em 06/09 o botão "Registrar número na Cloud API" foi escrito (`src/lib/meta-cloud.ts` + `api/meta-connect.ts` ação `register` + `ChannelsSettings.tsx`). **Não publicado** (depende da #30) e **não executado** — registrar é ação irreversível na conta do dono. #31 só fecha quando o `platform_type` do número voltar `CLOUD_API` | #30 | 06/09/2026 |
 | 30 | Publicar o frontend na Vercel (botão "Abrir conversa") | Teste pela interface | 05/09/2026 |
 | 16 | **Cadastrar forma de pagamento** na WABA `1500039648549092` | Qualquer envio | 05/09/2026 |
@@ -145,6 +148,9 @@ Nenhuma até agora.
 | 34b | **#34 tem código E banco, falta o Danilo testar pela interface.** Em 06/09 a regra de normalização foi escrita (`src/lib/phone.ts` + `_shared/phone-br.ts` + `whatsapp_hub.phone_br_canonical`), aplicada em todos os pontos de entrada, os duplicados existentes foram fundidos e o índice único funcional entrou. `meta-webhook` e `ingest-lead` republicados; **frontend não publicado** (depende de deploy na Vercel). #34 só fecha quando o Danilo confirmar, pela tela, que um número que responde cai no MESMO contato/conversa | Deploy na Vercel | 06/09/2026 |
 | 37 | **`repurchase-dispatch` e `simulate-inbound` têm o código do nono dígito no disco, mas NÃO foram republicados.** Continuam na `version: 1` de 24/08. Consequência: se algum dia forem usados e tentarem criar um contato duplicado, o novo índice único devolve erro de chave em vez de duplicar em silêncio (falha ruidosa, não perda de dado). `repurchase-dispatch` precisa do ramo `meta` de qualquer forma (pendência #22/Fase 3); `simulate-inbound` é dev-only | Nada agora | 06/09/2026 |
 | 36 | **Mídia enviada pelo operador no canal Meta não aparece no thread.** `send-operator-media` v2 sobe os bytes para a própria Meta (`POST /{phone_number_id}/media`) e envia por media id — a mensagem **chega ao paciente**, mas `media_url` fica `null` e o balão mostra "visualização indisponível nesta versão". Resolver exige decidir onde guardar mídia de paciente (é a mesma decisão das pendências #21 e #23): bucket próprio com RLS por perfil + expurgo de 12 meses, ou o bucket público `whatsapp-hub-agent-media` (mais simples, porém expõe o arquivo por URL aberta). **Decisão do Danilo, não do agente** | Histórico visual do atendimento | 06/09/2026 |
+| 23b | **#23 IMPLEMENTADA em 06/09** — bucket privado `whatsapp-hub-inbox-media` criado (RLS admin+recepção por org), `meta-webhook` guarda a mídia recebida, `transcribe-audio` voltou a funcionar, expurgo diário de 12 meses no ar (cron `wh-purge-inbox-media`, 03:20 UTC). **Não fecho sozinho** (regra 4): só fecha com o Danilo confirmando pela tela que foto e áudio de paciente aparecem no thread — o que **depende do deploy na Vercel** (#30) | #30 | 06/09/2026 |
+| 36b | **#36 IMPLEMENTADA e PUBLICADA em 06/09** — `send-operator-media` v3 guarda cópia do que o operador manda no mesmo bucket privado e grava a referência em `media_url`. **Não fecho sozinho:** só fecha quando o Danilo anexar uma imagem pelo clipe e vê-la no balão — o que **depende do deploy na Vercel** (#30) | #30 | 06/09/2026 |
+| 38 | **IA não enxerga a foto do paciente.** `process-ai-message::describeImage` (linha ~89) faz `fetch(imageUrl)` puro — funciona com URL http do Zernio, mas **não abre referência de bucket privado**, que é o formato novo de `media_url`. Correção: bifurcar com `inboxMediaParseRef` + `inboxMediaDownload` (service role), como já foi feito no `transcribe-audio`, e **republicar** (a função está na v3). O `meta-webhook` já chama `process-ai-message` quando chega imagem, então basta corrigir e publicar. **Sem regressão hoje:** ela responde `skipped: sem conteúdo textual`, igual a antes | IA responder a foto | 06/09/2026 |
 
 ---
 
@@ -2331,3 +2337,308 @@ depois que ela terminar.
 - **Arquivos:** `MEMORIA.md`. **Banco:** 1 `UPDATE` na campanha (autorizado).
 - **Próximo:** terminar a normalização → criar o bucket privado e ligar a
   guarda de mídia → Fase 1 fecha.
+
+### 2026-09-06 · Claude Code · FASE 0.5 CONCLUÍDA — um paciente = um contato
+
+**Publicado:** commit `bf4e681`. Vercel republicando.
+
+**RESULTADO DA JUNÇÃO (migração `20260906200000_phone_br_canonical.sql`):**
+
+| | Antes | Depois |
+|---|---|---|
+| Contatos | 4 | **3** |
+| Conversas | 4 | **3** |
+| **Mensagens** | **9** | **9** ✅ |
+| campaign_contacts / notificações | 1 / 5 | 1 / 5 |
+| Duplicados · fora da canônica | 1 · 3 | **0 · 0** |
+
+Nenhuma mensagem perdida. A conversa fundida passou de 2 para 4 mensagens —
+soma exata. As mensagens são reapontadas **antes** de qualquer `DELETE` (o FK é
+`ON DELETE CASCADE`; a ordem inversa apagaria histórico). O bloco se auto-audita
+e desfaz a migração inteira se alguma contagem não bater.
+
+**Forma canônica: COM o nono dígito.** Motivos, nesta ordem: é a forma que o
+**WebDental exporta e a recepção digita** (gravar canônico não reescreve o dado
+do dono, que é a fonte dos 63 orçamentos); é a que a **Meta aceita no envio**;
+é a que um humano reconhece. A forma curta segue reconhecida **na busca**.
+
+**A regra vive em três lugares pareados**, validados com os mesmos 16 casos,
+resultado idêntico caso a caso: `src/lib/phone.ts` (estendido, não duplicado) ·
+`_shared/phone-br.ts` (**prefixo `phoneBr*` obrigatório** — `normalizePhone` já
+existe local em três functions e seria sobrescrito no escopo plano do inliner) ·
+`whatsapp_hub.phone_br_canonical` (SQL). Fixo `+557332147762` **não** ganhou o 9;
+EUA e Portugal passaram intactos.
+
+**Defesa no banco:** índice único funcional `contacts_org_phone_canonical_key`
+sobre `(org_id, phone_br_canonical(phone)) WHERE phone IS NOT NULL`.
+**Testado:** `INSERT` de `+553399772570` — exatamente o que o webhook fazia —
+foi **recusado**, sem deixar lixo.
+
+**Entradas tratadas:** `meta-webhook` (busca por variantes antes de criar,
+promove o legado curto para canônico) · `conversations.ts` (trata corrida 23505)
+· importação CSV/XLSX · `useContacts` · `useContactProfile` · `useDealDetail` ·
+`VendasPage` · `ingest-lead` · `repurchase-dispatch` · `simulate-inbound` ·
+**`api/meta-connect.ts`** (a Meta devolve o `display_phone_number` do próprio
+canal truncado — mesma armadilha que consumiu horas em 05/09).
+Varridos e confirmados **sem** necessidade de mudança (resolvem por `id`):
+`dispatch-campaign`, `check-follow-ups`, `funnel-automation`, os três
+`send-operator-*`, `process-ai-message`, `useConversations`, `FunilPage`.
+
+**Item 0.5.5 do plano resolveu-se sozinho:** o `meta-webhook` marca `replied`
+por `contact_id` e o status por `wamid` — com o contato unificado, os dois
+apontam para a linha certa.
+
+**FUNÇÕES REPUBLICADAS (todas conferidas por sha256 contra o bundle local):**
+`meta-webhook` v2 · `process-ai-message` v3 · `ingest-lead` v2 ·
+`repurchase-dispatch` v2 · `simulate-inbound` v2.
+
+**LIÇÃO REGISTRADA — conferir sha256 NÃO é formalidade:** o primeiro envio de
+`process-ai-message` saiu com **2 bytes a mais** (dois espaços num comentário de
+`_shared/llm.ts`). Inócuo, mas não byte-exato — e só apareceu porque a
+conferência foi feita de verdade, baixando o publicado e rodando `cmp`.
+
+**SUSTO REGISTRADO:** este agente leu `list_edge_functions` e viu `meta-webhook`
+em `version: 1`, concluindo que havia risco ativo de perda de mensagem de
+paciente (índice novo recusando o insert do webhook antigo). Lançou agente de
+emergência. **A leitura estava desatualizada** — a função já estava em v2,
+publicada às 15:48, com `phoneBrNormalize`/`phoneBrVariants` no bundle,
+confirmado por `cmp`. **Não houve risco.** O agente de emergência aproveitou
+para republicar `repurchase-dispatch` e `simulate-inbound`, que de fato tinham
+drift. Lição: `list_edge_functions` pode devolver leitura defasada — confirmar
+baixando o código publicado antes de declarar incidente.
+
+**PENDÊNCIAS:**
+- **#34 continua ABERTA** (regra 4 do projeto: pendência só fecha com decisão
+  registrada do Danilo). Só fecha com ele testando pela tela: celular novo manda
+  mensagem → **um só contato**; responder e receber de volta → **mesma conversa**.
+- A junção **não é reversível por SQL** — desfazer exige PITR. Registrado na
+  tabela *Mudanças no banco* junto com a reversão parcial (índice + função).
+- `zernio-webhook` e `uazapi-webhook` ainda criam contato sem `phone-br`.
+  **Sem risco hoje** (nenhum canal desses existe), mas o bug volta por ali se
+  algum for ativado. Some na Fase 4.
+
+**FASE 0.5 DO PLANO: CONCLUÍDA** (pendente de validação do Danilo pela tela).
+
+- **Banco:** migração `20260906200000_phone_br_canonical.sql` aplicada.
+- **Próximo:** criar o bucket privado de mídia e ligar a guarda de foto/áudio —
+  fecha a Fase 1. O conflito de arquivo no `meta-webhook` acabou.
+
+### 2026-09-06 · Claude Code (subagente) · Guarda de mídia de paciente
+
+- **Pedido:** Fase 1 do `PLANO-MIGRACAO-META.md`, itens **1.4, 1.5 e 1.7** —
+  (1) criar o bucket PRIVADO de mídia de paciente com RLS por perfil;
+  (2) fazer o `meta-webhook` baixar da Meta e guardar a mídia recebida;
+  (3) fazer o `transcribe-audio` voltar a funcionar; (4) renderizar no thread e
+  resolver a pendência **#36** (mídia enviada pelo operador sem `media_url`);
+  (5) expurgo automático aos 12 meses. Sem `git push`, sem deploy na Vercel,
+  sem tocar em segredo. Autorizado: criar bucket, aplicar migração versionada,
+  deployar as functions alteradas.
+
+**1. BUCKET PRIVADO CRIADO — `whatsapp-hub-inbox-media`.**
+
+| Item | Valor |
+|---|---|
+| `public` | **false** (conferido por `SELECT`) |
+| `file_size_limit` | 25 MB (mesmo teto do envio pelo operador) |
+| `allowed_mime_types` | 27 tipos: imagem (jpeg/png/webp/gif) · áudio (aac/amr/mpeg/mp4/ogg/opus/wav/webm) · vídeo (mp4/3gpp/quicktime/webm) · documento (pdf/doc/docx/xls/xlsx/ppt/pptx/zip/txt/csv) · `application/octet-stream` |
+| Policy de leitura | `wh_inbox_media_org_read` — SELECT para `authenticated` com `current_user_role() IN ('admin','operator')` **e** pasta[1] = `current_org_id()` |
+| Escrita / remoção | **sem policy** → só service role (Edge Functions) |
+
+**Caminho do objeto (decidido e documentado):**
+`<org_id>/<conversation_id>/<message_id>.<ext>`
+- O 1º segmento é o **org_id** porque é ele que a policy confere
+  (`storage.foldername(name))[1]`), igual aos buckets `whatsapp-hub-knowledge`
+  e `whatsapp-hub-avatars` que já existiam.
+- O arquivo leva o **UUID da mensagem**, não o wamid: o wamid tem `.` e `=`
+  (ruim em chave de objeto/URL) e **não existe** na mídia que o operador envia,
+  onde a linha nasce sem id de provedor. O UUID serve aos dois sentidos.
+
+**`messages.media_url` mudou de significado (sem migração de dado):** agora
+guarda a **referência** `whatsapp-hub-inbox-media/<org>/<conversa>/<msg>.<ext>`
+em vez de uma URL. Valor legado (URL http do Zernio/UAZAPI) continua sendo
+tratado como URL em todos os leitores — a distinção é `^https?://`.
+
+**MIME e tamanho — o que acontece no limite:** a Meta manda
+`audio/ogg; codecs=opus`; o Storage compara a string inteira contra
+`allowed_mime_types`, então o parâmetro é removido antes do upload
+(`inboxMediaCleanMime`). Tipo fora da lista é gravado como
+`application/octet-stream` preservando a extensão — **nada de paciente é
+descartado por Content-Type exótico**. Arquivo acima de 25MB não é gravado: sai
+`meta_inbound_media_too_large` no log e **a mensagem continua no inbox**.
+
+**RLS CONFERIDA NA PRÁTICA** (objeto de teste inserido e apagado depois; bucket
+ficou com 0 objetos):
+
+| Quem | Vê? |
+|---|---|
+| admin da mesma org | **sim** (1) |
+| recepção (`operator`) da mesma org | **sim** (1) |
+| admin de OUTRA org | não (0) |
+| logado sem perfil no JWT | não (0) |
+| `anon` | não (0) |
+
+**2. `meta-webhook` — a mídia recebida agora é guardada.**
+- `decodeInbound` passou a devolver também `mimeType` e `filename` (o
+  `mime_type`/`filename` que a Meta manda no bloco de mídia).
+- O INSERT da mensagem virou `.select('id').single()` para termos o id.
+- **`persistInboundMedia` roda DEPOIS da resposta**, via
+  `EdgeRuntime.waitUntil` (helper `afterResponse`): resolve a URL
+  (`metaResolveMediaUrl`) → baixa com o Bearer (`metaDownloadMedia`) → sobe no
+  bucket → grava `media_url`. O caminho crítico do webhook continua devolvendo
+  200 em milissegundos.
+- **Reentrega da Meta NÃO duplica mensagem — confirmado por leitura do fluxo:**
+  `claimEvent('meta:msg:<wamid>')` é gravado **antes** do insert, então o
+  segundo POST sai em `return` antes de tocar em contato, conversa ou mensagem.
+  O upload usa `upsert: true`, então repetir só regrava o mesmo arquivo. Há
+  ainda a dedup por `zernio_message_id` e o índice único como terceira rede.
+- **Falha de download não perde a mensagem:** a linha já está gravada; a mídia é
+  complemento. Sai `meta_inbound_media_store_failed` em log estruturado, sem
+  token e sem URL assinada.
+- Depois de a mídia entrar, o webhook **acorda quem depende dela**:
+  `transcribe-audio` para áudio e `process-ai-message` para imagem. Isso é
+  necessário porque o gatilho `on_audio_inbound` é AFTER **INSERT** e exige
+  `media_url NOT NULL` — como o valor só aparece no UPDATE seguinte, ele nunca
+  dispararia sozinho.
+
+**3. `transcribe-audio` — voltou a funcionar (estava em `skipped: no media_url`).**
+`downloadAudio` passou a receber o client admin e a bifurcar: referência de
+Storage → `inboxMediaDownload` (service role, que **não passa por RLS**); URL
+http → `fetch` simples, como antes. **Era exatamente aqui que o bucket privado
+quebraria a função** se tivesse ficado o `fetch` puro.
+
+**4. Frontend — `MessageThread.tsx`.**
+- Novo hook `useResolvedMedia`: referência de Storage → **URL assinada** gerada
+  pelo próprio usuário logado (`createSignedUrl`, validade 1h); URL http →
+  caminho antigo (`resolveMediaUrl`, proxy do Zernio). Estados: carregando /
+  pronta / indisponível (expurgada ou perfil sem acesso) — o balão nunca quebra.
+- Novo `src/lib/inbox-media.ts` (par de browser do `_shared/inbox-media.ts`).
+- Áudio e vídeo passaram a mostrar a legenda/transcrição embaixo do player.
+- O `proxied()`/`resolveMediaUrl` antigo **não foi removido** — Zernio/UAZAPI
+  continuam funcionando igual.
+
+**5. PENDÊNCIA #36 — mídia do operador: implementada e publicada.**
+`send-operator-media` continua mandando os bytes direto para a Meta (nada de
+URL pública nossa), e agora guarda **uma cópia no mesmo bucket privado**,
+gravando a referência em `media_url`. Falhar nessa cópia **não desfaz o envio**
+— a mensagem já foi entregue e gravada; só a miniatura se perde, com
+`operator_media_store_failed` no log. Mesma retenção de 12 meses.
+
+**6. EXPURGO DE 12 MESES — `purge-inbox-media` + cron `wh-purge-inbox-media`.**
+- **Roda todo dia às 03:20 UTC (00:20 em Itabuna)** — janela morta, longe do
+  `dispatch-campaigns` (30s) e do `repurchase` (9h).
+- Apaga o **objeto** do Storage e zera `messages.media_url`. **Não apaga a
+  mensagem**: texto, transcrição do áudio e descrição da foto continuam no
+  histórico; só o arquivo expira, e o balão volta ao placeholder.
+- Ordem importa e está comentada no código: **apaga o arquivo primeiro**. Zerar
+  `media_url` antes deixaria objeto órfão sem ponteiro que o encontrasse.
+- Só toca em `media_url LIKE 'whatsapp-hub-inbox-media/%'` — mídia de URL
+  externa (Zernio/UAZAPI) não é nossa para apagar.
+- Lote de 200 por rodada, `retention_days` padrão 365, aceita
+  `{ "dry_run": true }` para conferência.
+- **Testado de ponta a ponta pelo caminho real do cron:**
+  `SELECT whatsapp_hub._cron_invoke_edge('purge-inbox-media')` → resposta
+  `200 {"ok":true,"cutoff":"2025-09-06T21:41:54.308Z","retention_days":365,"purged":0}`.
+
+- **Arquivos:**
+  - `supabase/migrations/20260906230000_inbox_media_bucket.sql` (**novo**)
+  - `supabase/functions/_shared/inbox-media.ts` (**novo**)
+  - `supabase/functions/purge-inbox-media/index.ts` (**novo**)
+  - `supabase/functions/meta-webhook/index.ts` (alterado)
+  - `supabase/functions/transcribe-audio/index.ts` (alterado)
+  - `supabase/functions/send-operator-media/index.ts` (alterado)
+  - `src/lib/inbox-media.ts` (**novo**)
+  - `src/components/inbox/MessageThread.tsx` (alterado)
+  - `MEMORIA.md`
+
+- **Banco:** **1 migração aplicada** — `20260906230000_inbox_media_bucket.sql`,
+  versionada em `supabase/migrations/` e aplicada via MCP `apply_migration`
+  (nome no controle `inbox_media_bucket`). Linha completa **com a reversão
+  escrita** na tabela *Mudanças no banco*. **`npm run db:push` e `/setup` NÃO
+  foram rodados.** Nenhuma tabela de domínio alterada, nenhum dado de paciente
+  tocado, nenhuma outra policy mexida.
+
+- **DEPLOYS — 4 functions, todas conferidas por sha256 contra o bundle local:**
+
+| Função | Antes | Agora | Conferência |
+|---|---|---|---|
+| `purge-inbox-media` | (não existia) | **v1** | `sha256 f5f2292b…` — idêntico |
+| `transcribe-audio` | v1 (24/08) | **v2** | `sha256 1a529c68…` — idêntico |
+| `meta-webhook` | v2 (06/09) | **v4** | `sha256 ff9f191e…` — idêntico |
+| `send-operator-media` | v2 (06/09) | **v3** | `sha256 53f88c8b…` — idêntico |
+
+  Deploy pelo MCP `deploy_edge_function`, **`verify_jwt: false` nas quatro**
+  (padrão do projeto; no `meta-webhook` é crítico — a Meta chama anonimamente).
+  Bundle achatado pelo **mesmo inliner de `api/bootstrap.ts`**;
+  `npx supabase functions deploy` segue inutilizável nesta máquina (sem
+  `SUPABASE_ACCESS_TOKEN` — testado de novo, o comando trava).
+  **Prova de que o empacotador é fiel:** antes de qualquer deploy, gerei o
+  bundle local de `send-operator-message` (publicada v2 em 06/09) e ele bateu
+  byte a byte com o publicado (`sha256 d56dab28…`).
+
+  **Smoke tests depois de cada deploy:**
+  `POST /meta-webhook {}` sem Authorization → `200 {"ok":true,"skipped":"no_phone_number_id"}`;
+  `GET /meta-webhook` com verify_token errado → `403`;
+  `POST /purge-inbox-media` e `/transcribe-audio` sem Authorization → `403 Forbidden`;
+  `POST /send-operator-media` sem Authorization → `401 Missing Authorization header`.
+  Nenhuma subiu com BOOT_ERROR.
+
+- **⚠️ ARMADILHA DO EMPACOTADOR — QUARTA vez, e a 2ª exatamente igual:** o
+  primeiro envio do `meta-webhook` (v3) saiu com **2 bytes a mais** — dois
+  espaços num comentário do `_shared/zernio.ts`, na linha do `getAdAccountSpend`
+  (*"// nativas da moeda da conta; somamos as linhas de data[]"*). **É o MESMO
+  ponto do incidente de 06/09** com o `process-ai-message`. Funcionalmente
+  inócuo, mas não byte-exato — e **só apareceu porque a conferência foi feita de
+  verdade**. Reenviado corrigido (v4) e aí bateu. A v3 fica inerte no histórico
+  do Supabase. **Conferir sha256 não é formalidade.**
+
+- **⚠️ ARMADILHA NOVA (5ª do inliner) — `import type { X }` derruba a função no
+  boot.** O hoister de `api/bootstrap.ts` trata a palavra `type` de
+  `import type { X } from 'mod'` como import **default** e emite
+  `import type, { …, type X, X } from 'mod'` — **dois bindings com o mesmo
+  nome**, que é SyntaxError e mata o worker. Pegou o `_shared/inbox-media.ts`
+  na primeira versão (`deno check` acusou "Duplicate identifier 'SupabaseClient'").
+  **Regra:** em `_shared/*`, usar sempre `import { type X } from 'mod'` — a
+  forma que `supabase-admin.ts` já usa, com o modificador DENTRO da chave; aí o
+  specifier é idêntico e o hoister deduplica. Comentário fixado no arquivo.
+
+- **Prefixo obrigatório respeitado:** todo helper de `_shared/inbox-media.ts` é
+  `inboxMedia*` (`inboxMediaCleanMime`, `inboxMediaExt`, `inboxMediaBuildRef`,
+  `inboxMediaParseRef`, `inboxMediaUpload`, `inboxMediaDownload`,
+  `inboxMediaRemove`), na mesma regra dos `meta*` e `phoneBr*`. **Conferido:**
+  nenhuma declaração de topo duplicada nova em bundle nenhum — a única duplicada
+  segue sendo `type Admin`, que já existia no publicado e é apagada pelo runtime.
+
+- **Validação:** `npx tsc -b`, `npx tsc -p tsconfig.api.json --noEmit` e
+  `npx vite build` passam sem erro. `npm run validate:sql` valida as 96
+  migrations. `deno check` dos bundles: **mesmo número de erros da baseline em
+  todos** (meta-webhook 4×4 · send-operator-media 6×6 · transcribe-audio 3×3 ·
+  process-ai-message 6×6), todos pré-existentes dos `_shared/`; o
+  `purge-inbox-media` tem 1, o mesmo erro de schema do `createClient` que todo
+  bundle carrega. **Nenhum erro novo e nenhum citando `inboxMedia`.**
+
+- **Não feito / limites desta entrega:**
+  - **Nenhum segredo lido, pedido, gerado ou gravado.** O token da Meta continua
+    cifrado na linha do canal e só é decifrado dentro da Edge Function.
+  - **Nenhum `git push`, nenhum deploy na Vercel.** As mudanças de frontend
+    (`src/components/inbox/MessageThread.tsx` e `src/lib/inbox-media.ts`)
+    existem **só no disco** — reforçam a pendência **#30**. **Sem esse deploy a
+    mídia é guardada e transcrita normalmente, mas o thread não exibe foto nem
+    áudio** (a tela publicada não sabe pedir URL assinada e cai no placeholder).
+  - **Nenhuma mídia real passou pelo caminho novo.** Exercitar exige um paciente
+    mandando foto/áudio de verdade — é o teste do Danilo.
+  - **`process-ai-message` NÃO foi alterada nem republicada.** Fica a pendência
+    **#38**: o `describeImage` dela faz `fetch(media_url)` puro, que não abre
+    referência de bucket privado. O `meta-webhook` já a chama quando chega uma
+    imagem (fica pronto para quando ela for corrigida), e hoje ela responde
+    `skipped: sem conteúdo textual` — **mesmo comportamento de antes**, sem
+    regressão. Fonte no disco == bundle publicado (v3, `sha256 90d9a8f6…`),
+    sem drift.
+  - As 17 functions restantes em `version: 1` continuam como estavam.
+  - Nada mudou em zernio nem em uazapi — só acréscimo.
+
+- **Próximo:** (1) Danilo autoriza o deploy na Vercel (pendência #30) — sem ele
+  a foto não aparece na tela; (2) teste pela interface: pedir para um celular
+  mandar **uma foto e um áudio**; a foto tem que aparecer no balão e o áudio
+  tem que virar **texto transcrito**; (3) anexar uma imagem pelo clipe e
+  conferir que ela também aparece (fecha a #36); (4) corrigir o
+  `describeImage` do `process-ai-message` (#38) para a IA enxergar a foto.
