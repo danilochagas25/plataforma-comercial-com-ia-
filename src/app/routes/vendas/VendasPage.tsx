@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { BarChart3, Loader2, MoreVertical, RefreshCw, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { getSupabase } from '@/lib/supabase';
+import { phoneVariants } from '@/lib/phone';
 import { useAppUser } from '@/app/providers/AppUserProvider';
 import { useSalesUpload, withHeaderRow, SALES_FIELDS, type PreparedSheet } from '@/hooks/useSalesUpload';
 import { Dialog } from '@/components/ui/dialog';
@@ -206,7 +207,15 @@ export default function VendasPage() {
       return;
     }
     const supabase = getSupabase();
-    const { data } = await supabase.from('contacts').select('id').eq('phone', phone).maybeSingle();
+    // Casa as duas grafias do celular BR (com e sem o nono dígito) — a planilha
+    // de vendas nem sempre traz o número na mesma forma do cadastro.
+    const variants = phoneVariants(phone);
+    const { data } = await supabase
+      .from('contacts')
+      .select('id')
+      .in('phone', variants.length > 0 ? variants : [phone])
+      .limit(1)
+      .maybeSingle();
     if (data) navigate(`/contacts/${(data as { id: string }).id}`);
     else toast.error('Contato não encontrado na base.', { description: `Nenhum contato com o telefone ${phone}.` });
   };

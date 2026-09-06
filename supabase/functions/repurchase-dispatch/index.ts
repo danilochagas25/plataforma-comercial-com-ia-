@@ -29,6 +29,7 @@ import {
   type ZernioContext,
 } from '../_shared/zernio.ts';
 import { loadOrgZernioContext } from '../_shared/channels.ts';
+import { phoneBrNormalize, phoneBrVariants } from '../_shared/phone-br.ts';
 
 const BATCH_LIMIT = 50;
 const E164 = /^\+\d{10,15}$/;
@@ -72,8 +73,11 @@ function withinBusinessHours(businessHours: unknown): boolean {
   return hhmm >= start && hhmm <= end;
 }
 
-async function findOrCreateContact(admin: Admin, orgId: string, phone: string, name: string | null): Promise<string | null> {
-  const { data: existing } = await admin.from('contacts').select('id').eq('org_id', orgId).eq('phone', phone).maybeSingle();
+// Procura por TODAS as grafias equivalentes do telefone antes de criar (celular
+// BR com e sem o nono dígito); grava sempre na forma canônica.
+async function findOrCreateContact(admin: Admin, orgId: string, rawPhone: string, name: string | null): Promise<string | null> {
+  const phone = phoneBrNormalize(rawPhone) ?? rawPhone;
+  const { data: existing } = await admin.from('contacts').select('id').eq('org_id', orgId).in('phone', phoneBrVariants(phone)).limit(1).maybeSingle();
   if (existing) return (existing as { id: string }).id;
   const { data: created, error } = await admin
     .from('contacts')

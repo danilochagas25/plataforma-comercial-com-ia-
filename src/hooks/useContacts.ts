@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getSupabase } from '@/lib/supabase';
+import { canonicalPhone } from '@/lib/phone';
 import { useAppUser } from '@/app/providers/AppUserProvider';
 import type { Contact, ContactWithTags, Tag } from '@/types/db';
 
@@ -315,7 +316,8 @@ export function useContacts({
     const { data, error: err } = await supabase
       .from('contacts')
       .insert({
-        phone: contactPayload.phone,
+        // Grava sempre na forma canônica (com o nono dígito nos celulares BR).
+        phone: canonicalPhone(contactPayload.phone) ?? contactPayload.phone,
         name: contactPayload.name ?? null,
         email: contactPayload.email ?? null,
         custom_fields: contactPayload.custom_fields ?? {},
@@ -340,6 +342,8 @@ export function useContacts({
     if (!userId) return;
     const { tag_ids, ...rest } = patch;
     const supabase = getSupabase();
+    // Idem: telefone editado na tela também é canonizado antes de gravar.
+    if (typeof rest.phone === 'string') rest.phone = canonicalPhone(rest.phone) ?? rest.phone;
     const { error: err } = await supabase.schema('whatsapp_hub').from('contacts').update(rest).eq('id', id);
     if (err) {
       setError(err.message);

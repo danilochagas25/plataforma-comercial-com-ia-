@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getSupabase } from '@/lib/supabase';
+import { canonicalPhone } from '@/lib/phone';
 import type { Contact } from '@/types/db';
 import type { Message } from '@/types/inbox';
 import type { Deal } from '@/types/crm';
@@ -155,6 +156,10 @@ export function useContactProfile(id: string): UseContactProfileResult {
   const saveContact = useCallback<UseContactProfileResult['saveContact']>(
     async (patch) => {
       const supabase = getSupabase();
+      // Telefone editado na ficha entra na forma canônica (nono dígito BR).
+      if (typeof patch.phone === 'string') {
+        patch = { ...patch, phone: canonicalPhone(patch.phone) ?? patch.phone };
+      }
       setContact((cur) => (cur ? ({ ...cur, ...patch } as Contact) : cur));
       const { error: err } = await supabase
         .from('contacts')

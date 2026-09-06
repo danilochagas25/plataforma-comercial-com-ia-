@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { getSupabase } from '@/lib/supabase';
 import { useAppUser } from '@/app/providers/AppUserProvider';
-import { normalizePhone } from '@/lib/phone';
+import { normalizePhone, phoneVariants, canonicalPhone } from '@/lib/phone';
 
 type FieldMapping =
   | { kind: 'skip' }
@@ -188,24 +188,43 @@ export function ImportContactsDialog({
     // Quem ainda nao existe entra com source='import' (e o que o filtro
     // "Importacao (Excel)" procura); quem ja existia mantem o canal de origem,
     // por isso os dois grupos vao em requisicoes separadas.
+    //
+    // Regra de negócio (06/09/2026 — nono dígito): a busca do que "ja existe"
+    // varre TODAS as grafias equivalentes do telefone. Um contato legado
+    // gravado sem o nono dígito é atualizado (upsert por `id`) para a forma
+    // canônica, em vez de virar um segundo contato do mesmo paciente.
     let imported = 0;
     for (let i = 0; i < pending.length; i += CHUNK_SIZE) {
       const chunk = pending.slice(i, i + CHUNK_SIZE);
+      const lookup = [...new Set(chunk.flatMap((c) => phoneVariants(c.phone)))];
       const { data: existingRows } = await supabase
         .from('contacts')
-        .select('phone')
-        .in('phone', chunk.map((c) => c.phone));
-      const existing = new Set((existingRows ?? []).map((r: { phone: string }) => r.phone));
-      const groups = [
-        chunk.filter((c) => !existing.has(c.phone)).map((c) => ({ ...c, source: 'import' })),
-        chunk.filter((c) => existing.has(c.phone)),
-      ].filter((g) => g.length > 0);
+        .select('id, phone')
+        .in('phone', lookup);
+      // canônica do que já existe → id da linha, para atualizar no lugar certo.
+      const idByCanonical = new Map<string, string>();
+      for (const r of (existingRows ?? []) as Array<{ id: string; phone: string }>) {
+        const key = canonicalPhone(r.phone);
+        if (key && !idByCanonical.has(key)) idByCanonical.set(key, r.id);
+      }
+      const novos = chunk
+        .filter((c) => !idByCanonical.has(c.phone))
+        .map((c) => ({ ...c, source: 'import' }));
+      const jaExistem = chunk
+        .filter((c) => idByCanonical.has(c.phone))
+        .map((c) => ({ ...c, id: idByCanonical.get(c.phone) as string }));
       let batchError: string | null = null;
-      for (const rows of groups) {
+      if (novos.length > 0) {
         const { error } = await supabase
           .from('contacts')
-          .upsert(rows, { onConflict: 'org_id,phone' });
-        if (error) { batchError = error.message; break; }
+          .upsert(novos, { onConflict: 'org_id,phone' });
+        if (error) batchError = error.message;
+      }
+      if (!batchError && jaExistem.length > 0) {
+        const { error } = await supabase
+          .from('contacts')
+          .upsert(jaExistem, { onConflict: 'id' });
+        if (error) batchError = error.message;
       }
       if (batchError) {
         errors.push({ row: -1, reason: `batch ${i / CHUNK_SIZE + 1}: ${batchError}` });

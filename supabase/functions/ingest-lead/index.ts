@@ -11,6 +11,7 @@
 
 import { getAdminClient } from '../_shared/supabase-admin.ts';
 import { jsonResponse, preflight } from '../_shared/cors.ts';
+import { phoneBrNormalize, phoneBrVariants } from '../_shared/phone-br.ts';
 
 interface LeadBody {
   name?: string;
@@ -30,9 +31,11 @@ interface LeadBody {
 function clean(v: unknown): string | null {
   return typeof v === 'string' && v.trim() !== '' ? v.trim() : null;
 }
+// Grava sempre na forma canônica (celular BR com o nono dígito). Se a entrada
+// não for reconhecível como telefone, mantém o comportamento antigo.
 function normalizePhone(raw: string): string {
   const t = raw.trim();
-  return t.startsWith('+') ? t : `+${t.replace(/[^\d]/g, '')}`;
+  return phoneBrNormalize(t) ?? (t.startsWith('+') ? t : `+${t.replace(/[^\d]/g, '')}`);
 }
 
 Deno.serve(async (req) => {
@@ -57,8 +60,10 @@ Deno.serve(async (req) => {
 
   // Resolve/cria contato por telefone (preferido) ou email.
   let contactId: string | null = null;
+  // Busca por TODAS as grafias equivalentes do telefone (com e sem o nono
+  // dígito): senão o mesmo lead vira dois contatos.
   const lookup = phone
-    ? admin.from('contacts').select('id').eq('phone', phone).maybeSingle()
+    ? admin.from('contacts').select('id').in('phone', phoneBrVariants(phone)).limit(1).maybeSingle()
     : admin.from('contacts').select('id').eq('email', email!).maybeSingle();
   const { data: existing } = await lookup;
   if (existing) contactId = (existing as { id: string }).id;

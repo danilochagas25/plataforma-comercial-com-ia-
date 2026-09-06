@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireAdmin } from '../src/lib/admin-auth.js';
+import { canonicalPhone } from '../src/lib/phone.js';
 import { decrypt, encrypt, setCredential } from '../src/lib/credentials.js';
 import {
   MetaCloudError,
@@ -98,10 +99,13 @@ function str(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-// Telefone só para exibição no CRM: normaliza para E.164 sem depender de lib.
+// Telefone do canal no CRM: E.164 na forma canônica. A Meta devolve o
+// display_phone_number BR sem o nono dígito ("9804-0599" para +55 73
+// 99804-0599); `canonicalPhone` repõe o 9 e evita gravar número truncado.
 function normalizePhone(raw: string): string | null {
   const digits = raw.replace(/\D/g, '');
-  return digits ? `+${digits}` : null;
+  if (!digits) return null;
+  return canonicalPhone(digits) ?? `+${digits}`;
 }
 
 // Valida App Secret / Verify Token com o MESMO validador da tela de

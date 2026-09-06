@@ -12,11 +12,46 @@
 // ============================================================================
 
 import { getSupabase } from './supabase';
+import { phoneVariants } from './phone';
 
 interface ChannelPick {
   id: string;
   provider: string;
   label: string | null;
+}
+
+// Regra de negócio (06/09/2026 — nono dígito): antes de abrir uma conversa
+// nova, procurar a conversa de QUALQUER contato com telefone equivalente. A
+// Meta entrega número BR sem o 9, então o mesmo paciente pode ter chegado por
+// duas grafias; abrir uma conversa nova aqui partiria o histórico em dois.
+async function findTwinConversation(contactId: string): Promise<string | null> {
+  const supabase = getSupabase();
+  const { data: me } = await supabase
+    .from('contacts')
+    .select('phone')
+    .eq('id', contactId)
+    .maybeSingle();
+  const phone = (me as { phone: string | null } | null)?.phone ?? null;
+  const variants = phoneVariants(phone);
+  if (variants.length < 2) return null; // sem grafia alternativa, nada a fazer
+
+  const { data: twins } = await supabase
+    .from('contacts')
+    .select('id')
+    .in('phone', variants);
+  const ids = ((twins ?? []) as Array<{ id: string }>)
+    .map((r) => r.id)
+    .filter((id) => id !== contactId);
+  if (ids.length === 0) return null;
+
+  const { data: conv } = await supabase
+    .from('conversations')
+    .select('id')
+    .in('contact_id', ids)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  return conv ? (conv as { id: string }).id : null;
 }
 
 /**
@@ -36,6 +71,12 @@ export async function ensureConversationForContact(contactId: string): Promise<s
     .maybeSingle();
   if (findErr) throw new Error(findErr.message);
   if (existing) return (existing as { id: string }).id;
+
+  // 1b. Conversa de um "gêmeo" — mesmo telefone em outra grafia (sem o nono
+  //     dígito). Depois da junção automática isso deixa de existir, mas o
+  //     caminho fica como defesa: é mais barato reusar do que partir o histórico.
+  const twin = await findTwinConversation(contactId);
+  if (twin) return twin;
 
   // 2. Número conectado que vai atender. Preferimos o canal oficial da Meta
   //    (decisão vigente do projeto), depois zernio, e por último uazapi.
@@ -71,6 +112,20 @@ export async function ensureConversationForContact(contactId: string): Promise<s
     })
     .select('id')
     .single();
-  if (insErr) throw new Error(insErr.message);
+  if (insErr) {
+    // Corrida com o webhook: a UNIQUE (org_id, contact_id) já criou a conversa
+    // entre a busca e o insert. Relê em vez de estourar na cara do operador.
+    if ((insErr as { code?: string }).code === '23505') {
+      const { data: raced } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('contact_id', contactId)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (raced) return (raced as { id: string }).id;
+    }
+    throw new Error(insErr.message);
+  }
   return (created as { id: string }).id;
 }

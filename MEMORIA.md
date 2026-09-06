@@ -87,8 +87,12 @@ Nenhuma até agora.
 |---|---|---|---|---|
 | 05/09/2026 | `20260905120000_meta_cloud_channel.sql` (aplicada via MCP `apply_migration`, nome no controle: `meta_cloud_channel`, version `20260905201957`) | `whatsapp_hub.channels`: +3 colunas nullable (`meta_waba_id`, `meta_phone_number_id`, `meta_token_encrypted`); `channels_provider_check` passa a aceitar `'meta'`; `channels_provider_shape` passa a exigir `meta_phone_number_id` quando provider='meta'; nova UNIQUE `channels_meta_number_unique (org_id, provider, meta_phone_number_id)`; índice parcial `idx_channels_meta_phone`. Nenhuma linha alterada (tabela estava vazia), nenhuma policy RLS tocada. | **Danilo, 05/09/2026** (fecha a pendência #14) | `BEGIN; DELETE FROM whatsapp_hub.channels WHERE provider='meta'; ALTER TABLE whatsapp_hub.channels DROP CONSTRAINT IF EXISTS channels_meta_number_unique; ALTER TABLE whatsapp_hub.channels DROP CONSTRAINT IF EXISTS channels_provider_shape; ALTER TABLE whatsapp_hub.channels ADD CONSTRAINT channels_provider_shape CHECK ((provider='zernio' AND zernio_account_id IS NOT NULL) OR (provider='uazapi' AND uazapi_server_url IS NOT NULL)); ALTER TABLE whatsapp_hub.channels DROP CONSTRAINT IF EXISTS channels_provider_check; ALTER TABLE whatsapp_hub.channels ADD CONSTRAINT channels_provider_check CHECK (provider IN ('zernio','uazapi')); DROP INDEX IF EXISTS whatsapp_hub.idx_channels_meta_phone; ALTER TABLE whatsapp_hub.channels DROP COLUMN IF EXISTS meta_waba_id, DROP COLUMN IF EXISTS meta_phone_number_id, DROP COLUMN IF EXISTS meta_token_encrypted; COMMIT;` |
 
+| 06/09/2026 | `20260906200000_phone_br_canonical.sql` (aplicada via MCP `apply_migration`, nome no controle: `phone_br_canonical`) | (1) nova função `whatsapp_hub.phone_br_canonical(text)` — IMMUTABLE/STRICT, `SET search_path = ''` — devolve a forma canônica do telefone (celular BR **com** o nono dígito; fixo e estrangeiro intactos). (2) **Junção automática dos contatos duplicados**: 1 grupo, 2 contatos → 1 (sobrevivente = o mais antigo). Conversas do grupo fundidas (mensagens e notificações reapontadas antes de qualquer DELETE), `unread_count` somado, `last_message_at` = o maior. Todas as 10 FKs de `contacts` reapontadas; `custom_fields` fundido (sobrevivente vence a chave). (3) Todos os telefones restantes passaram para a forma canônica (2 linhas corrigidas). (4) Novo índice único parcial `contacts_org_phone_canonical_key (org_id, phone_br_canonical(phone)) WHERE phone IS NOT NULL`. **Contagens: contatos 4→3 · conversas 4→3 · mensagens 9→9 · campaign_contacts 1→1 · notificações 5→5.** O bloco tem guarda: levanta exceção e desfaz tudo se mensagem, deal ou linha de campanha sumir. Nenhuma policy RLS tocada. | **Danilo, 06/09/2026** ("não só junte os contatos, faça que o próprio CRM já faça isso automaticamente") | Parcial: `BEGIN; DROP INDEX IF EXISTS whatsapp_hub.contacts_org_phone_canonical_key; DROP FUNCTION IF EXISTS whatsapp_hub.phone_br_canonical(text); COMMIT;` — **a junção em si NÃO é reversível por SQL** (as linhas perdedoras deixaram de existir). Desfazer a junção exige restaurar backup PITR do Supabase para antes de 06/09/2026 ~19h UTC. Por isso a detecção foi rodada em modo leitura antes e o bloco tem guarda de contagem. |
+
 > **Correção 05/09/2026:** a frase "Nenhuma até agora" acima deixou de valer nesta
 > data. O banco passou a ter 1 migração aplicada por este projeto (linha acima).
+>
+> **Atualização 06/09/2026:** são **2** migrações aplicadas por este projeto.
 
 ---
 
@@ -138,6 +142,8 @@ Nenhuma até agora.
 | 29 | **`send-operator-template` ramo `meta` está no ar mas NUNCA foi exercitado contra a API real.** Validado por leitura de código, typecheck, `deno check` e boot da função (401 sem Authorization). Exercitar de verdade exige o token do canal (segredo) e dispara mensagem real — é ação do Danilo, pela tela | Prova de que o envio de modelo funciona ponta a ponta | 05/09/2026 |
 | 30 | **Frontend não publicado.** `src/lib/conversations.ts` (novo) e `ContactDetailPage.tsx` (botão "Abrir conversa" com get-or-create da conversa) existem só no disco. A Vercel serve o commit `15ebea6`. Sem esse deploy, **não há como abrir a primeira conversa pela interface** — e sem conversa não há onde clicar em "Reiniciar com template". Publicar é decisão do Danilo | Disparo do modelo pela tela de Conversas | 05/09/2026 |
 | 35 | **⚠️ ARMADILHA — 18 Edge Functions ainda na `version: 1` do bootstrap de 24/08.** O deploy carrega junto os `_shared` **do momento do deploy**: corrigir `channels.ts` / `inbox-delivery.ts` não conserta função nenhuma sozinha. Já causou 2 incidentes (05/09 `send-operator-template`; 06/09 `send-operator-message` + `send-operator-media`). **Risco alto e imediato: `process-ai-message`** — o fonte já está certo, falta só republicar; enquanto não for, toda resposta da IA em conversa Meta falha com "Zernio API Key não configurada". Regra: ao mexer em `_shared/*`, rodar `list_edge_functions` e decidir quem redeployar | Resposta da IA · campanhas · régua | 06/09/2026 |
+| 34b | **#34 tem código E banco, falta o Danilo testar pela interface.** Em 06/09 a regra de normalização foi escrita (`src/lib/phone.ts` + `_shared/phone-br.ts` + `whatsapp_hub.phone_br_canonical`), aplicada em todos os pontos de entrada, os duplicados existentes foram fundidos e o índice único funcional entrou. `meta-webhook` e `ingest-lead` republicados; **frontend não publicado** (depende de deploy na Vercel). #34 só fecha quando o Danilo confirmar, pela tela, que um número que responde cai no MESMO contato/conversa | Deploy na Vercel | 06/09/2026 |
+| 37 | **`repurchase-dispatch` e `simulate-inbound` têm o código do nono dígito no disco, mas NÃO foram republicados.** Continuam na `version: 1` de 24/08. Consequência: se algum dia forem usados e tentarem criar um contato duplicado, o novo índice único devolve erro de chave em vez de duplicar em silêncio (falha ruidosa, não perda de dado). `repurchase-dispatch` precisa do ramo `meta` de qualquer forma (pendência #22/Fase 3); `simulate-inbound` é dev-only | Nada agora | 06/09/2026 |
 | 36 | **Mídia enviada pelo operador no canal Meta não aparece no thread.** `send-operator-media` v2 sobe os bytes para a própria Meta (`POST /{phone_number_id}/media`) e envia por media id — a mensagem **chega ao paciente**, mas `media_url` fica `null` e o balão mostra "visualização indisponível nesta versão". Resolver exige decidir onde guardar mídia de paciente (é a mesma decisão das pendências #21 e #23): bucket próprio com RLS por perfil + expurgo de 12 meses, ou o bucket público `whatsapp-hub-agent-media` (mais simples, porém expõe o arquivo por URL aberta). **Decisão do Danilo, não do agente** | Histórico visual do atendimento | 06/09/2026 |
 
 ---
@@ -2089,3 +2095,239 @@ relato, a decisão é do Danilo:
   sair **sem** a faixa "Salvo, mas não entregue"; depois anexar uma imagem pelo
   clipe. (2) Decidir se `process-ai-message` também é republicada — é um deploy
   sem uma linha de código e destrava a resposta da IA no canal Meta.
+
+### 2026-09-06 · Claude Code (subagente) · Normalização de telefone BR e junção automática
+
+- **Pedido:** (1) republicar `process-ai-message`, que roda o bundle de 24/08 e
+  faz toda resposta da IA em conversa Meta falhar com "Zernio API Key não
+  configurada"; (2) **Fase 0.5 do `PLANO-MIGRACAO-META.md`** — fazer o CRM
+  reconhecer o paciente sozinho: regra única de nono dígito, aplicada em todos
+  os pontos de entrada, mais a junção automática dos contatos já duplicados
+  (autorizada pelo dono). Sem `git push`, sem deploy na Vercel, sem tocar em
+  segredo. Deploy de Edge Function autorizado.
+
+**1. FORMA CANÔNICA ESCOLHIDA: COM o nono dígito.**
+`+55` + DDD (2 dígitos) + 9 dígitos começando em 9. Três razões, nesta ordem:
+  1. É a forma que o **WebDental exporta** e que a **recepção digita** — a fonte
+     dos 63 orçamentos. Gravar canônico **não reescreve o dado do dono**.
+  2. É a forma que a **Meta aceita no envio**; o truncamento é só de saída (no
+     `wa_id`). Então o número gravado serve direto para disparar.
+  3. É a forma que um humano reconhece na tela de Pessoas.
+A forma curta (a que a Meta entrega) continua sendo reconhecida **na busca**,
+via `phoneVariants` / `phoneBrVariants`. **Fixo** (assinante de 8 dígitos
+começando em 2–5) **não** recebe o 9. **Número não brasileiro passa intacto.**
+
+**2. A REGRA EXISTE EM TRÊS LUGARES — E É A MESMA.** Não dá para importar uma da
+outra (frontend é Vite/Node, functions são Deno, e o índice precisa de SQL).
+Os três arquivos têm cabeçalho avisando que são pareados:
+
+| Onde | Arquivo | Nomes |
+|---|---|---|
+| Node / browser | `src/lib/phone.ts` | `canonicalPhone`, `phoneVariants`, `samePhone` (+ `normalizePhone`, contrato antigo preservado, agora canonizando o E.164 de saída) |
+| Deno / Edge | `supabase/functions/_shared/phone-br.ts` (**novo**) | `phoneBrNormalize`, `phoneBrVariants`, `phoneBrSame` |
+| SQL | função `whatsapp_hub.phone_br_canonical(text)` | usada pelo índice único e pela junção |
+
+> **Prefixo `phoneBr*` no `_shared/` não é estilo, é obrigação.** O inliner de
+> `api/bootstrap.ts` achata todos os `_shared/` no MESMO escopo do `index.ts`.
+> `normalizePhone` já existe local em `meta-webhook`, `zernio-webhook` e
+> `ingest-lead` — sem prefixo, um sobrescreveria o outro **sem erro nenhum**.
+
+**Conferência das três implementações:** rodei a MESMA tabela de 16 casos
+(celular curto/longo, fixo de Itabuna `3214-7762`, fixo de SP, EUA, Portugal,
+vazio, lixo) contra a versão Deno e contra a função SQL. **Resultado idêntico
+caso a caso.** `+557332147762` (fixo) NÃO ganhou o 9; `+12125551234` e
+`+351912345678` passaram intactos.
+
+**3. PONTOS DE ENTRADA TRATADOS (varredura do projeto inteiro).**
+
+| Ponto | Arquivo | O que mudou |
+|---|---|---|
+| Webhook da Meta | `supabase/functions/meta-webhook/index.ts` | `normalizePhone` delega a `phoneBrNormalize`; `findOrCreateContact` procura por **todas as variantes** antes de criar, elege o que já está na forma canônica (senão o mais antigo) e promove contato legado solitário para a canônica |
+| Abrir conversa pela tela | `src/lib/conversations.ts` | novo `findTwinConversation`: antes de criar, procura a conversa de qualquer contato com telefone equivalente; e `23505` no insert passou a reler em vez de estourar |
+| Importação CSV/XLSX | `src/components/contacts/ImportContactsDialog.tsx` | a busca do "já existe" varre as variantes; contato legado sem o 9 é **atualizado por `id`** para a canônica em vez de virar um segundo contato |
+| Cadastro/edição manual | `src/hooks/useContacts.ts` (`create`, `update`) | grava sempre canônico |
+| Ficha do contato | `src/hooks/useContactProfile.ts` | idem |
+| Ficha da oportunidade | `src/hooks/useDealDetail.ts` | idem |
+| "Abrir contato" da tela de Vendas | `src/app/routes/vendas/VendasPage.tsx` | busca por variantes |
+| Lead de landing | `supabase/functions/ingest-lead/index.ts` | grava canônico e busca por variantes |
+| Recompra | `supabase/functions/repurchase-dispatch/index.ts` | idem (**fonte pronto, NÃO republicado** — ver pendência #37) |
+| Simulador de inbound (dev) | `supabase/functions/simulate-inbound/index.ts` | idem (**fonte pronto, NÃO republicado**) |
+| Número do PRÓPRIO canal | `api/meta-connect.ts` | a Meta devolve `display_phone_number` truncado ("9804-0599"); agora o CRM repõe o 9 antes de gravar. **É a mesma armadilha que consumiu horas em 05/09** |
+
+**Varridos e confirmados SEM necessidade de mudança** (resolvem contato por
+`id`, não por telefone): `dispatch-campaign`, `check-follow-ups`,
+`funnel-automation`, `send-operator-template`, `send-operator-message`,
+`send-operator-media`, `process-ai-message`, `useConversations`,
+`CustomFieldsEditor`, `FunilPage`. **`zernio-webhook` e `uazapi-webhook` foram
+deixados intactos de propósito** — a regra é "não quebrar zernio nem uazapi, só
+acrescentar", e eles não atendem nenhuma org viva.
+
+**4. CASAMENTO DA RESPOSTA COM A CAMPANHA (item 0.5.5 do plano) — já resolvido
+sem código novo.** O `meta-webhook` marca `campaign_contacts.replied` por
+`contact_id`, e o status de entrega casa por `wamid`. Com o contato unificado,
+os dois caminhos passam a apontar para a linha certa. Nada a mudar em
+`dispatch-campaign`.
+
+**5. DEPLOYS DA SESSÃO — 3 funções, todas conferidas byte a byte.**
+
+| Função | Antes | Agora | Conferência |
+|---|---|---|---|
+| `process-ai-message` | v1 (24/08) | **v3** | `sha256 90d9a8f6…` — publicado **idêntico** ao bundle local (`cmp` sem diferença, 119.576 bytes) |
+| `meta-webhook` | v1 (05/09) | **v2** | `sha256 95087b69…` — publicado **idêntico** ao bundle local |
+| `ingest-lead` | v1 (24/08) | **v2** | conferido por leitura do publicado + smoke test (`400 {"ok":false,"error":"Informe telefone ou email."}`) |
+
+Deploy pelo MCP `deploy_edge_function`, **`verify_jwt: false` nas três** (é o
+padrão do projeto; no `meta-webhook` é crítico — a Meta chama anonimamente).
+Bundle achatado pelo **mesmo inliner de `api/bootstrap.ts`**.
+`npx supabase functions deploy` segue inutilizável nesta máquina.
+
+**Prova de que o método de empacotar é fiel:** antes de qualquer deploy, gerei
+o bundle local de `send-operator-message` (publicada v2 ontem) e ele bateu
+**byte a byte** com o publicado (`sha256 d56dab28…`). Só então usei o caminho.
+
+**Smoke tests depois do deploy:**
+- `POST /meta-webhook` com `{}` e **sem** `Authorization` → `200
+  {"ok":true,"skipped":"no_phone_number_id"}`. Sobe, roda, e prova que o
+  `verify_jwt` está `false` (com `true` o gateway devolveria 401 antes).
+- `GET /meta-webhook?hub.mode=subscribe&hub.verify_token=errado&…` → `403
+  {"ok":false,"error":"Forbidden"}` — a validação do desafio está no ar.
+
+> **⚠️ ARMADILHA DO EMPACOTADOR — terceira vez, agora numa forma nova.** Ao
+> emitir os 119 KB do bundle de `process-ai-message`, o primeiro envio saiu com
+> **2 bytes a mais** (dois espaços dentro de um comentário de `_shared/llm.ts`,
+> na linha do `getAdAccountSpend`). Funcionalmente inócuo, mas **não byte-exato**
+> — e só apareceu porque a conferência foi feita de verdade, baixando o
+> publicado e rodando `cmp`. Reenviei corrigido (v3) e aí bateu.
+> **Lição: conferir sha256 do publicado contra o local não é formalidade.**
+> A v2 fica no histórico do Supabase, inerte.
+
+- **Banco:** **1 migração aplicada** — `20260906200000_phone_br_canonical.sql`
+  (arquivo versionado em `supabase/migrations/`, aplicada via MCP
+  `apply_migration`, nome no controle `phone_br_canonical`). Linha completa,
+  com reversão escrita, na tabela *Mudanças no banco*. **`npm run db:push` e
+  `/setup` NÃO foram rodados** (reaplicariam as 93 migrations).
+
+  **Detecção rodada em modo LEITURA antes de aplicar:** 1 grupo duplicado,
+  2 contatos, sobrevivente `4230c6df…` (`+5533999772570`, cadastro manual, o
+  mais antigo); perdedor `8857b133…` (`+553399772570`, criado pelo webhook).
+  Mais 2 contatos fora da forma canônica (Sérgio e Trabalho).
+
+  **Resultado, conferido por `SELECT` depois:**
+
+  | Métrica | Antes | Depois |
+  |---|---|---|
+  | Contatos | 4 | **3** |
+  | Conversas | 4 | **3** |
+  | **Mensagens** | **9** | **9** — nenhuma perdida |
+  | campaign_contacts | 1 | 1 |
+  | Notificações | 5 | 5 |
+  | Grupos duplicados | 1 | **0** |
+  | Telefones fora da canônica | 3 | **0** |
+
+  A conversa `c2f06afb…` foi fundida na `b3330404…`, que passou de 2 para **4
+  mensagens** — soma exata das duas. `+557399374142` virou `+5573999374142` e
+  `+557382119963` virou `+5573982119963`.
+
+  **Decisão sobre threads duplicadas: FUNDIR, e não foi escolha de gosto.**
+  Existe `UNIQUE (org_id, contact_id)` em `conversations`
+  (`conversations_org_contact_key`) — manter duas conversas apontando para o
+  contato único é **impossível** no banco. Então mensagens e notificações são
+  reapontadas **antes** de qualquer `DELETE` (o FK de `messages` é
+  `ON DELETE CASCADE`; a ordem inversa apagaria histórico), `unread_count` é
+  somado e `last_message_at` fica com o maior dos dois.
+
+  **O bloco se auto-audita:** conta mensagens, deals, `campaign_contacts` e
+  contatos antes e depois, e `RAISE EXCEPTION` (desfazendo a migração inteira)
+  se qualquer contagem não bater.
+
+- **Defesa contra o problema voltar (item 2.4):** entrou o índice único parcial
+  `contacts_org_phone_canonical_key (org_id, phone_br_canonical(phone)) WHERE
+  phone IS NOT NULL`. **Avaliado como seguro:** dois contatos com a mesma forma
+  canônica são, por definição, a mesma pessoa — a `UNIQUE (org_id, phone)` que
+  já existia proibia a grafia idêntica, esta só estende para a equivalente.
+  Telefone nulo ou irreconhecível cai em `NULL`, e `NULL`s não colidem.
+  **Testado na prática:** um `INSERT` de `+553399772570` (exatamente o que o
+  webhook fazia) foi **recusado** com `unique_violation`, e o teste não deixou
+  lixo no banco.
+
+- **Validação:** `npx tsc -b`, `npx tsc -p tsconfig.api.json --noEmit` e
+  `npx vite build` passam sem erro. `npm run validate:sql` valida as 95
+  migrations. `deno check` dos bundles novos: só os erros pré-existentes dos
+  `_shared/` (4 em `meta-webhook`, 1 em `ingest-lead`), **nenhum novo e nenhum
+  citando `phoneBr`**. Nenhuma declaração de topo duplicada nova em bundle
+  nenhum.
+
+- **Não feito / limites desta entrega:**
+  - **Nenhum segredo lido, pedido, gerado ou gravado.**
+  - **Nenhum `git push`, nenhum deploy na Vercel.** As mudanças de frontend
+    (8 arquivos) e a de `api/meta-connect.ts` existem **só no disco** —
+    reforçam a pendência **#30**.
+  - **`repurchase-dispatch` e `simulate-inbound` não foram republicados** de
+    propósito (pendência **#37**): o primeiro precisa do ramo `meta` de
+    qualquer forma, o segundo é dev-only. Republicar mais funções do que o
+    necessário aumenta a superfície de risco sem ganho.
+  - **Pendência #34 continua ABERTA** (regra 4: agente não fecha pendência).
+    Só fecha com o Danilo confirmando pela tela.
+  - Nada mudou em zernio nem em uazapi — só acréscimo.
+
+- **Arquivos:** `src/lib/phone.ts` · `supabase/functions/_shared/phone-br.ts`
+  (**novo**) · `supabase/migrations/20260906200000_phone_br_canonical.sql`
+  (**novo**) · `supabase/functions/meta-webhook/index.ts` ·
+  `supabase/functions/ingest-lead/index.ts` ·
+  `supabase/functions/repurchase-dispatch/index.ts` ·
+  `supabase/functions/simulate-inbound/index.ts` · `src/lib/conversations.ts` ·
+  `src/components/contacts/ImportContactsDialog.tsx` · `src/hooks/useContacts.ts` ·
+  `src/hooks/useContactProfile.ts` · `src/hooks/useDealDetail.ts` ·
+  `src/app/routes/vendas/VendasPage.tsx` · `api/meta-connect.ts` · `MEMORIA.md`.
+
+- **Precisa de deploy na Vercel?** **SIM.** 7 arquivos de frontend
+  (`src/lib/phone.ts`, `src/lib/conversations.ts`, `ImportContactsDialog.tsx`,
+  `useContacts.ts`, `useContactProfile.ts`, `useDealDetail.ts`,
+  `VendasPage.tsx`) + 1 API Route (`api/meta-connect.ts`). Sem esse deploy o
+  **webhook já está protegido** (é Edge Function, já no ar), mas o **cadastro
+  manual, a importação de CSV e a tela de Vendas continuam gravando a grafia
+  crua** — e aí o índice único devolve erro de chave em vez de duplicar.
+  Publicar é decisão do Danilo (pendência #30).
+
+- **Próximo:** (1) Danilo autoriza o deploy na Vercel; (2) teste pela interface —
+  pedir para um celular **novo** mandar mensagem e conferir que criou **um** só
+  contato; responder pelo CRM, pedir resposta de volta e conferir que cai na
+  **mesma** conversa; em Pessoas, conferir que não há dois contatos com o mesmo
+  telefone. Isso fecha a **#34**. (3) Só então seguir no
+  `PLANO-MIGRACAO-META.md`.
+
+### 2026-09-06 · Claude Code · Decisões do Danilo + Fase 0 concluída
+
+**DECISÕES DO DANILO (06/09/2026):**
+1. **D0.1 — Cancelar a campanha "Teste"** ✅ autorizado e **EXECUTADO**:
+   `campaigns` id `c92d6e1c-92ab-428a-bff6-8d0e4ac05c28` passou de
+   `status='sending'` para `'paused'`. Não dispara mais sozinha quando a
+   Fase 2 ficar pronta. (Os crons `wh-dispatch-campaigns` e
+   `wh-sync-broadcast-status` **não foram desligados** — D0.2 não foi
+   respondida; com a campanha pausada, o loop não tem o que processar.)
+2. **D0.5.1/D0.5.2 — Contatos duplicados:** o Danilo foi além do proposto —
+   *"não só junte os contatos, faça que o próprio CRM já faça isso
+   automaticamente"*. Ou seja: **solução estrutural e permanente**, não
+   mutirão de limpeza. Migração autorizada.
+3. **D1.1/D1.2 — Mídia de paciente:** autorizado criar o espaço de
+   armazenamento. Confirmado: **Supabase Storage**, bucket **PRIVADO**
+   (não o `whatsapp-hub-agent-media`, que é `public=true` e serve à IA),
+   acesso por perfil (admin + recepção), **expurgo automático em 12 meses**.
+4. **Republicar `process-ai-message`** ✅ autorizado.
+5. **Publicar o código** ✅ autorizado e **EXECUTADO** — commit `a7d140f`.
+
+**ALERTA REITERADO AO DANILO (não é bloqueio):** guardar foto e áudio de
+paciente por 12 meses transforma a **pendência #24** (política de privacidade
+apontando para a do Facebook) de "feio" em **exposição real**. Continua aberta.
+
+**FASE 0 DO PLANO: CONCLUÍDA.**
+
+**Ordem de execução por conflito de arquivo:** a guarda de mídia inbound
+(Fase 1.4) e a normalização de telefone (Fase 0.5) **tocam o mesmo arquivo**
+(`meta-webhook/index.ts`). Executar em série, nunca em paralelo — dois agentes
+no mesmo arquivo se desfazem. A normalização está em curso; a mídia entra
+depois que ela terminar.
+
+- **Arquivos:** `MEMORIA.md`. **Banco:** 1 `UPDATE` na campanha (autorizado).
+- **Próximo:** terminar a normalização → criar o bucket privado e ligar a
+  guarda de mídia → Fase 1 fecha.

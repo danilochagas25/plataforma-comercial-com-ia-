@@ -41,6 +41,7 @@ import {
   type ChannelRow,
 } from '../_shared/channels.ts';
 import { metaTimingSafeEqual, verifyMetaSignature } from '../_shared/meta-cloud.ts';
+import { phoneBrNormalize, phoneBrVariants } from '../_shared/phone-br.ts';
 
 type AdminClient = ReturnType<typeof getAdminClient>;
 type DeliveryStatus = 'sent' | 'delivered' | 'read' | 'failed';
@@ -68,11 +69,12 @@ function str(obj: Record<string, unknown>, keys: string[]): string | null {
 }
 
 // A Meta manda o wa_id em dígitos ('5573998040599'); o banco guarda E.164.
+//
+// Regra de negócio (06/09/2026): a Meta entrega número brasileiro SEM o nono
+// dígito. `phoneBrNormalize` devolve a forma CANÔNICA (com o 9), que é a que
+// gravamos; a busca do contato usa `phoneBrVariants` para casar as duas.
 function normalizePhone(raw: string | null): string | null {
-  if (!raw) return null;
-  const digits = raw.replace(/\D/g, '');
-  if (digits.length < 10) return null;
-  return `+${digits}`;
+  return phoneBrNormalize(raw);
 }
 
 // --- idempotência -----------------------------------------------------------
@@ -103,19 +105,46 @@ async function claimEvent(
 
 // --- domínio (espelha o zernio-webhook) -------------------------------------
 
+// Resolve o contato do remetente. `phone` já vem canônico (com o nono dígito).
+//
+// Regra de negócio: procurar por TODAS as formas equivalentes antes de criar.
+// Sem isso, o paciente que a clínica cadastrou com o número completo vira um
+// contato novo quando responde, porque a Meta entrega o wa_id sem o 9 — e aí
+// o orçamento fica num contato e a resposta em outro.
 async function findOrCreateContact(
   admin: AdminClient,
   orgId: string,
   phone: string,
   name: string | null,
 ): Promise<string | null> {
-  const { data: existing } = await admin
+  const variants = phoneBrVariants(phone);
+  const { data: matches } = await admin
     .from('contacts')
-    .select('id')
+    .select('id, phone, created_at')
     .eq('org_id', orgId)
-    .eq('phone', phone)
-    .maybeSingle();
-  if (existing) return (existing as { id: string }).id;
+    .in('phone', variants.length > 0 ? variants : [phone])
+    .order('created_at', { ascending: true });
+  const rows = (matches ?? []) as Array<{ id: string; phone: string | null }>;
+  if (rows.length > 0) {
+    // Sobrevivente: o que já está na forma canônica; senão o mais antigo.
+    const canonical = rows.find((r) => r.phone === phone);
+    const chosen = canonical ?? rows[0];
+    if (!canonical && rows.length === 1) {
+      // Contato legado gravado na forma curta e sem concorrente: promove para a
+      // canônica. Best-effort — se colidir com o índice único, segue como está.
+      const { error: upErr } = await admin
+        .from('contacts')
+        .update({ phone })
+        .eq('id', chosen.id);
+      if (upErr) {
+        console.log(JSON.stringify({
+          event: 'meta_webhook_phone_canonicalize_skipped',
+          contact_id: chosen.id,
+        }));
+      }
+    }
+    return chosen.id;
+  }
   const { data: created, error } = await admin
     .from('contacts')
     .insert({ org_id: orgId, phone, name, source: 'whatsapp' })

@@ -13,6 +13,7 @@
 import { requireAdmin, AuthError } from '../_shared/auth.ts';
 import { getAdminClient } from '../_shared/supabase-admin.ts';
 import { jsonResponse, preflight } from '../_shared/cors.ts';
+import { phoneBrNormalize, phoneBrVariants } from '../_shared/phone-br.ts';
 
 interface Payload {
   phone?: string;
@@ -44,7 +45,9 @@ Deno.serve(async (req) => {
 
     // Validate E.164 format (dev tool seeds the contacts table, so we don't
     // want to pollute it with garbage like "not-a-phone").
-    const phone = rawPhone.startsWith('+') ? rawPhone : `+${rawPhone}`;
+    // Forma canônica (celular BR com o nono dígito), igual ao meta-webhook.
+    const phone = phoneBrNormalize(rawPhone)
+      ?? (rawPhone.startsWith('+') ? rawPhone : `+${rawPhone}`);
     if (!/^\+[1-9]\d{6,14}$/.test(phone)) {
       return jsonResponse(
         { ok: false, error: 'phone inválido. Use formato E.164 (ex.: +5511999999999).' },
@@ -70,7 +73,8 @@ Deno.serve(async (req) => {
       .from('contacts')
       .select('id')
       .eq('org_id', caller.orgId)
-      .eq('phone', phone)
+      .in('phone', phoneBrVariants(phone))
+      .limit(1)
       .maybeSingle();
     if (existing) {
       contactId = (existing as { id: string }).id;

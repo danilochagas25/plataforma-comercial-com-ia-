@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getSupabase } from '@/lib/supabase';
+import { canonicalPhone } from '@/lib/phone';
 import type {
   ContactFull,
   CustomField,
@@ -143,6 +144,10 @@ export function useDealDetail(deal: Deal | null): UseDealDetailResult {
   const saveContact = useCallback<UseDealDetailResult['saveContact']>(async (patch) => {
     if (!deal) return 'Sem contato.';
     const supabase = getSupabase();
+    // Telefone editado na oportunidade entra na forma canônica (nono dígito BR).
+    if (typeof patch.phone === 'string') {
+      patch = { ...patch, phone: canonicalPhone(patch.phone) ?? patch.phone };
+    }
     setContact((cur) => (cur ? { ...cur, ...patch } : cur));
     const { error: err } = await supabase.from('contacts').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', deal.contact_id);
     if (err) { setError(err.message); return err.message; }
