@@ -116,6 +116,10 @@ Nenhuma até agora.
 | 24 | **Política de privacidade própria da clínica** — hoje aponta para a do Facebook (remendo aceito pelo Danilo em 05/09) | Defesa em LGPD | 05/09/2026 |
 | 25 | **Comunicar a recepção da odonto**: o número saiu do celular, atendimento passa a ser pelo CRM (reabre a #12, que foi fechada por engano) | Rotina da equipe | 05/09/2026 |
 | 31 | **BLOQUEANTE — registrar o número na Cloud API** (PIN de 6 dígitos + `register`). Sem isso o número não envia nem recebe | **TUDO** | 05/09/2026 |
+| 31c | ~~Registro na Cloud API~~ — **RESOLVIDA 06/09/2026: número registrado, ciclo completo funcionando** | — | fechada |
+| 32 | **URGENTE — responder a mensagem de paciente que já chegou no CRM** e definir quem monitora | Atendimento real | 06/09/2026 |
+| 33 | Verificar, na 1ª campanha, se pacientes antigos da recepção ficam com o estado "não está mais no WhatsApp" | Taxa de resposta | 06/09/2026 |
+| 34 | 🔴 **Nono dígito BR: a Meta entrega telefone sem o 9 e o CRM DUPLICA contato/conversa** — normalizar antes de qualquer campanha | **A campanha inteira** | 06/09/2026 |
 | 31b | **#31 tem código, falta o Danilo usar.** Em 06/09 o botão "Registrar número na Cloud API" foi escrito (`src/lib/meta-cloud.ts` + `api/meta-connect.ts` ação `register` + `ChannelsSettings.tsx`). **Não publicado** (depende da #30) e **não executado** — registrar é ação irreversível na conta do dono. #31 só fecha quando o `platform_type` do número voltar `CLOUD_API` | #30 | 06/09/2026 |
 | 30 | Publicar o frontend na Vercel (botão "Abrir conversa") | Teste pela interface | 05/09/2026 |
 | 16 | **Cadastrar forma de pagamento** na WABA `1500039648549092` | Qualquer envio | 05/09/2026 |
@@ -133,6 +137,8 @@ Nenhuma até agora.
 | 28 | **Botões COPY_CODE / OTP / FLOW da Meta não têm equivalente local.** O sync ignora esses botões ao importar (ficam intactos na Meta, só não aparecem na edição do CRM). Só afeta modelo de autenticação/fluxo, que não está no escopo da odonto hoje | Edição de modelo de autenticação | 05/09/2026 |
 | 29 | **`send-operator-template` ramo `meta` está no ar mas NUNCA foi exercitado contra a API real.** Validado por leitura de código, typecheck, `deno check` e boot da função (401 sem Authorization). Exercitar de verdade exige o token do canal (segredo) e dispara mensagem real — é ação do Danilo, pela tela | Prova de que o envio de modelo funciona ponta a ponta | 05/09/2026 |
 | 30 | **Frontend não publicado.** `src/lib/conversations.ts` (novo) e `ContactDetailPage.tsx` (botão "Abrir conversa" com get-or-create da conversa) existem só no disco. A Vercel serve o commit `15ebea6`. Sem esse deploy, **não há como abrir a primeira conversa pela interface** — e sem conversa não há onde clicar em "Reiniciar com template". Publicar é decisão do Danilo | Disparo do modelo pela tela de Conversas | 05/09/2026 |
+| 35 | **⚠️ ARMADILHA — 18 Edge Functions ainda na `version: 1` do bootstrap de 24/08.** O deploy carrega junto os `_shared` **do momento do deploy**: corrigir `channels.ts` / `inbox-delivery.ts` não conserta função nenhuma sozinha. Já causou 2 incidentes (05/09 `send-operator-template`; 06/09 `send-operator-message` + `send-operator-media`). **Risco alto e imediato: `process-ai-message`** — o fonte já está certo, falta só republicar; enquanto não for, toda resposta da IA em conversa Meta falha com "Zernio API Key não configurada". Regra: ao mexer em `_shared/*`, rodar `list_edge_functions` e decidir quem redeployar | Resposta da IA · campanhas · régua | 06/09/2026 |
+| 36 | **Mídia enviada pelo operador no canal Meta não aparece no thread.** `send-operator-media` v2 sobe os bytes para a própria Meta (`POST /{phone_number_id}/media`) e envia por media id — a mensagem **chega ao paciente**, mas `media_url` fica `null` e o balão mostra "visualização indisponível nesta versão". Resolver exige decidir onde guardar mídia de paciente (é a mesma decisão das pendências #21 e #23): bucket próprio com RLS por perfil + expurgo de 12 meses, ou o bucket público `whatsapp-hub-agent-media` (mais simples, porém expõe o arquivo por URL aberta). **Decisão do Danilo, não do agente** | Histórico visual do atendimento | 06/09/2026 |
 
 ---
 
@@ -1702,3 +1708,384 @@ o token já está cifrado em `channels.meta_token_encrypted`.
   (`platform_type = CLOUD_API`); (4) mandar mensagem do celular pessoal para
   **+55 73 99804-0599** e conferir se agora existe campo de digitar e se a
   mensagem cai em Conversas no CRM.
+
+### 2026-09-06 · Claude Code · ✅ API DO WHATSAPP CONCLUÍDA — ciclo completo funcionando
+
+**MARCO FINAL DA ETAPA DE API.** O Danilo registrou o número na Cloud API pelo
+botão novo da tela de Canais e confirmou: **"deu certo, chegou até as mensagens
+de outra pessoa"**.
+
+**Estado do banco após o registro:**
+| Métrica | Valor |
+|---|---|
+| Mensagens recebidas (inbound) | **1** — de terceiro, real |
+| Mensagens enviadas (outbound) | 2 |
+| Conversas | 2 |
+| Contatos | **2** — o segundo criado automaticamente pelo webhook |
+| Eventos da Meta processados | 5 |
+
+**O que está PROVADO funcionando ponta a ponta:**
+1. CRM **envia** template pela Graph API → Meta confirma `delivered`
+2. Meta **entrega** eventos de status ao webhook → CRM processa
+3. Terceiro **manda mensagem** → webhook recebe → CRM **cria contato e conversa
+   sozinho** e grava a mensagem
+4. Templates listados e criáveis pelo CRM
+
+**CAUSA RAIZ CONFIRMADA NA PRÁTICA:** era o **registro na Cloud API** (`POST
+/{phone_number_id}/register` com PIN de 6 dígitos). O número estava adicionado e
+verificado, mas nunca registrado. Assim que registrou, tudo passou a funcionar.
+Fecha as pendências **#31** e **#31b**.
+
+**Número real definitivo:** **+55 73 99804-0599** (E.164 `+5573998040599`).
+A Meta exibe truncado como `9804-0599` — não confiar na exibição.
+
+**Deploys do dia:** `c428e03` (templates + envio de template + botão "Abrir
+conversa") e `240b25f` (registro na Cloud API). Ambos publicados e validados em
+produção. Varredura de segredo limpa nos dois.
+
+---
+
+## ⚠️ RISCO OPERACIONAL ABERTO (não é técnico, é de negócio)
+
+O número **era da recepção da odonto**. Os pacientes não sabem que ele mudou de
+lugar e **continuam mandando mensagem** — que agora caem no CRM, onde **ninguém
+está olhando**. Já há 1 mensagem de terceiro sem resposta.
+
+**Pendências que passam a ser URGENTES:**
+- **#25** — comunicar a recepção: o atendimento desse número agora é pelo CRM
+- **#4** (aberta desde 05/09) — **definir quem opera o CRM no dia a dia**. Era
+  planejamento; virou operação real com paciente esperando.
+- **NOVA #32** — alguém precisa responder a mensagem que já chegou.
+
+---
+
+## O QUE FALTA NO PROJETO (próxima sessão)
+
+**Obra grande — disparo em massa e régua** (pendência #22): as Edge Functions
+`dispatch-campaign`, `check-follow-ups`, `repurchase-dispatch`,
+`funnel-automation` e `sync-broadcast-status` seguem **sem ramo `meta`**.
+É o que vai atacar os **63 orçamentos parados**. Inclui construir a fila com
+**freio de ritmo** — a Meta não tem Broadcast, e o CDT já levou restrição de
+número por volume (1.343 msgs em 2 dias, em 07/05/2026).
+
+**Outras pendências abertas:** #24 política de privacidade própria (hoje aponta
+para a do Facebook) · #23 retenção de mídia de paciente 12 meses (decidida, não
+implementada) · #26 enum de status sem `paused` · #10 reescrever `ODONTO.md` §7 ·
+#1 `product_type` odonto · #2/#3 `stage_entered_at` e cadência da régua ·
+#9 janela da carga inicial dos orçamentos.
+
+### 2026-09-06 · Claude Code · Resíduo da conta antiga no aparelho — risco para a campanha
+
+**SINTOMA (só no celular do Danilo):** mesmo com o número **registrado e
+funcionando**, o WhatsApp dele mostra na conversa com o número da clínica:
+> "Essa pessoa não está mais no WhatsApp." + botão "Convidar para o WhatsApp"
+
+E **não oferece campo de digitar**. Persiste mesmo depois de apagar a conversa e
+reabrir por `wa.me` — a conversa nova já vem rotulada **"Conta comercial"** e
+com o aviso *"Esta empresa usa um serviço seguro da Meta para gerenciar esta
+conversa"*, mas o bloqueio continua.
+
+**CAUSA:** o número **era da recepção da odonto** e tinha WhatsApp comum. O
+aparelho do Danilo tinha conversa antiga, contato salvo e até registro de
+ligação de voz (15:36 de 05/09). Quando a conta antiga foi apagada, o WhatsApp
+marcou "essa pessoa saiu" — e esse estado vive no **servidor**, não só no
+aparelho. Apagar a conversa local não desfaz. Costuma normalizar em horas.
+
+**POR QUE NÃO É PROBLEMA DO SISTEMA:** a mensagem de **terceiro** chegou ao CRM
+normalmente, criando contato e conversa. Alguém que não é o Danilo consegue
+escrever para o número. O bloqueio é do vínculo antigo entre o número dele e o
+da clínica.
+
+**⚠️ RISCO PARA A CAMPANHA (pendência #33):** pacientes que **já conversavam com
+a recepção** nesse número podem ver o mesmo estado. Normalmente o WhatsApp
+reabre a conversa quando a empresa inicia com template aprovado — foi o que
+aconteceu com o terceiro cujo inbound chegou. **Mas verificar na primeira
+campanha:** se houver entregas (`delivered`) sem nenhuma resposta e sem falha,
+essa pode ser a causa. Comparar taxa de resposta entre pacientes antigos da
+recepção e pacientes novos.
+
+**Orientação dada ao Danilo:** parar de testar pelo próprio celular (é o pior
+caso possível — tinha contato salvo, conversa antiga e ligação) e testar de um
+número que nunca falou com a recepção.
+
+- **Banco:** nenhuma migração. Só `SELECT`.
+- **Próximo:** teste de outro número; confirmar entrada em `whatsapp_hub.messages`.
+
+### 2026-09-06 · Claude Code · 🔴 BUG CRÍTICO — nono dígito BR duplica contatos (achado pelo Danilo)
+
+**O Danilo percebeu na tela:** duas conversas com o mesmo número. Confirmado por
+`SELECT` em `whatsapp_hub.contacts`:
+
+| name | phone | tamanho | origem |
+|---|---|---|---|
+| Danilo Chagas | `+5533999772570` | 14 | cadastro manual |
+| **Danilo Chagas** | **`+553399772570`** | 13 | **criado pelo `meta-webhook`** |
+| Sérgio O Fernandes | `+557399374142` | 13 | meta-webhook |
+| Trabalho | `+557382119963` | 13 | meta-webhook |
+
+**A Meta entrega o `wa_id` de números brasileiros SEM o nono dígito.** A mesma
+pessoa virou **2 contatos e 2 conversas**. Vale para todos os inbounds:
+`557399374142` (real `5573999374142`) e `557382119963` (real `5573982119963` —
+o chip do agente gestor, documentado no CLAUDE.md pessoal).
+
+É o **mesmo fenômeno** que consumiu horas ontem com o número da própria clínica
+(Meta exibe `9804-0599`; real `99804-0599`) — só que agora do lado de quem
+escreve, e com consequência muito pior.
+
+**IMPACTO NO NEGÓCIO — este é o cenário que arruína a campanha dos 63 orçamentos:**
+1. Importa paciente do WebDental **com número completo** (com o 9)
+2. Dispara o template
+3. Paciente **responde**
+4. A Meta entrega a resposta **sem o 9**
+5. CRM **cria contato e conversa NOVOS**
+6. O orçamento fica num contato e a resposta em outro → **o funil não avança e o
+   relatório conclui que ninguém respondeu**
+
+**PENDÊNCIA #34 — PRIORIDADE MÁXIMA, antes de qualquer campanha:**
+1. **Normalizar telefone BR** na entrada do `meta-webhook`: casar com e sem o
+   nono dígito (celular BR = `+55` + DDD 2 dígitos + 8 dígitos iniciados em 8/9
+   → o real tem 9 na frente). Definir **forma canônica** e usá-la em toda
+   gravação e busca.
+2. **Outros pontos afetados:** `dispatch-campaign` (casar resposta com
+   `campaign_contacts`), importação de CSV, `process-ai-message`,
+   `ensureConversationForContact` em `src/lib/conversations.ts`.
+3. **Consolidar os duplicados já existentes** sem perder mensagem — pode exigir
+   script/migração: **decisão do dono**.
+4. Verificar UNIQUE em `contacts.phone` e comportamento com as duas formas.
+
+> Crédito do achado: **o Danilo**, olhando a lista de conversas. O agente não
+> tinha percebido. Reforça a lição do dia: **comparar com o que já funciona e
+> olhar o dado real vale mais que teoria**.
+
+- **Banco:** nenhuma migração. Só `SELECT`.
+- **Próximo:** incluir como Fase 1 (ou 0) do `PLANO-MIGRACAO-META.md`.
+
+### 2026-09-06 · Claude Code · PLANO DE MIGRAÇÃO ESCRITO — `PLANO-MIGRACAO-META.md`
+- **Pedido:** montar o plano completo antes de executar (decisão do Danilo).
+- **Feito:** criado `PLANO-MIGRACAO-META.md` na raiz (466 linhas), organizado por
+  **dor de negócio**, com 6 fases, riscos, decisões pendentes e testes pela
+  interface. O subagente de planejamento estava em modo somente-leitura e não
+  pôde criar o arquivo — o conteúdo foi salvo por este agente, **acrescentando a
+  Fase 0.5** (nono dígito), que o subagente não conhecia.
+
+**DESCOBERTAS DA INVESTIGAÇÃO (divergem do que estava registrado):**
+
+1. **🔴 Campanha "Teste" VIVA E TRAVADA** — `campaigns` id
+   `c92d6e1c-92ab-428a-bff6-8d0e4ac05c28`, `status='sending'`, 1 contato
+   `pending`, criada 06/09 15:04 UTC. O cron `wh-dispatch-campaigns` (30s) rodou
+   **2.874 vezes em 24h** falhando em `loadOrgZernioContext`. Nada foi enviado,
+   **mas quando a Fase 2 ficar pronta ela dispara sozinha**. Não constava no log.
+
+2. **20 das 24 Edge Functions rodam a versão 1 do bootstrap de 24/08.**
+   Atualizadas: `meta-webhook` (nova), `sync-template-status` v4,
+   `submit-template` v2, `send-operator-template` v2.
+
+3. **`send-operator-message`, `process-ai-message` e a ação `send_text` do
+   `funnel-automation` NÃO precisam de código novo** — delegam a
+   `_shared/inbox-delivery.ts::sendInboxWithResolve`, que já tem o ramo `meta`.
+   **É problema de publicação, não de programação.** Derruba muito o custo da Fase 1.
+
+4. **`sync-broadcast-status` não precisa migrar — precisa ser DESLIGADA.**
+   Verificado linha a linha que `meta-webhook::handleStatus` +
+   `syncCampaignContactStatus` já fazem o serviço dela (avanço monotônico
+   sent→delivered→read, failed com motivo, `bump_campaign_counter`), e
+   `handleInboundMessage` já marca `replied`. Cron id 4, 720 execuções/24h inúteis.
+
+5. **4 funções repetem o MESMO bloco de "mandar modelo 1:1"** —
+   `dispatch-campaign` (589–615), `check-follow-ups::sendDirectFollowUp` (122–169),
+   `repurchase-dispatch` (~243–270), `funnel-automation::send_template` (~186–225).
+   Migrar separadamente = **quatro vezes o mesmo bug**. Proposta: helper único
+   `_shared/template-send.ts`.
+
+6. **RITMO ATUAL É PERIGOSO:** `dispatch-campaign` usa `DIRECT_PER_TICK = 60`
+   com cron de 30s = **até 120 msg/min**. É o padrão que restringiu o número do
+   CDT em 07/05/2026. O freio é **pré-requisito**, não melhoria.
+
+7. **`transcribe-audio` não tem acoplamento ao Zernio** (só comentário) — falha
+   por `media_url = null`, que é a pendência da mídia inbound.
+
+8. **Defeito encontrado em `check-follow-ups`:** ao criar conversa nova grava
+   `provider: rule.provider === 'uazapi' ? 'uazapi' : 'zernio'` — uma regra Meta
+   gravaria `'zernio'` e envenenaria envios futuros. Corrigir na Fase 2.
+
+9. **Falso alarme descartado:** `INSERT` sem `org_id` em `conversations`/`messages`
+   no `check-follow-ups` **não quebra** — o gatilho `trg_org_from_parent` preenche.
+   Registrado para ninguém repetir a investigação.
+
+**DECISÕES PENDENTES DO DANILO (listadas no plano):** D0.1 e D0.2 (campanha
+travada e crons) · **D0.5.1 e D0.5.2 (juntar contatos duplicados)** · D1.1 a
+D1.3 (mídia de paciente e republicações) · **D2.1 a D2.5 (freio, cadência,
+textos, quem opera)** · D3.1 a D3.3 · D4.1 a D4.3.
+
+**PREFERÊNCIA DE TRABALHO do Danilo (06/09):** não repetir alertas sobre
+conversas aguardando resposta durante conversa técnica — ele já está ciente; o
+foco da sessão é configuração. Registrado para outros agentes não insistirem.
+
+- **Arquivos:** `PLANO-MIGRACAO-META.md` (novo), `MEMORIA.md`.
+- **Banco:** nenhuma migração. Só `SELECT` de diagnóstico.
+- **Próximo:** Danilo lê o plano e decide por onde começar.
+
+### 2026-09-06 · Claude Code (subagente) · Republicação de send-operator-message e send-operator-media
+
+- **Pedido:** confirmar o diagnóstico de que as duas funções rodam o bundle de
+  24/08 (sem o ramo `meta`), corrigir o fonte se estivesse incompleto, deployar
+  **apenas** essas duas, conferir cada deploy contra o bundle local, varrer o
+  resto das funções ainda em `version: 1` e registrar aqui. Sem migração, sem
+  `git push`, sem deploy na Vercel, sem tocar em segredo.
+
+**SINTOMA QUE ORIGINOU A TAREFA:** responder uma conversa com texto livre pela
+inbox devolvia *"Salvo, mas não entregue ao contato — Zernio API Key não
+configurada. Configure a chave na tela de Canais."* — numa org que **não tem
+Zernio nenhum**.
+
+**1. DIAGNÓSTICO CONFIRMADO (por leitura do código PUBLICADO, não do disco).**
+Baixei as duas funções com `get_edge_function` e contei as ocorrências:
+
+| Bundle publicado (v1, 24/08) | `metaSendText` | `metaSendMedia` | `meta-cloud` | `'meta'` | `zernio` | `uazapi` |
+|---|---|---|---|---|---|---|
+| `send-operator-message` | 0 | 0 | 0 | 0 | 68 | 37 |
+| `send-operator-media` | 0 | 0 | 0 | 0 | 66 | 37 |
+
+**Zero referência a Meta nos dois.** A frase de erro está literalmente lá
+(`Zernio API Key nao configurada…`), vinda do `loadOrgZernioContext` de
+`_shared/channels.ts` — a versão de agosto, em que `getSendContextForConversation`
+caía **sempre** no ramo zernio. O fonte no disco já estava certo; faltava publicar.
+
+**2. DEFEITO REAL ENCONTRADO NO FONTE — `send-operator-media` NÃO funcionaria
+só com republicação.** Republicar sem corrigir teria trocado um erro por outro.
+A linha 93 do fonte antigo chamava, **incondicionalmente e antes de qualquer
+roteamento**:
+
+```ts
+const zernio = await loadOrgZernioContext(admin, caller.orgId, …);
+const mediaUrl = await uploadMediaDirect({ apiKey: zernio.apiKey, … });
+```
+
+Ou seja: o Zernio era o **host obrigatório** da mídia, mesmo para uma conversa
+Meta. Numa org só-Meta isso estoura com a MESMA mensagem de "Zernio API Key não
+configurada", agora no upload. O ramo `meta` de `inbox-delivery.ts` nunca era
+alcançado.
+
+**Correção aplicada (só acréscimo; zernio e uazapi intactos):**
+- **`_shared/meta-cloud.ts`**
+  - `metaReadJson(res)` — extraído de dentro do `metaFetchUrl` (o tratamento de
+    erro da Graph API vira função própria). `metaFetchUrl` passou a chamá-lo;
+    **comportamento idêntico**, sem nenhuma mudança de payload ou de mensagem.
+  - **`metaUploadMedia(ctx, {bytes, filename, mimeType})`** (novo) →
+    `POST /v25.0/{phone_number_id}/media` em multipart
+    (`messaging_product=whatsapp` + `type` + `file`), devolve `{ mediaId }`.
+    Não define `Content-Type` na mão — o boundary é do runtime.
+  - `metaSendMedia` passou a aceitar **`mediaId` OU `link`** (os dois opcionais,
+    com erro claro se faltarem os dois). A chamada existente em
+    `inbox-delivery.ts` usa `link` e não mudou.
+  - **Prefixo `meta` mantido em todo helper privado** (regra do empacotador).
+- **`send-operator-media/index.ts`** — passou a resolver
+  `getSendContextForConversation` **antes** de subir o arquivo e a bifurcar:
+  - `provider === 'meta'` → `metaUploadMedia` (bytes vão direto para a Meta) +
+    `metaSendMedia({ mediaId })`. `media_url` grava **null**.
+  - qualquer outro → caminho de hoje, **byte a byte igual**
+    (`loadOrgZernioContext` → `uploadMediaDirect` → `sendInboxWithResolve`).
+  - `MetaCloudError` tratado no `catch` (401 → 401, resto → 502), antes do
+    `ZernioError`. A resposta ganhou o campo `provider`.
+
+> **Por que os bytes vão para a Meta e não para um bucket público nosso:**
+> existe o bucket **público** `whatsapp-hub-agent-media`, que resolveria o
+> problema em uma linha — mas publicar foto/áudio de paciente numa URL aberta é
+> **decisão de LGPD do dono** (pendências #21 e #23, ainda em aberto). Mandando
+> os bytes direto para a Meta, o arquivo não passa por nenhuma URL pública
+> nossa. **Preço disso: `media_url` fica null e o balão da mídia enviada mostra
+> o placeholder "visualização indisponível nesta versão"** — a mesma limitação
+> já documentada para a mídia inbound. Vira a **pendência #36**.
+
+**3. DEPLOY — as duas funções, conferidas byte a byte.**
+
+| Função | Antes | Agora | Conferência |
+|---|---|---|---|
+| `send-operator-message` | v1 (24/08) | **v2** | `sha256 d56dab28…` — publicado **idêntico** ao bundle local |
+| `send-operator-media` | v1 (24/08) | **v2** | `sha256 898c75b0…` — publicado **idêntico** ao bundle local |
+
+- Deploy pelo MCP `deploy_edge_function`, `verify_jwt: false`, com o **bundle
+  achatado do mesmo inliner de `api/bootstrap.ts`** (formato em que as funções
+  já estavam publicadas). `npx supabase functions deploy` continua inutilizável
+  nesta máquina (sem `SUPABASE_ACCESS_TOKEN`).
+- **Prova de que o inliner é fiel:** gerei o bundle local de
+  `send-operator-template` (publicada v2 ontem) e ele bateu **byte a byte** com
+  o código publicado (`sha256 095577c4…`). Só então usei o mesmo caminho.
+- **Smoke test:** `POST` sem `Authorization` nas duas → `401 {"ok":false,
+  "error":"Missing Authorization header"}`. Sobem e respondem, sem `BOOT_ERROR`.
+- **Armadilha do empacotador — verificada:** comparei a lista de declarações de
+  topo do bundle novo com a do baseline. **Nenhuma declaração duplicada nova.**
+  A única duplicada é `type Admin` (vem de `channels.ts` e de
+  `inbox-delivery.ts`), que **já existia no v1 publicado** — é *type alias*,
+  apagado pelo runtime do Deno, e não afeta execução.
+- **`deno check`:** baseline 6 erros × bundle novo **6 erros** — os mesmos,
+  todos pré-existentes dos `_shared`. Nenhum erro novo.
+  (Uma primeira versão do `metaUploadMedia` introduziu um 7º erro —
+  `Uint8Array<ArrayBufferLike>` não casa com `BlobPart` no lib do Deno.
+  Corrigido com cast explícito e comentário.)
+- `npx tsc -b`, `npx tsc -p tsconfig.api.json --noEmit` e `npx vite build`
+  passam sem erro.
+
+**4. ⚠️ A ARMADILHA DAS FUNÇÕES EM `version: 1` — SEGUNDO INCIDENTE PELO MESMO
+MOTIVO. LEIA ANTES DE MEXER EM QUALQUER FUNÇÃO.**
+
+> **O deploy leva junto os `_shared` do momento do deploy.** Uma função que
+> ainda está na `version: 1` roda o bundle de **24/08/2026**, congelado antes de
+> toda a migração para a Meta — mesmo que o arquivo no disco esteja perfeito.
+> **Corrigir `_shared/channels.ts` ou `_shared/inbox-delivery.ts` não conserta
+> ninguém sozinho: só conserta quem for redeployado depois.**
+>
+> Já aconteceu **duas vezes**: em 05/09 com `send-operator-template` (a versão
+> publicada era a v1 do bootstrap, sem nenhuma referência a `meta`) e agora com
+> `send-operator-message` + `send-operator-media`.
+>
+> **Vai acontecer de novo** com `dispatch-campaign`, `check-follow-ups`,
+> `repurchase-dispatch`, `funnel-automation` e `sync-broadcast-status` quando
+> forem adaptadas. **Regra: toda vez que mexer em `_shared/*`, listar
+> `list_edge_functions` e decidir explicitamente quem precisa ser redeployado.**
+> Registrado como **pendência #35**.
+
+**5. VARREDURA — as 18 funções que continuam em `version: 1`** (bootstrap de
+24/08; `meta-webhook` também aparece como v1 mas é **nova**, de 05/09, e já
+nasceu com o ramo `meta`). **Nenhuma delas foi deployada nesta sessão** — só
+relato, a decisão é do Danilo:
+
+| Função | Ainda v1 | Está no caminho do canal Meta? | O que acontece hoje |
+|---|---|---|---|
+| `process-ai-message` | sim | **SIM — risco alto** | Usa `sendInboxWithResolve` passando `provider`+`channel_id`. **Basta republicar** (o fonte já está certo). Enquanto não for: **toda resposta da IA numa conversa Meta falha com o mesmo erro de "Zernio API Key"** |
+| `funnel-automation` | sim | **SIM — parcial** | `send_text` usa `sendInboxWithResolve` → **republicar resolve**. Mas `send_template` chama `loadOrgZernioContext` direto (linha ~208) → **precisa de código**, não só deploy |
+| `check-follow-ups` | sim | SIM — precisa código | Só ramo zernio/uazapi. Além disso, ao criar conversa grava `provider` `'zernio'`/`'uazapi'` — uma regra Meta envenenaria a conversa |
+| `dispatch-campaign` | sim | SIM — precisa código | Só Broadcast do Zernio. É a pendência #22 (fila + freio) |
+| `repurchase-dispatch` | sim | SIM — precisa código | Idem `dispatch-campaign` |
+| `sync-broadcast-status` | sim | SIM — mas o plano é **desligar**, não migrar (o `meta-webhook` já faz o serviço) | — |
+| `transcribe-audio` | sim | SIM — mas republicar **não resolve** | Não tem acoplamento a Zernio; para no `media_url = null` da mídia inbound da Meta (pendências #21/#23). Áudio de paciente **não é transcrito** hoje, em silêncio (`skipped: no media_url`) |
+| `simulate-inbound` | sim | **Não** — dev-only, não fala com provedor nenhum | Cria conversa **sem `channel_id`/`provider`**, que cairia no fallback zernio se alguém tentasse responder. Só atrapalha em teste |
+| `zernio-webhook` · `uazapi-webhook` · `zernio-number-status` · `test-zernio-connection` | sim | Não — são dos outros provedores | Sem efeito no canal Meta |
+| `generate-template` · `process-knowledge` · `ingest-lead` · `redirect-tracker` · `invite-team-member` · `delete-team-member` | sim | Não — não tocam canal | Sem efeito |
+
+- **Arquivos:** `supabase/functions/_shared/meta-cloud.ts` (alterado) ·
+  `supabase/functions/send-operator-media/index.ts` (alterado) · `MEMORIA.md`.
+  `send-operator-message/index.ts` **não precisou de uma linha** — só do deploy.
+- **Banco:** **nenhuma migração, nenhum DDL, nenhuma escrita.** Só um `SELECT`
+  de diagnóstico em `storage.buckets` (para saber se existia bucket usável).
+- **Não feito:**
+  - **Nenhum segredo lido, pedido, gerado ou gravado.**
+  - **Nenhum `git push`, nenhum deploy na Vercel.** As duas alterações são de
+    Edge Function, então **não há nada para publicar na Vercel** nesta entrega —
+    mas os arquivos seguem **não commitados** no disco.
+  - **Nenhuma outra função foi deployada** — as 18 em `version: 1` continuam
+    como estavam, de propósito.
+  - O ramo `meta` de `send-operator-media` **não foi exercitado contra a API
+    real** (exige o token do canal e dispara mensagem de verdade — é ação do
+    Danilo, pela tela). O de `send-operator-message` idem.
+- **Efeito colateral a registrar:** a mudança no `_shared/meta-cloud.ts` faz os
+  bundles publicados de `send-operator-template` (v2), `submit-template` (v2),
+  `sync-template-status` (v4) e `meta-webhook` (v1 de 05/09) ficarem **atrás do
+  fonte**. Sem impacto de comportamento (o refactor do `metaReadJson` é neutro e
+  `metaUploadMedia` é só acréscimo), mas quem for redeployá-las leva o
+  `meta-cloud.ts` novo junto.
+- **Próximo:** (1) Danilo testa pela interface: Conversas → abrir uma conversa
+  do canal Meta dentro da janela de 24h → digitar e enviar → a mensagem tem que
+  sair **sem** a faixa "Salvo, mas não entregue"; depois anexar uma imagem pelo
+  clipe. (2) Decidir se `process-ai-message` também é republicada — é um deploy
+  sem uma linha de código e destrava a resposta da IA no canal Meta.

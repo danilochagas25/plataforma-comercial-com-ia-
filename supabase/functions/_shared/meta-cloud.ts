@@ -123,21 +123,11 @@ function metaFriendlyMessage(
   return raw;
 }
 
-// Single fetch helper for every Graph API call (GET or JSON POST).
-// `url` is absolute so pagination (paging.next) can reuse it verbatim.
-async function metaFetchUrl(
-  ctx: MetaContext,
-  url: string,
-  init: { method: 'GET' | 'POST'; body?: Record<string, unknown> } = { method: 'GET' },
-): Promise<Record<string, unknown>> {
-  const headers: Record<string, string> = { Authorization: `Bearer ${ctx.token}` };
-  if (init.body) headers['Content-Type'] = 'application/json';
-
-  const res = await fetch(url, {
-    method: init.method,
-    headers,
-    body: init.body ? JSON.stringify(init.body) : undefined,
-  });
+// Reads the Graph API response body and turns any error shape into a
+// MetaCloudError. Shared by the JSON path (metaFetchUrl) and by the multipart
+// upload (metaUploadMedia), which cannot reuse the same fetch because its body
+// is a FormData and must NOT carry a JSON Content-Type.
+async function metaReadJson(res: Response): Promise<Record<string, unknown>> {
   const text = await res.text();
   let json: Record<string, unknown> = {};
   try {
@@ -155,6 +145,24 @@ async function metaFetchUrl(
     throw new MetaCloudError(metaFriendlyMessage(code, subcode, raw), res.status, code, subcode);
   }
   return json;
+}
+
+// Single fetch helper for every Graph API call (GET or JSON POST).
+// `url` is absolute so pagination (paging.next) can reuse it verbatim.
+async function metaFetchUrl(
+  ctx: MetaContext,
+  url: string,
+  init: { method: 'GET' | 'POST'; body?: Record<string, unknown> } = { method: 'GET' },
+): Promise<Record<string, unknown>> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${ctx.token}` };
+  if (init.body) headers['Content-Type'] = 'application/json';
+
+  const res = await fetch(url, {
+    method: init.method,
+    headers,
+    body: init.body ? JSON.stringify(init.body) : undefined,
+  });
+  return await metaReadJson(res);
 }
 
 async function metaFetch(
@@ -241,19 +249,59 @@ export async function metaSendTemplate(
   });
 }
 
-// Mídia por URL pública (`link`). A Meta baixa o arquivo do link — ele precisa
-// estar acessível sem auth. Caption não se aplica a áudio.
+// Sobe o arquivo para a PRÓPRIA Meta (POST /{phone_number_id}/media) e devolve
+// o media id, que vale 30 dias e é aceito no lugar do `link` no envio.
+// Por que existe: o caminho Zernio hospeda a mídia e manda uma URL pública; no
+// canal Meta direto não há esse host, e publicar mídia de paciente numa URL
+// aberta é decisão de LGPD do dono (pendências #21/#23 do MEMORIA.md). Mandando
+// os bytes direto para a Meta, o arquivo não passa por nenhuma URL pública nossa.
+export async function metaUploadMedia(
+  ctx: MetaContext,
+  input: { bytes: Uint8Array; filename: string; mimeType: string },
+): Promise<{ mediaId: string }> {
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', input.mimeType);
+  // `Uint8Array<ArrayBufferLike>` does not narrow to `BlobPart` in Deno's lib
+  // (SharedArrayBuffer is in the union). The bytes always come from a plain
+  // ArrayBuffer here, so the cast is safe.
+  const filePart = input.bytes as unknown as BlobPart;
+  form.append('file', new Blob([filePart], { type: input.mimeType }), input.filename);
+
+  // Multipart: o boundary é montado pelo runtime, então NÃO definimos
+  // Content-Type aqui — só o Bearer.
+  const res = await fetch(
+    `${META_GRAPH_BASE}/${META_GRAPH_VERSION}/${ctx.phoneNumberId}/media`,
+    { method: 'POST', headers: { Authorization: `Bearer ${ctx.token}` }, body: form },
+  );
+  const json = await metaReadJson(res);
+  const mediaId = typeof json.id === 'string' ? json.id.trim() : '';
+  if (!mediaId) {
+    throw new MetaCloudError('A Meta não devolveu o id da mídia enviada.', 502);
+  }
+  return { mediaId };
+}
+
+// Mídia por URL pública (`link`) OU por id já subido na Meta (`mediaId`, de
+// metaUploadMedia). Com `link` a Meta baixa o arquivo — ele precisa estar
+// acessível sem auth. Caption não se aplica a áudio.
 export async function metaSendMedia(
   ctx: MetaContext,
   input: {
     phone: string;
     type: 'image' | 'video' | 'audio' | 'document';
-    link: string;
+    link?: string;
+    mediaId?: string;
     caption?: string;
     filename?: string;
   },
 ): Promise<{ messageId: string | null }> {
-  const media: Record<string, unknown> = { link: input.link };
+  const mediaId = input.mediaId?.trim();
+  const link = input.link?.trim();
+  if (!mediaId && !link) {
+    throw new MetaCloudError('Envio de mídia sem link público nem id do arquivo.', 400);
+  }
+  const media: Record<string, unknown> = mediaId ? { id: mediaId } : { link };
   if (input.caption && input.type !== 'audio') media.caption = input.caption;
   if (input.filename && input.type === 'document') media.filename = input.filename;
   return await metaSendMessage(ctx, {

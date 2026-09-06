@@ -2,19 +2,24 @@
 // send-operator-media
 // ----------------------------------------------------------------------------
 // Operador anexa uma mídia (imagem/áudio/vídeo/documento) numa conversa. O
-// arquivo chega como multipart/form-data; subimos ao Zernio via
-// /media/upload-direct (máx 25MB), enviamos a mensagem com attachmentUrl pela
-// inbox 1:1 e persistimos a linha (content_type + media_url = url do Zernio)
-// para o thread renderizar. A ZERNIO_API_KEY nunca toca o browser.
+// arquivo chega como multipart/form-data e o destino depende do CANAL:
+//   zernio / uazapi → sobe ao Zernio (/media/upload-direct, máx 25MB), envia
+//     com attachmentUrl pela inbox 1:1 e persiste media_url = url do Zernio,
+//     que o thread usa para renderizar. A ZERNIO_API_KEY nunca toca o browser.
+//   meta (Cloud API direta) → sobe os bytes para a própria Meta
+//     (POST /{phone_number_id}/media) e envia por media id. Não existe host de
+//     mídia nosso nesse caminho, então media_url fica null e o thread mostra o
+//     placeholder (mesma limitação do inbound — pendência #21 do MEMORIA.md).
 //
-// Notas privadas NÃO passam por aqui — são texto e nunca vão ao Zernio.
+// Notas privadas NÃO passam por aqui — são texto e nunca vão ao provedor.
 // ============================================================================
 
 import { requireOrgCaller, AuthError } from '../_shared/auth.ts';
 import { getAdminClient } from '../_shared/supabase-admin.ts';
 import { jsonResponse, preflight } from '../_shared/cors.ts';
 import { ZernioError, uploadMediaDirect } from '../_shared/zernio.ts';
-import { loadOrgZernioContext } from '../_shared/channels.ts';
+import { getSendContextForConversation, loadOrgZernioContext } from '../_shared/channels.ts';
+import { MetaCloudError, metaSendMedia, metaUploadMedia } from '../_shared/meta-cloud.ts';
 import { sendInboxWithResolve } from '../_shared/inbox-delivery.ts';
 
 const MAX_BYTES = 25 * 1024 * 1024;
@@ -88,13 +93,6 @@ Deno.serve(async (req) => {
     const filename = voiceNote ? 'voice-note.ogg' : (file.name || `arquivo-${contentType}`);
     const bytes = new Uint8Array(await file.arrayBuffer());
 
-    // 1. Sobe a mídia ao Zernio (host da URL usada no attachmentUrl, inclusive
-    //    para conversas UAZAPI que enviam a URL direto pela instância).
-    const zernio = await loadOrgZernioContext(admin, caller.orgId, convRow.zernio_account_id ?? null);
-    const mediaUrl = await uploadMediaDirect({ apiKey: zernio.apiKey, bytes, filename, contentType: mime });
-
-    // 2. Resolve a conversa 1:1 no Zernio (por canal) e envia a mídia, curando
-    //    o id salvo se o Zernio o rejeitar.
     const { data: contactRow } = await admin
       .from('contacts')
       .select('phone, instagram_id')
@@ -102,23 +100,67 @@ Deno.serve(async (req) => {
       .maybeSingle();
     const contact = (contactRow as { phone?: string; instagram_id?: string } | null) ?? {};
 
-    const zernioMessageId = await sendInboxWithResolve(
-      admin,
-      {
-        conversationRowId: conversationId,
-        orgId: caller.orgId,
-        channel,
-        phone: contact.phone ?? null,
-        instagramId: contact.instagram_id ?? null,
-        storedZernioConversationId: convRow.zernio_conversation_id,
-        channelId: convRow.channel_id ?? null,
-        zernioAccountId: convRow.zernio_account_id ?? null,
-        provider: convRow.provider ?? null,
-      },
-      { attachmentUrl: mediaUrl, voiceNote, text: caption || undefined },
-    );
+    // 1. Roteia pelo CANAL da conversa ANTES de subir o arquivo. O Zernio é o
+    //    host da mídia para zernio e uazapi, mas o canal Meta direto não tem
+    //    esse host — e numa org só-Meta não existe Zernio API Key nenhuma, o
+    //    que fazia o upload falhar com "Zernio API Key nao configurada".
+    const sendCtx = await getSendContextForConversation(admin, {
+      org_id: caller.orgId,
+      channel_id: convRow.channel_id ?? null,
+      provider: convRow.provider ?? null,
+      zernio_account_id: convRow.zernio_account_id ?? null,
+    });
 
-    // 4. Persiste a linha (media_url = url do Zernio, baixável pelo thread).
+    let mediaUrl: string | null = null;
+    let providerMessageId: string | null = null;
+
+    if (sendCtx.provider === 'meta') {
+      if (channel !== 'whatsapp') {
+        return jsonResponse({ ok: false, error: 'Canal Meta atende somente WhatsApp.' }, { status: 400 });
+      }
+      if (!contact.phone) {
+        return jsonResponse({ ok: false, error: 'Contato sem telefone para envio pela Meta.' }, { status: 400 });
+      }
+      // 2a. Bytes direto para a Meta e envio por media id (sem URL pública).
+      const { mediaId } = await metaUploadMedia(sendCtx.meta, {
+        bytes,
+        filename,
+        mimeType: mime,
+      });
+      const sent = await metaSendMedia(sendCtx.meta, {
+        phone: contact.phone,
+        type: contentType,
+        mediaId,
+        caption: caption || undefined,
+        filename,
+      });
+      providerMessageId = sent.messageId;
+    } else {
+      // 2b. Sobe a mídia ao Zernio (host da URL usada no attachmentUrl,
+      //     inclusive para conversas UAZAPI que enviam a URL pela instância) e
+      //     resolve a conversa 1:1, curando o id salvo se o Zernio o rejeitar.
+      const zernio = await loadOrgZernioContext(admin, caller.orgId, convRow.zernio_account_id ?? null);
+      mediaUrl = await uploadMediaDirect({ apiKey: zernio.apiKey, bytes, filename, contentType: mime });
+
+      providerMessageId = await sendInboxWithResolve(
+        admin,
+        {
+          conversationRowId: conversationId,
+          orgId: caller.orgId,
+          channel,
+          phone: contact.phone ?? null,
+          instagramId: contact.instagram_id ?? null,
+          storedZernioConversationId: convRow.zernio_conversation_id,
+          channelId: convRow.channel_id ?? null,
+          zernioAccountId: convRow.zernio_account_id ?? null,
+          provider: convRow.provider ?? null,
+        },
+        { attachmentUrl: mediaUrl, voiceNote, text: caption || undefined },
+      );
+    }
+
+    // 3. Persiste a linha (media_url = url do Zernio quando houver; null no
+    //    canal Meta, onde o arquivo vive na Meta e não numa URL nossa).
     const { data: inserted, error: insErr } = await admin
       .from('messages')
       .insert({
@@ -130,7 +172,7 @@ Deno.serve(async (req) => {
         content_type: contentType,
         content: caption || null,
         media_url: mediaUrl,
-        zernio_message_id: zernioMessageId,
+        zernio_message_id: providerMessageId,
         meta_status: 'sent',
         is_private_note: false,
       })
@@ -152,11 +194,15 @@ Deno.serve(async (req) => {
       ok: true,
       message_id: (inserted as { id: string }).id,
       media_url: mediaUrl,
+      provider: sendCtx.provider,
       sent_to_zernio: true,
     });
   } catch (err) {
     if (err instanceof AuthError) {
       return jsonResponse({ ok: false, error: err.message }, { status: err.status });
+    }
+    if (err instanceof MetaCloudError) {
+      return jsonResponse({ ok: false, error: err.message }, { status: err.status === 401 ? 401 : 502 });
     }
     if (err instanceof ZernioError) {
       return jsonResponse({ ok: false, error: err.message }, { status: err.status === 401 ? 401 : 502 });
