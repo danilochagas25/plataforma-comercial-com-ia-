@@ -170,6 +170,25 @@ export const setupConfig: SetupConfig = {
       },
     },
     {
+      // PIN de 6 digitos do registro do numero na Cloud API
+      // (POST /{phone_number_id}/register). Gravado por api/meta-connect
+      // quando o registro da certo. Guardar e obrigatorio: sem o PIN, qualquer
+      // novo registro do mesmo numero fica travado.
+      key: 'meta_registration_pin',
+      label: 'PIN de registro do numero (Meta)',
+      placeholder: '6 digitos',
+      inputType: 'password',
+      helpText:
+        'PIN escolhido pelo dono no registro do numero na Cloud API. Nao e codigo de SMS. E exigido em qualquer re-registro do mesmo numero.',
+      validate: async (value) => {
+        const v = value.trim();
+        if (!v) return ok; // opcional ate o numero ser registrado
+        return /^\d{6}$/.test(v)
+          ? ok
+          : { ok: false, message: 'O PIN precisa ter exatamente 6 digitos numericos.' };
+      },
+    },
+    {
       key: 'openai_api_key',
       label: 'OpenAI API Key',
       placeholder: 'sk-...',

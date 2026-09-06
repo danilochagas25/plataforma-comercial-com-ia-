@@ -42,12 +42,17 @@ interface ChannelRow {
 }
 
 // Status do número lido da Graph API (GET /api/meta-connect).
+// platformType === 'CLOUD_API' é a prova de que o número foi REGISTRADO na
+// Cloud API — adicionar e verificar por SMS não registra. Sem registro o
+// número envia, mas não recebe: a conversa chega sem campo de digitação.
 interface MetaChannelStatus {
   id: string;
   connected: boolean;
   status: string | null;
   verifiedName: string | null;
   qualityRating: string | null;
+  platformType: string | null;
+  codeVerificationStatus: string | null;
 }
 
 type ConnState = boolean | null; // null = carregando
@@ -144,6 +149,11 @@ export function ChannelsSettings() {
   const [metaWebhookUrl, setMetaWebhookUrl] = useState(META_WEBHOOK_URL_FALLBACK);
   const [metaStatus, setMetaStatus] = useState<Record<string, MetaChannelStatus>>({});
   const [webhookCopied, setWebhookCopied] = useState(false);
+  // Registro do número na Cloud API: PIN de 6 dígitos por canal. O valor vive
+  // só no formulário e é limpo assim que a chamada termina.
+  const [showRegisterFor, setShowRegisterFor] = useState<string | null>(null);
+  const [registerPin, setRegisterPin] = useState('');
+  const [registeringId, setRegisteringId] = useState<string | null>(null);
 
   const loadChannels = useCallback(async () => {
     const supabase = getSupabase();
@@ -455,6 +465,59 @@ export function ChannelsSettings() {
       toast.success('URL do webhook copiada.');
     } catch {
       toast.error('Não foi possível copiar. Selecione a URL e copie manualmente.');
+    }
+  };
+
+  // Registra o número na Cloud API (POST /{phone_number_id}/register na Meta).
+  // É o passo que faz o número existir como conta de WhatsApp — sem ele o CRM
+  // envia e a Meta entrega, mas o destinatário não consegue responder.
+  const registerMetaNumber = async (channelId: string) => {
+    if (!session) return;
+    const pin = registerPin.trim();
+    if (!/^\d{6}$/.test(pin)) {
+      toast.error('PIN inválido', {
+        description: 'Digite exatamente 6 dígitos numéricos, sem espaço.',
+      });
+      return;
+    }
+    setRegisteringId(channelId);
+    try {
+      const res = await fetch('/api/meta-connect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ action: 'register', channelId, pin }),
+      });
+      const body = await res.json();
+      if (!res.ok || !body.success) {
+        throw new Error(body.message ?? 'Falha ao registrar o número na Meta.');
+      }
+      setRegisterPin('');
+      setShowRegisterFor(null);
+      toast.success('Número registrado na Cloud API.', {
+        description: [
+          body.platformType ? `Plataforma: ${body.platformType}` : null,
+          body.codeVerificationStatus ? `verificação: ${body.codeVerificationStatus}` : null,
+          body.qualityRating ? `qualidade ${body.qualityRating}` : null,
+        ]
+          .filter(Boolean)
+          .join(' · ') || undefined,
+      });
+      if (body.pinWarning) {
+        toast.warning('PIN não guardado', { description: String(body.pinWarning) });
+      }
+      if (body.infoWarning) {
+        toast.warning('Estado do número não relido', { description: String(body.infoWarning) });
+      }
+      void loadMetaStatus();
+    } catch (err) {
+      toast.error('Falha ao registrar o número', {
+        description: err instanceof Error ? err.message : 'Erro interno',
+      });
+    } finally {
+      setRegisteringId(null);
     }
   };
 
@@ -1064,6 +1127,8 @@ export function ChannelsSettings() {
             <div className="space-y-3">
               {metaChannels.map((channel) => {
                 const st = metaStatus[channel.id];
+                const registered = st?.platformType === 'CLOUD_API';
+                const registerOpen = showRegisterFor === channel.id;
                 return (
                   <div key={channel.id} className="space-y-1">
                     {renderChannelCard(channel)}
@@ -1076,6 +1141,96 @@ export function ChannelsSettings() {
                           : `Meta não respondeu: ${st.status ?? 'erro'}`}
                       </p>
                     ) : null}
+
+                    {/* Registro na Cloud API — sem ele o número envia mas não
+                        recebe: a conversa chega sem campo de digitação. */}
+                    {registered ? (
+                      <div
+                        className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-[11px] font-semibold"
+                        style={{
+                          borderColor: 'rgba(16,185,129,0.3)',
+                          background: 'rgba(16,185,129,0.08)',
+                          color: '#10B981',
+                        }}
+                      >
+                        <CheckCheck className="h-3.5 w-3.5" />
+                        Número registrado na Cloud API
+                        <span className="font-normal text-[var(--color-text-secondary)]">
+                          Já recebe e responde mensagens.
+                        </span>
+                      </div>
+                    ) : (
+                      <div
+                        className="rounded-lg border"
+                        style={{
+                          borderColor: 'rgba(8,102,255,0.25)',
+                          background: 'rgba(8,102,255,0.05)',
+                        }}
+                      >
+                        <button
+                          onClick={() => {
+                            setRegisterPin('');
+                            setShowRegisterFor(registerOpen ? null : channel.id);
+                          }}
+                          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+                        >
+                          <span className="flex items-center gap-2 text-[11px] font-semibold" style={{ color: META_COLOR }}>
+                            <KeyRound className="h-3.5 w-3.5" />
+                            Registrar número na Cloud API
+                          </span>
+                          <ChevronDown
+                            className={`h-3.5 w-3.5 shrink-0 text-[var(--color-text-secondary)] transition ${
+                              registerOpen ? 'rotate-180' : ''
+                            }`}
+                          />
+                        </button>
+                        {registerOpen ? (
+                          <div className="space-y-3 border-t border-[rgba(8,102,255,0.15)] px-3 py-3">
+                            <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+                              Cadastrar e confirmar o número por SMS <strong>não basta</strong>:
+                              enquanto o registro não é feito, o número envia mensagem mas
+                              ninguém consegue responder — a conversa chega sem o campo de
+                              digitar e o contato aparece como "Convidar para o WhatsApp".
+                              <br />
+                              <br />
+                              O PIN abaixo é <strong>escolhido por você</strong> — não é código
+                              de SMS, não vem da Meta. São 6 números que você inventa.
+                              <strong> Anote em local seguro:</strong> a Meta vai exigir esse
+                              mesmo PIN em qualquer novo registro deste número.
+                            </p>
+                            <div className="flex flex-wrap items-end gap-2">
+                              <label className="min-w-[10rem] flex-1 space-y-1.5">
+                                <span className="block text-label">PIN de 6 dígitos</span>
+                                <input
+                                  value={registerPin}
+                                  onChange={(e) =>
+                                    setRegisterPin(e.target.value.replace(/\D/g, '').slice(0, 6))
+                                  }
+                                  type="password"
+                                  inputMode="numeric"
+                                  autoComplete="off"
+                                  maxLength={6}
+                                  placeholder="Ex.: 6 números que você escolher"
+                                  className={FIELD_CLASS}
+                                />
+                              </label>
+                              <button
+                                onClick={() => void registerMetaNumber(channel.id)}
+                                disabled={
+                                  registeringId === channel.id || registerPin.trim().length !== 6
+                                }
+                                className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-[#182940] to-[#D4A574] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                              >
+                                {registeringId === channel.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : null}
+                                Registrar número
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
                 );
               })}

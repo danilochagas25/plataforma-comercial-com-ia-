@@ -116,6 +116,7 @@ Nenhuma até agora.
 | 24 | **Política de privacidade própria da clínica** — hoje aponta para a do Facebook (remendo aceito pelo Danilo em 05/09) | Defesa em LGPD | 05/09/2026 |
 | 25 | **Comunicar a recepção da odonto**: o número saiu do celular, atendimento passa a ser pelo CRM (reabre a #12, que foi fechada por engano) | Rotina da equipe | 05/09/2026 |
 | 31 | **BLOQUEANTE — registrar o número na Cloud API** (PIN de 6 dígitos + `register`). Sem isso o número não envia nem recebe | **TUDO** | 05/09/2026 |
+| 31b | **#31 tem código, falta o Danilo usar.** Em 06/09 o botão "Registrar número na Cloud API" foi escrito (`src/lib/meta-cloud.ts` + `api/meta-connect.ts` ação `register` + `ChannelsSettings.tsx`). **Não publicado** (depende da #30) e **não executado** — registrar é ação irreversível na conta do dono. #31 só fecha quando o `platform_type` do número voltar `CLOUD_API` | #30 | 06/09/2026 |
 | 30 | Publicar o frontend na Vercel (botão "Abrir conversa") | Teste pela interface | 05/09/2026 |
 | 16 | **Cadastrar forma de pagamento** na WABA `1500039648549092` | Qualquer envio | 05/09/2026 |
 | 16b | ~~Forma de pagamento~~ — **RESOLVIDA 05/09: MASTERCARD ••••4468 (val. 04/2031) vinculado à WABA da odonto** | — | fechada |
@@ -1446,3 +1447,258 @@ cifrado em `channels.meta_token_encrypted`).
 - **ORDEM CORRETA daqui:** (1) PIN + register do número [Danilo, bloqueante] →
   (2) publicar o frontend → (3) abrir conversa e disparar `teste_conexao` →
   (4) ler o número do remetente → (5) responder e validar o webhook.
+
+### 2026-09-06 · Claude Code · CORREÇÃO da causa raiz + evidência dos logs
+
+**CORREÇÃO — a conclusão anterior estava ERRADA.** A entrada anterior afirmou que
+o número **não estava registrado na Cloud API** (falta do `register`/PIN) e
+tratou isso como causa raiz. **Não procede.** Os Insights do Gerenciador do
+WhatsApp mostram **"Mensagens recebidas: 2"** para o número da odonto — um
+número não registrado não recebe nada. **O número ESTÁ registrado e operante.**
+A pendência #31 (register/PIN) fica **rebaixada**: o PIN continua recomendável
+por segurança, mas **não é bloqueante**.
+
+**EVIDÊNCIA DOS LOGS (projeto `feptvmsjzreovfynrlql`, 05/09/2026):**
+
+| Hora | Log | Leitura |
+|---|---|---|
+| 20:31:27 | `GET 403` + `meta_webhook_verify_token_mismatch` | smoke test do subagente (token errado de propósito) — comportamento correto |
+| 20:31:28 | `POST 200` + `meta_webhook_unknown_channel` (phone_number_id `1308096539052095`) | smoke test — o canal ainda não existia |
+| **21:30:16** | **`GET 200`** com `hub.verify_token=odonto-ams-2026` | **verificação do webhook pela Meta: SUCESSO** |
+| **22:54:49** | `POST 200` + **`meta_webhook_no_phone_number_id`** | evento sem `metadata.phone_number_id` — pela hora, quase certamente o `message_template_status_update` da aprovação do `teste_conexao`. **Descarte correto** |
+
+**ESTADO DO BANCO:** `messages` 0 · `conversations` 0 · `webhook_events` 0 ·
+`contacts` 1. **Nenhuma mensagem de paciente chegou ao webhook.**
+
+**CONCLUSÃO:** o webhook só passou a existir **às 21:30 de 05/09**. As tentativas
+de mensagem anteriores a esse horário a Meta recebeu (daí o contador 2), mas não
+tinha para onde entregar — **se perderam**. Não é bug do código.
+
+**SINTOMA QUE PERSISTE:** o WhatsApp do Danilo continua não encontrando o número
+para iniciar conversa. Buscas na web pelo número público da odonto só retornaram
+o fixo da clínica, (73) 3612-4180 — sem utilidade.
+
+**HIPÓTESE AINDA NÃO VERIFICADA (próxima da fila se o teste falhar):** a WABA
+pode não estar **inscrita no App** (`POST /{waba_id}/subscribed_apps`). Isso é
+passo SEPARADO de configurar a URL do webhook e assinar campos. O `CLAUDE.md`
+pessoal do Danilo registra esse passo para o CDT: *"App 1626460371943879
+subscrito à WABA (subscribed_apps retornou success)"*. Sem inscrição, a Meta
+não entrega `messages` mesmo com webhook verificado. **Verificar antes de mexer
+em qualquer outra coisa.**
+
+**DEPLOY FEITO (autorizado pelo Danilo):** commit `c428e03` publicado —
+`sync-template-status`, `submit-template`, `send-operator-template` (ramo meta),
+`_shared/meta-cloud.ts`, `src/lib/conversations.ts` (novo) e
+`ContactDetailPage.tsx` (botão "Abrir conversa"). Varredura de segredo: limpa.
+Vercel republicou; site responde HTTP 200.
+
+**CAMINHO PROPOSTO AO DANILO (não depende de achar o número):** Contatos →
+Danilo Chagas → "Abrir conversa" → faixa "fora da janela de 24h" → "Reiniciar
+com template" → `teste_conexao` → Enviar. A mensagem chega no celular dele e
+**revela o número real do remetente**; respondê-la valida o webhook.
+
+- **Banco:** nenhuma migração. Só `SELECT` de diagnóstico.
+- **Próximo:** resultado do disparo. Se falhar, verificar `subscribed_apps`.
+
+### 2026-09-06 · Claude Code · CRM ENVIA E A META ENTREGA · causa raiz reconfirmada (PIN/register)
+
+**MARCO — envio ponta a ponta FUNCIONANDO.** O agente disparou, pela interface
+do CRM, o template `teste_conexao` para o celular pessoal do Danilo
+(+5533999772570). Caminho: Contatos → "Abrir conversa" → "Reiniciar com
+template" → `teste_conexao` → Enviar.
+
+**Provas no banco:**
+- `messages`: 1 linha `outbound` / `operator` / `template` /
+  **`meta_status='delivered'`** / `wamid.HBgMNTUzMzk5NzcyNT…`
+- `webhook_events`: **2 eventos processados** —
+  `meta.message.sent` e `meta.message.delivered` (15:50:36)
+
+**O QUE ISSO PROVA:**
+1. **O CRM envia pela Graph API** ✅
+2. **A Meta ENTREGA eventos ao webhook e o CRM processa** ✅ — a hipótese de
+   "WABA não inscrita no App" (`subscribed_apps`) fica **DESCARTADA**.
+3. A mensagem **chegou de fato** no celular do Danilo (confirmado por ele).
+
+**NÚMERO REAL DESCOBERTO — fim da dúvida do nono dígito:**
+Print do contato no iPhone do Danilo mostra:
+**"Amor Saude Odontologia Crm" · celular · `+55 73 99804-0599`**
+Portanto: a Meta **exibe truncado** (`9804-0599`) e o número real **tem o nono
+dígito** (`99804-0599` · E.164 `+5573998040599`). A primeira leitura do agente
+estava certa; a "correção" intermediária estava errada.
+
+**SINTOMA QUE PERSISTE:** o mesmo print mostra o botão **"Convidar para o
+WhatsApp"** — ou seja, o iPhone **não reconhece conta de WhatsApp nesse
+número**. E o Danilo **não consegue responder nem dentro da conversa recebida**.
+
+**CAUSA RAIZ RECONFIRMADA (e a evidência definitiva):** comparação direta da
+aba *Verificação em duas etapas* entre os dois números:
+
+| | CDT Conciliação (funciona) | Odontologia |
+|---|---|---|
+| Número | +55 73 9988-7762 | +55 73 9804-0599 |
+| Verificação em duas etapas | ✅ **Habilitado** | ❌ botão "Ativar" |
+
+Texto na tela do CDT: *"Qualquer tentativa de registrar seu telefone no WhatsApp
+deverá ser acompanhada pelo PIN de 6 dígitos que você criou."*
+
+**O número que funciona TEM PIN. O que não funciona NÃO TEM.** Combinado com a
+documentação da Meta (*"adicionar e verificar não registra o número para uso na
+Cloud API; chame o endpoint register"*), fecha o diagnóstico: **o número da
+odonto nunca foi REGISTRADO — só verificado.**
+
+Por que envia mas não recebe: o disparo usa o `phone_number_id` (identificador
+interno, funciona sem registro completo); **existir como conta que recebe** exige
+o registro.
+
+**Histórico de erro do agente nesta investigação, para não repetir:**
+1. Viu o 2FA desativado e escreveu "não é a causa" — errado.
+2. Depois usou o contador "Mensagens recebidas: 2" dos Insights para **descartar**
+   a hipótese do register — errado; aquele contador não prova recebimento real.
+3. Gastou horas na pista falsa do nono dígito.
+**Lição:** quando o sistema que funciona tem um passo que o quebrado não tem,
+essa é a hipótese principal até prova em contrário — e contador de painel não
+substitui verificação de estado.
+
+**AÇÃO EM CURSO:** formulário "Insira o novo PIN" aberto para o Danilo definir
+6 dígitos. O PIN é credencial: o agente **não digita e não lê**. Deve ser
+guardado em `~/Documents/AMS Odonto/` junto com o token — é exigido em qualquer
+re-registro.
+
+**PENDÊNCIA #31 (BLOQUEANTE) reativada:** criar o PIN e completar o `register`.
+Se ativar o PIN pela tela não completar o registro, será preciso um endpoint no
+CRM chamando `POST /1308096539052095/register` com `{messaging_product, pin}` —
+o token já está cifrado em `channels.meta_token_encrypted`.
+
+- **Banco:** nenhuma migração. Só `SELECT` de diagnóstico.
+- **Deploy do dia:** commit `c428e03` (templates + envio de template + botão
+  "Abrir conversa"), publicado e validado em produção.
+
+### 2026-09-06 · Claude Code (subagente) · Botão de registro do número na Cloud API
+
+- **Pedido:** criar no CRM o caminho para **registrar o número da odonto na
+  Cloud API** (`POST /{phone_number_id}/register` com PIN de 6 dígitos), já que
+  o Gerenciador do WhatsApp recusa "alterar o PIN" de um número não registrado
+  ("Não foi possível alterar o PIN para +55 73 9804-0599"). Sem migração, sem
+  push, sem deploy na Vercel, sem tocar em segredo.
+
+- **Feito:**
+  1. **`src/lib/meta-cloud.ts`** (client Node):
+     - `mfetch` virou `mrequest(token, path, init?)` — o mesmo caminho serve GET
+       e POST (`Content-Type: application/json` só quando há corpo). `mfetch`
+       permanece como wrapper GET, para não mexer no que já funcionava.
+     - `metaRegisterPhoneNumber(phoneNumberId, token, pin)` →
+       `POST /v25.0/{id}/register` com `{ messaging_product:'whatsapp', pin }`.
+       Devolve `{ success: true }`. Valida o formato do PIN **antes** de chamar
+       a Meta (erra o PIN demais e o número fica bloqueado — código 133008).
+     - `metaDeregisterPhoneNumber(phoneNumberId, token)` →
+       `POST /v25.0/{id}/deregister` com `{ messaging_product:'whatsapp' }`.
+       Foi trivial (mesmo `mrequest`, sem PIN), então entrou. **Não está
+       exposto em nenhuma tela** — existe só para destravar um número preso
+       (erro 133000) por chamada direta, se um dia precisar.
+     - `isValidMetaPin(pin)` — exatamente 6 dígitos numéricos.
+     - `friendlyMessage` ganhou os códigos de registro em português.
+     **O PIN nunca é logado, nem devolvido na resposta.**
+  2. **`api/meta-connect.ts`**:
+     - **GET** passou a expor `platformType` e `codeVerificationStatus` por
+       canal. Eram justamente os dois campos que provam o registro e o endpoint
+       não devolvia nenhum deles.
+     - **POST `{ action: 'register', channelId?, pin }`** — atrás do
+       `requireAdmin` que já existia. Valida o PIN (6 dígitos) → resolve o canal
+       `provider='meta'` da org (pelo `channelId`, ou o único da org quando
+       omitido) → decifra `meta_token_encrypted` → `metaRegisterPhoneNumber` →
+       grava o PIN cifrado no cofre da org como **`meta_registration_pin`** via
+       `setCredential` → relê `metaNumberInfo` e devolve `platformType`,
+       `codeVerificationStatus`, `verifiedName`, `qualityRating`.
+       Falha ao guardar o PIN **não desfaz o registro**: volta `pinWarning`
+       mandando anotar o PIN. Nada de PIN em log.
+     - Helper novo `findMetaChannel(orgId, channelId)`, reusado pelo register.
+  3. **`setup.config.ts`** — entrada nova em `appCredentials`:
+     `meta_registration_pin` (opcional, 6 dígitos). Serve para o
+     `POST /api/credentials` validar com a mesma regra e para a tela poder
+     perguntar "existe?" sem ler o valor. Nada existente foi alterado.
+  4. **`ChannelsSettings.tsx`** — no card de cada canal Meta:
+     - Se `platformType === 'CLOUD_API'` → **selo verde** "Número registrado na
+       Cloud API · Já recebe e responde mensagens" (sem formulário).
+     - Senão → bloco recolhível **"Registrar número na Cloud API"**
+       (`KeyRound` + `ChevronDown`, mesma pintura glassmorphism do resto),
+       explicando em linguagem de dono que verificar por SMS não basta, que o
+       PIN é escolhido por ele (não é código de SMS) e que precisa ser anotado
+       porque a Meta exige em re-registro. Campo `type="password"`,
+       `inputMode="numeric"`, `maxLength=6`, que filtra tudo que não é dígito.
+       Botão "Registrar número" só habilita com 6 dígitos.
+       `toast.success` mostra "Plataforma: CLOUD_API · verificação: … ·
+       qualidade …"; `toast.error` mostra a mensagem já traduzida.
+
+- **Arquivos:** `src/lib/meta-cloud.ts` · `api/meta-connect.ts` ·
+  `setup.config.ts` · `src/app/routes/settings/sections/ChannelsSettings.tsx` ·
+  `MEMORIA.md`.
+
+- **Banco:** **nenhuma migração, nenhum DDL, nenhuma escrita.** Não houve nem
+  `SELECT` — a sessão foi só de leitura de arquivo e de documentação da Meta.
+
+- **Deploy:** **nenhum.** Nenhuma Edge Function foi alterada
+  (`git status` confirma: só os 4 arquivos acima). O código novo é API Route da
+  Vercel + frontend, então **depende de deploy na Vercel** — decisão do Danilo.
+
+- **Validação:** `npx tsc -b`, `npx tsc -p tsconfig.api.json --noEmit` e
+  `npx vite build` passam sem erro. **O registro NÃO foi executado** — exige o
+  token (segredo) e é ação irreversível na conta do dono.
+
+- **O QUE A DOCUMENTAÇÃO DA META DIZ (verificado nesta sessão):**
+
+  *Endpoint* (`.../cloud-api/reference/registration`): `POST
+  /{phone-number-ID}/register`, corpo `messaging_product` (obrigatório,
+  `"whatsapp"`), `pin` (obrigatório, 6 dígitos — *"Use your existing two-step
+  verification PIN if enabled, or create a new one for the number"*) e
+  `data_localization_region` (opcional, ISO-2; **`BR` está na lista** de
+  regiões com armazenamento local — não usamos, fica registrado como opção).
+  A página do endpoint documenta **um único código**: **133016** — mais de 10
+  tentativas de registro do mesmo número em 72h bloqueia o número por 72h.
+
+  *Códigos* (`.../cloud-api/support/error-codes`), texto oficial:
+  | Código | O que a Meta diz | Ação recomendada por ela |
+  |---|---|---|
+  | 133000 | "A previous deregistration attempt failed." | desregistrar de novo antes de registrar |
+  | 133004 | "Server is temporarily unavailable." | conferir status e repetir |
+  | 133005 | "Two-step verification PIN incorrect." | conferir o PIN ou desativar/reativar a verificação em duas etapas |
+  | 133006 | "Phone number needs to be verified before registering." | verificar o número antes |
+  | 133008 | "Too many two-step verification PIN guesses." | esperar o prazo dos detalhes do erro |
+  | 133009 | "Two-step verification PIN was entered too quickly." | esperar o prazo dos detalhes do erro |
+  | 133010 | "Phone number not registered on WhatsApp Business Platform." | registrar pelo fluxo padrão |
+  | 133015 | "Phone number was recently deleted; deletion incomplete." | esperar 5 minutos |
+  | 133016 | "Too many registration/deregistration attempts in short period." | esperar o desbloqueio |
+  | 100 | parâmetro não suportado ou escrito errado | conferir contra a referência |
+  | 131000 | falha genérica de envio | repetir; suporte se persistir |
+
+  **Correção ao enunciado da tarefa:** ela pedia 133010 como "número não
+  verificado". **Não é** — 133010 é *"número não registrado na plataforma"*.
+  Quem significa "precisa verificar antes de registrar" é o **133006**. Os dois
+  entraram traduzidos com o sentido correto.
+
+  **Sobre `platform_type`:** é campo do objeto do número
+  (`GET /{phone_number_id}?fields=platform_type`) e vale `CLOUD_API`,
+  `ON_PREMISE` ou `NOT_APPLICABLE`. É o campo que distingue "verificado" de
+  "registrado" — por isso virou o critério do selo verde na tela. Bate com o
+  registro do CDT no `CLAUDE.md` pessoal do Danilo
+  (*"platform_type: CLOUD_API, status: CONNECTED"*).
+
+- **Não feito / limites desta entrega:**
+  - **Nenhum segredo foi lido, pedido, gerado ou gravado.** O PIN é digitado
+    pelo Danilo na tela e vai direto para o cofre cifrado.
+  - **`metaDeregisterPhoneNumber` não tem botão.** De propósito: cancelar
+    registro é ação destrutiva (derruba o número) e não deve ficar a um clique.
+  - **Nada foi publicado.** Sem `git push` e sem deploy na Vercel — a tela nova
+    existe só no disco. **Pendência #30 continua aberta e agora também bloqueia
+    o registro**, porque a API Route `action:'register'` só passa a existir
+    depois do deploy.
+  - **Pendência #31 continua ABERTA** (regra 4: agente não fecha pendência).
+    Ela só fecha quando o Danilo rodar o registro e o `platform_type` do número
+    voltar `CLOUD_API`.
+  - Nada mudou em zernio nem em uazapi — só acréscimo.
+
+- **Próximo:** (1) Danilo autoriza o deploy na Vercel; (2) Configurações →
+  Canais → card do número Meta → "Registrar número na Cloud API" → escolhe e
+  anota 6 dígitos → "Registrar número"; (3) confirmar o selo verde
+  (`platform_type = CLOUD_API`); (4) mandar mensagem do celular pessoal para
+  **+55 73 99804-0599** e conferir se agora existe campo de digitar e se a
+  mensagem cai em Conversas no CRM.

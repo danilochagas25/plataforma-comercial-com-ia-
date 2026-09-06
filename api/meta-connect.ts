@@ -1,7 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireAdmin } from '../src/lib/admin-auth.js';
 import { decrypt, encrypt, setCredential } from '../src/lib/credentials.js';
-import { MetaCloudError, metaNumberInfo, metaWabaInfo } from '../src/lib/meta-cloud.js';
+import {
+  MetaCloudError,
+  isValidMetaPin,
+  metaNumberInfo,
+  metaRegisterPhoneNumber,
+  metaWabaInfo,
+} from '../src/lib/meta-cloud.js';
 import { setupConfig } from '../setup.config.js';
 
 // ============================================================================
@@ -12,7 +18,13 @@ import { setupConfig } from '../setup.config.js';
 // (whatsapp_hub.channels, provider='meta') com o token do Usuário do Sistema
 // cifrado na própria linha (meta_token_encrypted).
 //
-//  GET  → lista os canais Meta da org com o status do número na Graph API.
+//  GET  → lista os canais Meta da org com o status do número na Graph API
+//         (inclui platform_type e code_verification_status: são eles que
+//         provam se o número foi REGISTRADO na Cloud API, não só verificado).
+//  POST { action: 'register', channelId?, pin } → registra o número na Cloud
+//         API (POST /{phone_number_id}/register). O PIN de 6 dígitos é
+//         escolhido pelo dono e fica cifrado no cofre da org
+//         (meta_registration_pin) — perder o PIN trava qualquer re-registro.
 //  POST → cria/atualiza um canal:
 //         { channelId?, label?, phone?, wabaId?, phoneNumberId?, token?,
 //           appSecret?, verifyToken? }
@@ -114,6 +126,10 @@ async function handleGet(orgId: string, res: ApiResponse) {
       let status: string | null = null;
       let verifiedName: string | null = null;
       let qualityRating: string | null = null;
+      // platform_type = 'CLOUD_API' é a prova de que o número foi REGISTRADO
+      // (verificar por SMS não registra). Sem ele o número não recebe mensagem.
+      let platformType: string | null = null;
+      let codeVerificationStatus: string | null = null;
       try {
         if (ch.meta_phone_number_id && ch.meta_token_encrypted) {
           const info = await metaNumberInfo(
@@ -124,6 +140,8 @@ async function handleGet(orgId: string, res: ApiResponse) {
           status = info.codeVerificationStatus;
           verifiedName = info.verifiedName;
           qualityRating = info.qualityRating;
+          platformType = info.platformType;
+          codeVerificationStatus = info.codeVerificationStatus;
         } else {
           status = 'não configurado';
         }
@@ -142,6 +160,8 @@ async function handleGet(orgId: string, res: ApiResponse) {
         status,
         verifiedName,
         qualityRating,
+        platformType,
+        codeVerificationStatus,
       };
     }),
   );
@@ -155,8 +175,107 @@ async function handleGet(orgId: string, res: ApiResponse) {
   });
 }
 
+// Resolve o canal Meta alvo: pelo id quando informado, senão o único da org.
+async function findMetaChannel(
+  orgId: string,
+  channelId: string,
+): Promise<ChannelRow | null> {
+  if (channelId) {
+    const { data, error } = await channelsTable()
+      .select(CHANNEL_COLUMNS)
+      .eq('id', channelId)
+      .eq('org_id', orgId)
+      .eq('provider', 'meta')
+      .maybeSingle();
+    if (error) throw error;
+    return (data as ChannelRow | null) ?? null;
+  }
+  const { data, error } = await channelsTable()
+    .select(CHANNEL_COLUMNS)
+    .eq('org_id', orgId)
+    .eq('provider', 'meta')
+    .order('created_at');
+  if (error) throw error;
+  const rows = (data ?? []) as ChannelRow[];
+  return rows.length === 1 ? rows[0] : null;
+}
+
+// ── POST { action: 'register' } ──
+// Registra o número na Cloud API. Só depois disso ele existe como conta de
+// WhatsApp (recebe mensagem, aparece na busca, tem campo de digitação).
+// O PIN nunca é logado, nem em console.error, nem devolvido na resposta.
+async function handleRegister(orgId: string, body: Record<string, unknown>, res: ApiResponse) {
+  const pin = str(body.pin);
+  const channelId = str(body.channelId);
+
+  // Valida o formato antes de gastar chamada na Meta — PIN errado demais
+  // bloqueia o número por tempo (erro 133008).
+  if (!isValidMetaPin(pin)) {
+    return res.status(400).json({
+      success: false,
+      message: 'O PIN precisa ter exatamente 6 dígitos numéricos (só números, sem espaço).',
+    });
+  }
+
+  const channel = await findMetaChannel(orgId, channelId);
+  if (!channel) {
+    return res.status(404).json({
+      success: false,
+      message: 'Canal da Meta não encontrado. Conecte o número antes de registrar.',
+    });
+  }
+  if (!channel.meta_phone_number_id || !channel.meta_token_encrypted) {
+    return res.status(400).json({
+      success: false,
+      message: 'Este canal não tem ID do número ou token de acesso salvo. Edite o canal antes de registrar.',
+    });
+  }
+
+  const token = decrypt(channel.meta_token_encrypted);
+  await metaRegisterPhoneNumber(channel.meta_phone_number_id, token, pin);
+
+  // Guarda o PIN cifrado no cofre da org: sem ele, qualquer re-registro futuro
+  // deste número fica travado. Falha aqui não desfaz o registro, só avisa.
+  let pinSaved = false;
+  let pinWarning: string | null = null;
+  try {
+    await setCredential(orgId, 'meta_registration_pin', pin);
+    pinSaved = true;
+  } catch {
+    pinWarning =
+      'O número foi registrado, mas não foi possível guardar o PIN no cofre. Anote o PIN em local seguro: ele é exigido em qualquer novo registro.';
+  }
+
+  // Estado atualizado do número — é aqui que platform_type vira CLOUD_API.
+  let info: Awaited<ReturnType<typeof metaNumberInfo>> | null = null;
+  let infoWarning: string | null = null;
+  try {
+    info = await metaNumberInfo(channel.meta_phone_number_id, token);
+  } catch (err) {
+    infoWarning = err instanceof MetaCloudError
+      ? err.message
+      : 'Registro concluído, mas não foi possível reler o estado do número na Meta.';
+  }
+
+  return res.status(200).json({
+    success: true,
+    channelId: channel.id,
+    registered: true,
+    pinSaved,
+    pinWarning,
+    infoWarning,
+    phoneNumberId: channel.meta_phone_number_id,
+    status: info?.codeVerificationStatus ?? null,
+    verifiedName: info?.verifiedName ?? null,
+    qualityRating: info?.qualityRating ?? null,
+    platformType: info?.platformType ?? null,
+    codeVerificationStatus: info?.codeVerificationStatus ?? null,
+  });
+}
+
 async function handlePost(orgId: string, req: ApiRequest, res: ApiResponse) {
   const body = (req.body ?? {}) as Record<string, unknown>;
+  if (str(body.action) === 'register') return handleRegister(orgId, body, res);
   const channelId = str(body.channelId);
   const wabaIdInput = str(body.wabaId);
   const label = str(body.label) || 'WhatsApp Meta (oficial)';
