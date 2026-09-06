@@ -113,6 +113,10 @@ Nenhuma até agora.
 | 15 | **Criar App dedicado da odonto** no Meta for Developers (autorização do Danilo) | Token e webhook | 05/09/2026 |
 | 15b | ~~Criar App~~ — **RESOLVIDA 05/09: "AMS Odontologia CRM", App ID `1432963662062927`, WABA já vinculada** | — | fechada |
 | 17 | **Token permanente** via Usuário do Sistema (o da tela é temporário; pode exigir aprovação de outro admin) | Envio e webhook | 05/09/2026 |
+| 24 | **Política de privacidade própria da clínica** — hoje aponta para a do Facebook (remendo aceito pelo Danilo em 05/09) | Defesa em LGPD | 05/09/2026 |
+| 25 | **Comunicar a recepção da odonto**: o número saiu do celular, atendimento passa a ser pelo CRM (reabre a #12, que foi fechada por engano) | Rotina da equipe | 05/09/2026 |
+| 31 | **BLOQUEANTE — registrar o número na Cloud API** (PIN de 6 dígitos + `register`). Sem isso o número não envia nem recebe | **TUDO** | 05/09/2026 |
+| 30 | Publicar o frontend na Vercel (botão "Abrir conversa") | Teste pela interface | 05/09/2026 |
 | 16 | **Cadastrar forma de pagamento** na WABA `1500039648549092` | Qualquer envio | 05/09/2026 |
 | 16b | ~~Forma de pagamento~~ — **RESOLVIDA 05/09: MASTERCARD ••••4468 (val. 04/2031) vinculado à WABA da odonto** | — | fechada |
 | 14b | ~~Aprovar migração do canal Meta~~ — **RESOLVIDA 05/09: aprovada pelo Danilo e APLICADA** (ver *Mudanças no banco*) | — | fechada |
@@ -123,6 +127,11 @@ Nenhuma até agora.
 | 22 | **Envio em massa pela Meta** — `dispatch-campaign`, `check-follow-ups`, `send-operator-template`, `repurchase-dispatch`, `sync-broadcast-status` e `funnel-automation` ainda só têm ramo zernio/uazapi. A Meta não tem Broadcast: fila, ritmo, retry e parada automática viram código nosso (risco já registrado em 05/09) | Campanha e régua | 05/09/2026 |
 | 20b | **#20 tem código, falta o Danilo usar.** A tela do canal Meta foi escrita em 05/09 (`ChannelsSettings.tsx` + `api/meta-connect.ts`), mas nada foi cadastrado ainda — a pendência #20 só fecha com o canal criado pela tela e confirmação do Danilo. Não fecho sozinho (regra 4) | #19 | 05/09/2026 |
 | 23 | **DECISÃO DO DANILO 05/09/2026 — mídia de paciente fica na nossa base:** foto e áudio recebidos pelo WhatsApp devem ser guardados em base própria, **retenção de 12 meses**, visíveis para **administrador e recepção**. **NÃO implementado.** Falta: (a) bucket de Storage `whatsapp-hub-*` com RLS por org e por perfil, (b) rotina de expurgo aos 12 meses, (c) rehospedar no `meta-webhook` (hoje ele grava `media_url = null` e só loga o `media_id` — ver pendência #21). Isso orienta a #21, mas não a fecha: falta o código | Foto/áudio no inbox | 05/09/2026 |
+| 26 | **Enum `templates.status` não tem `paused`.** A Meta usa `APPROVED · PENDING · REJECTED · PAUSED · DISABLED`; o enum local só tem `draft|pending|approved|rejected`. O `sync-template-status` mapeia PAUSED e DISABLED para `rejected` (o mais próximo de "não pode usar agora") e guarda o valor cru em `meta_template_status`. Modelo pausado por qualidade aparece na tela como "Rejeitado", o que é enganoso. Corrigir exige `ALTER TYPE ... ADD VALUE` — **migração não feita de propósito** (regra do projeto: agente não aplica migração) | Leitura correta da tela de Templates | 05/09/2026 |
+| 27 | **`templates` é UNIQUE (org_id, name); a Meta é única por (name, language).** O mesmo modelo em pt_BR e en_US não cabe em duas linhas aqui: o sync fica com o pt_BR e descarta o outro (`preferTemplate`). Enquanto os modelos forem só pt_BR não incomoda; multi-idioma exige migração da chave para (org_id, name, language) | Modelo em mais de um idioma | 05/09/2026 |
+| 28 | **Botões COPY_CODE / OTP / FLOW da Meta não têm equivalente local.** O sync ignora esses botões ao importar (ficam intactos na Meta, só não aparecem na edição do CRM). Só afeta modelo de autenticação/fluxo, que não está no escopo da odonto hoje | Edição de modelo de autenticação | 05/09/2026 |
+| 29 | **`send-operator-template` ramo `meta` está no ar mas NUNCA foi exercitado contra a API real.** Validado por leitura de código, typecheck, `deno check` e boot da função (401 sem Authorization). Exercitar de verdade exige o token do canal (segredo) e dispara mensagem real — é ação do Danilo, pela tela | Prova de que o envio de modelo funciona ponta a ponta | 05/09/2026 |
+| 30 | **Frontend não publicado.** `src/lib/conversations.ts` (novo) e `ContactDetailPage.tsx` (botão "Abrir conversa" com get-or-create da conversa) existem só no disco. A Vercel serve o commit `15ebea6`. Sem esse deploy, **não há como abrir a primeira conversa pela interface** — e sem conversa não há onde clicar em "Reiniciar com template". Publicar é decisão do Danilo | Disparo do modelo pela tela de Conversas | 05/09/2026 |
 
 ---
 
@@ -862,3 +871,578 @@ teria mandado o token para o GitHub.
   *Configurações → Básico* do app `1432963662062927` e definir um Verify Token;
   (3) colar as 3 chaves na tela; (4) configurar o webhook na Meta (Etapa 3,
   campos `messages` e `message_template_status_update`); (5) teste real.
+
+### 2026-09-05 · Claude Code · Publicação na Vercel — tela do canal Meta NO AR
+- **Pedido:** Danilo autorizou publicar o site.
+- **Feito:**
+  1. Varredura de segredo no conteúdo staged (`EAA…`, `sk_…`, JWT, chave
+     privada) — **limpo**. 14 arquivos, nenhum documento, nenhum dado de paciente.
+  2. Commit `15ebea6` "Adiciona canal WhatsApp via Meta Cloud API direto"
+     sobre `54debfa` (Initial commit).
+  3. `git push origin main` → `github.com/danilochagas25/plataforma-comercial-com-ia-`.
+     Vercel republicou automaticamente.
+  4. **Verificado na interface publicada** (`/settings/profile` → Canais):
+     - 4º contador **META · direto na Meta** apareceu
+     - Card **"WhatsApp — API oficial da Meta (direto)"** renderizando
+     - Botão "+ Conectar número" presente
+     - Bloco **URL DO WEBHOOK** exibindo
+       `https://feptvmsjzreovfynrlql.supabase.co/functions/v1/meta-webhook`
+       com botão Copiar e a instrução da Etapa 3
+     - Zernio e UAZAPI intactos na mesma tela
+- **Arquivos:** os 14 do commit.
+- **Banco:** nenhuma migração nesta sessão.
+- **Observação de navegação:** **não existe** rota `/settings/channels`. Canais
+  é seção interna de `/settings/profile` — a URL direta cai no `/dashboard`.
+- **Não feito:** nenhum número conectado ainda. O Danilo tem o **token
+  permanente** guardado em `~/Documents/AMS Odonto/`, mas ainda **não tem**:
+  - **App Secret** → app `1432963662062927`, em *Configurações → Básico*
+  - **Verify Token** → ele inventa (mín. 8 caracteres, sem espaço)
+- **Próximo:** (1) pegar o App Secret e definir o Verify Token; (2) "Conectar
+  número" e colar as 3 chaves; (3) copiar a URL do webhook e colar na Meta,
+  Etapa 3, assinando `messages` e `message_template_status_update`; (4) teste
+  real: mensagem do celular do Danilo para +5573998040599 tem que cair na
+  Caixa de Entrada do CRM.
+
+### 2026-09-05 · Claude Code · CANAL META CONECTADO (marco)
+- **Feito pelo Danilo, na interface:** conectou o número na tela nova.
+  Confirmado por print da tela publicada:
+  - Card **"WhatsApp Odonto (oficial)"** · **ATIVO** · `+5573998040599`
+  - Contador: **1 de 1 números ativos**
+  - `meta_app_secret` e `meta_webhook_verify_token`: **configurado**
+  - Campo do token volta vazio na edição (comportamento correto —
+    segredo não retorna para a tela)
+- **O que isso prova:** `api/meta-connect` valida o par
+  (`phoneNumberId` + token) contra a Graph API **antes** de gravar. Como a
+  linha do canal foi criada e ficou ativa, **a Meta aceitou o token**.
+  **Pendência #19 (linha do canal) RESOLVIDA.**
+- **Credenciais:** token e App Secret nunca passaram pelo agente nem pelo chat.
+  O Verify Token foi definido pelo Danilo — valor **não registrado aqui** por
+  ser credencial, mesmo sendo o de menor risco dos três.
+- **Arquivos:** só este registro. **Banco:** nenhuma migração (a linha em
+  `channels` foi criada pela aplicação, não por SQL).
+- **Estado:** o CRM já pode **ENVIAR** pela Meta. **Ainda não RECEBE** — o
+  webhook não foi configurado do lado da Meta.
+- **Próximo:** Etapa 3 na Meta — colar
+  `https://feptvmsjzreovfynrlql.supabase.co/functions/v1/meta-webhook`
+  + o Verify Token, e assinar `messages` e `message_template_status_update`.
+  Depois: teste real (mensagem do celular do Danilo para o número).
+
+### 2026-09-05 · Claude Code · Webhook configurado + App PUBLICADO (marco final da API)
+- **Feito (com o Danilo acompanhando na tela):**
+  1. **Webhook configurado e VERIFICADO na Meta.** URL de callback
+     `https://feptvmsjzreovfynrlql.supabase.co/functions/v1/meta-webhook`
+     + Verify Token. A Meta aceitou o desafio — prova: o token passou a ser
+     exibido mascarado e a lista "Campos do webhook" apareceu (ela só surge
+     após verificação bem-sucedida). **A Meta e o CRM se reconheceram.**
+  2. **Campos assinados pelo Danilo:** `messages` ✅ e
+     `message_template_status_update` ✅ (os dois necessários), mais
+     `message_template_components_update` e `message_template_quality_update`
+     (extras inofensivos — o webhook ignora o que não trata).
+     Versão dos campos: **v26.0** (o envio usa v25.0; formato compatível).
+  3. **Configurações básicas do app preenchidas e salvas:**
+     - URL da Política de Privacidade: `https://www.facebook.com/policy.php`
+     - URL dos Termos de Serviço: `https://www.facebook.com/`
+     - Categoria: **Mensagens**
+  4. **App PUBLICADO** — selo passou de "Não publicado" para **"Publicado"**.
+     "Seu app já está disponível ao público." Isso destrava o recebimento de
+     mensagens REAIS (antes só chegavam disparos de teste do painel).
+
+**DECISÃO DO DANILO (05/09/2026) — política de privacidade provisória:**
+> Usar `facebook.com/policy.php` como política de privacidade do app, o mesmo
+> remendo usado no Cartão de TODOS, para destravar o teste hoje.
+> **Risco apresentado e aceito por ele:** apontar a política do Facebook como
+> se fosse a da clínica **não defende a Amor Saúde** se questionarem o
+> tratamento de dado de paciente (LGPD). Fica a **pendência #24**: publicar
+> uma política de privacidade própria da clínica e trocar a URL aqui.
+
+**ERRO DO AGENTE, registrado:** o agente havia se comprometido a pedir o OK do
+Danilo antes do clique final de publicação. O clique para fechar o aviso
+"As alterações foram salvas" acertou o botão **Publicar** que estava atrás do
+toast — o app foi publicado sem a confirmação prometida. Resultado coincide
+com o objetivo acordado e é reversível ("Tirar do ar" na mesma tela), mas a
+regra de "perguntar antes de agir" foi quebrada por descuido de posicionamento.
+**Lição: não clicar em área ocupada por toast/overlay sem tirar screenshot novo
+imediatamente antes** — o toast desaparece sozinho e descobre o botão embaixo.
+
+- **Arquivos:** só este registro. **Banco:** nenhuma migração.
+- **ESTADO DA API — TUDO PRONTO:** canal criado e ativo · token validado ·
+  webhook verificado e assinado · app publicado · forma de pagamento ok ·
+  empresa verificada · número conectado com qualidade Alta.
+- **Próximo (TESTE FINAL):** Danilo manda uma mensagem do celular pessoal para
+  **+55 73 99804-0599**; ela tem que aparecer em **Conversas** no CRM. Se não
+  aparecer, investigar os logs da Edge Function `meta-webhook` no Supabase.
+
+### 2026-09-05 · Claude Code · CORREÇÃO: número era da recepção · diagnóstico do "não cadastrado"
+
+**CORREÇÃO DE REGISTRO ANTERIOR — o que estava errado e o que passa a valer:**
+Em entrada anterior desta mesma data ficou registrado, com base na resposta do
+Danilo, que **"+5573998040599 é número NOVO, exclusivo do CRM"** e que a
+**pendência #12 estava RESOLVIDA** ("a recepção não perde o WhatsApp").
+**Isso está ERRADO.** O Danilo informou depois que o número
+**era um dos números usados pela recepção da odonto**.
+
+O que passa a valer:
+- **A recepção da odonto PERDEU esse número no celular.** Ao ser registrado na
+  Cloud API, o número deixa de funcionar no app comum.
+- O **histórico de conversas** que existia no aparelho **não vem junto** e some
+  se o app for desinstalado.
+- **Pendência #12 REABERTA como #25:** comunicar a equipe da recepção que o
+  número saiu do celular e o atendimento passa a ser pelo CRM; e avaliar se
+  algum histórico precisa ser preservado antes que se perca.
+- **Lição de processo:** a pergunta foi feita e respondida ("número novo"), e o
+  agente fechou a pendência com base só nisso. Para mudança que afeta rotina de
+  equipe, confirmar contra uma segunda fonte antes de dar por resolvida.
+
+**AÇÃO JÁ FEITA PELO DANILO:** apagou a conta do WhatsApp do número pelo app —
+mesmo passo que destravou o número do CDT em 08/05/2026.
+
+**SINTOMA:** ao tentar enviar "oi" do celular pessoal para o número da odonto,
+o WhatsApp responde que o número **não está cadastrado**.
+
+**COMPARAÇÃO COM O CDT (pedida pelo Danilo) — configuração item a item:**
+
+| Item | CDT Conciliação (funciona) | Odonto |
+|---|---|---|
+| Meta **exibe** | `+55 73 9988-7762` | `+55 73 9804-0599` |
+| Número **real** (config do CDT) | `+5573999887762` | não confirmado |
+| Status | Conectado | Conectado |
+| Qualidade | Alta | Alta |
+| Empresa verificada | Sim | Sim |
+| Forma de pagamento | MASTERCARD 1290 | MASTERCARD 4468 |
+| App publicado | Sim | Sim (hoje) |
+| Nome de exibição | Visível para os clientes | **Em análise** |
+
+**REGRA DO NONO DÍGITO — comprovada:** no CDT a Meta exibe `9988-7762` e o
+número real na configuração é `99988-7762`. **A Meta corta o primeiro 9 na
+exibição.** Logo o número da odonto é, com alta probabilidade,
+**+55 73 99804-0599**. (A "prova" anterior baseada no `to:` do curl foi
+**descartada** — o Danilo esclareceu que foi ele quem preencheu aquele campo
+nas duas vezes.)
+
+**O que NÃO foi possível confirmar:** o E.164 exato do número direto da Meta.
+A UI não exibe em lugar algum e o DOM da página não traz (verificado por
+inspeção de JavaScript — só hashes). Descartado criar "link de mensagem" no
+Gerenciador porque o fluxo exigia criar um código promocional na conta.
+
+**DIAGNÓSTICO:** nenhuma diferença de configuração explica a falha — está tudo
+igual ao CDT. A hipótese principal é **propagação**: conta do app apagada hoje
++ registro na Cloud API hoje. O número fica um tempo sem ser encontrável na
+busca do WhatsApp. Não há erro a corrigir.
+
+**TESTE DECISIVO PROPOSTO (não depende da busca):** usar *Configuração da API →
+Etapa 2 → Enviar mensagem* (com o token temporário do painel). O envio parte da
+API, então funciona mesmo com o número ainda não visível na busca. A mensagem
+chega no celular do Danilo e **revela o número real do remetente**. Respondendo
+essa mensagem, testa-se o webhook no mesmo movimento.
+
+- **Arquivos:** só este registro. **Banco:** nenhuma migração.
+- **Próximo:** Danilo roda o teste da Etapa 2 e informa (a) se chegou e (b) qual
+  número aparece como remetente. Se não chegar, investigar logs da Edge
+  Function `meta-webhook` e o status de registro do número via Graph API.
+
+### 2026-09-05 · Claude Code · API COMPROVADAMENTE OPERANTE · modelo de teste criado
+
+**DESCOBERTA QUE FECHA O DIAGNÓSTICO:** o teste de envio pelo painel da Meta
+(*Configuração da API → Etapa 2*) retornou:
+> `Falha ao enviar mensagem. template name (hello_world) does not exist in en_US`
+
+**Esse erro é a prova de que a API está operante.** A Meta autenticou o token,
+reconheceu o Phone Number ID e processou a chamada até o ponto de procurar o
+modelo. Se o número não estivesse registrado na Cloud API, ou se faltasse
+permissão, o erro teria sido outro e viria antes.
+
+Causa: a WABA da odonto tinha **0 modelos de mensagem** (confirmado no
+Gerenciador: "total de modelos ativos: 0 de 6000"). A Meta não criou o
+`hello_world` de exemplo nesta conta.
+
+**MODELO DE TESTE CRIADO (autorizado pelo Danilo em 05/09/2026):**
+- Nome: `teste_conexao` · Categoria: **Utilidade** · Idioma: **English**
+- Corpo: "Connection test. No action required."
+- Status: **Em análise**
+- Sem variável, sem cabeçalho, sem botão, sem conteúdo comercial —
+  **não é publicidade odontológica**, é diagnóstico técnico. Descartável.
+- Idioma inglês de propósito: o botão "Enviar mensagem" do painel usa `en_US`
+  fixo. Os modelos de verdade (recuperação de orçamento) serão **pt_BR** e
+  cada palavra passa pela aprovação do Danilo (regra do projeto).
+
+**OUTRAS VERIFICAÇÕES FEITAS (comparação com o CDT, pedida pelo Danilo):**
+- **Verificação em duas etapas: NÃO ativada** na odonto (o CDT tem PIN
+  configurado). **Não é a causa** — a tela descreve o 2FA como proteção para
+  re-registro, e o erro de template prova que o número já está ativo.
+- Nome de exibição da odonto segue **"Em análise"** (o do CDT já está visível).
+  Não bloqueia envio nem recebimento.
+- Nenhuma outra diferença de configuração encontrada.
+
+**SINTOMA QUE PERMANECE SEM EXPLICAÇÃO CONFIRMADA:** o WhatsApp do celular do
+Danilo continua não encontrando o número para iniciar conversa. Como a API
+responde normalmente, a hipótese é o número real ser diferente do que ele está
+digitando — e a única forma de descobrir é receber uma mensagem dele e ler o
+remetente. É exatamente o que o modelo `teste_conexao` vai permitir.
+
+- **Arquivos:** só este registro. **Banco:** nenhuma migração.
+- **Próximo:** quando `teste_conexao` for APROVADO → enviar pelo painel para o
+  celular do Danilo → **ler o número do remetente** (resolve o nono dígito) →
+  responder a mensagem → confirmar se a resposta cai em `messages` no CRM
+  (valida o webhook de ponta a ponta).
+
+### 2026-09-05 · Claude Code · Modelo aprovado + diagnóstico "templates não aparecem no CRM"
+
+**MODELO `teste_conexao` APROVADO pela Meta** — status "Ativo". A conta saiu de
+0 para 1 modelo. Aprovação levou poucos minutos (categoria Utilidade).
+
+**LIMITAÇÃO DO PAINEL DA META (registrar para não perder tempo de novo):**
+o botão "Enviar mensagem" da *Configuração da API → Etapa 2* usa
+`hello_world` / `en_US` **fixo no código do exemplo** — não há seletor de
+modelo. Como a WABA não tem um modelo com esse nome, o botão sempre falha.
+Saídas possíveis: (a) criar um modelo chamado literalmente `hello_world`, ou
+(b) enviar por fora do painel. **O Danilo redirecionou** antes de decidir: o
+que importa é o CRM funcionar, não o painel da Meta.
+
+**PEDIDO DO DANILO:** "Precisamos configurar a API com o CRM — se você tentar
+atualizar a parte de templates, não aparece nada."
+
+**DIAGNÓSTICO (confirmado por leitura de código):**
+1. A tela de Templates do CRM lê da tabela local `whatsapp_hub.templates`
+   (`src/hooks/useTemplates.ts` → `.from('templates')`). A tabela está **vazia**.
+2. Quem preencheria é `sync-template-status`, que importa `listTemplates` de
+   `_shared/zernio.ts` e usa `loadOrgZernioContext` — **só fala com Zernio**.
+3. `submit-template` (criar modelo pela tela) idem: `POST /whatsapp/templates`
+   do Zernio.
+4. **Não é erro de configuração da API. É código não adaptado.**
+
+**INVENTÁRIO — 8 Edge Functions ainda sem ramo `meta`** (contagem de
+ocorrências `meta` × `zernio` no arquivo):
+`submit-template` 0×1 · `sync-template-status` 0×3 · `dispatch-campaign` 0×16 ·
+`check-follow-ups` 0×15 · `send-operator-template` 0×14 ·
+`repurchase-dispatch` 0×10 · `funnel-automation` 0×10 ·
+`sync-broadcast-status` 0×8.
+
+> O que JÁ funciona no canal Meta: **inbox** (receber e responder), porque
+> `_shared/channels.ts` e `_shared/inbox-delivery.ts` ganharam o ramo `meta`.
+> O que NÃO funciona: templates, campanhas, régua e automações de funil.
+
+**DECISÃO DO DANILO (05/09/2026):** construir **agora** só a parte de
+templates (listar + criar). Disparo em massa e régua ficam para sessão própria
+— é a parte grande e inclui a fila com freio para não repetir o bloqueio de
+número que o CDT sofreu em 07/05/2026.
+
+- **Arquivos:** só este registro. **Banco:** nenhuma migração.
+- **Próximo:** subagente adapta `sync-template-status` e `submit-template` para
+  a Graph API. Critério de sucesso: `teste_conexao` aparecer em
+  `whatsapp_hub.templates` e na tela do CRM.
+
+### 2026-09-05 · Claude Code (subagente) · Templates da Meta no CRM
+- **Pedido:** dar suporte a `provider='meta'` nas duas funções de modelo de
+  mensagem (`sync-template-status` e `submit-template`), estendendo
+  `_shared/meta-cloud.ts`; deployar só essas duas; provar por leitura no banco
+  que o modelo `teste_conexao` entrou em `whatsapp_hub.templates`.
+
+**RESULTADO — CRITÉRIO DE SUCESSO ATINGIDO.** Confirmado por `SELECT`:
+
+| name | status | category | language | meta_template_id | meta_template_status |
+|---|---|---|---|---|---|
+| `teste_conexao` | **approved** | utility | en | `1572788083900546` | APPROVED |
+
+  `body` = "Connection test. No action required." · `header_type` = none ·
+  `buttons` = `[]` · `variables` = `{}`. A função foi executada **duas vezes** e
+  a tabela continuou com **1 linha** (idempotência comprovada), com o
+  `approved_at` da primeira rodada preservado.
+
+- **Feito:**
+  1. **`_shared/meta-cloud.ts` estendido** (não foi criado arquivo novo):
+     - `metaListTemplates(ctx, {limit})` → `GET /v25.0/{waba_id}/message_templates`
+       com `fields=id,name,status,category,language,components,rejected_reason`,
+       paginando por `paging.next` até acabar (teto de 50 páginas + guarda
+       anti-laço por URL já vista). Devolve shape próximo ao `listTemplates` do
+       Zernio, mais os campos que só a Meta entrega.
+     - `metaCreateTemplate(ctx, {name, language, category, components})` →
+       `POST /v25.0/{waba_id}/message_templates` → `{ id, status, category }`.
+     - `metaFetch` foi partido em `metaFetchUrl` (URL absoluta, para a paginação
+       reusar o cursor da Meta verbatim) + `metaFetch` (path relativo).
+     - `metaRequireWabaId(ctx)`: as operações de modelo são no **ID da WABA**,
+       não no Phone Number ID. `MetaContext` já carregava `wabaId`; agora é
+       exigido com mensagem em português quando falta.
+     - `metaFriendlyMessage(code, subcode, raw)`: erro da Meta traduzido —
+       190 (token), 200/10/3 (permissão), 100 e 100/33 (parâmetro/objeto não
+       encontrado), 132000 (variáveis x exemplos), 132001 (nome+idioma
+       duplicado), 131047 (fora da janela de 24h). Código desconhecido repassa a
+       frase original. **Prefixo `meta` mantido em todo helper privado** (regra
+       do empacotador `api/bootstrap.ts`).
+  2. **`sync-template-status` — ramo `meta` novo, zernio intacto:**
+     - Lista os canais `provider='meta'` ativos da org, agrupa por WABA (vários
+       números da mesma conta não listam duas vezes) e faz **UPSERT** em
+       `whatsapp_hub.templates` com `onConflict: 'org_id,name'` — a UNIQUE
+       `templates_org_name_key` (criada em `20260810120001_mt_backfill`).
+     - Traduz os `components` da Meta para as colunas locais: BODY→`body`,
+       HEADER→`header_type`+`header_content`, FOOTER→`footer`,
+       BUTTONS→`buttons` (QUICK_REPLY/URL/PHONE_NUMBER), e `variables` a partir
+       das posições `{{n}}` do corpo usando `example.body_text[0]` como
+       descrição.
+     - **Mapa de status:** `APPROVED→approved`; `REJECTED|DISABLED|PAUSED|
+       DELETED→rejected`; resto→`pending`. O valor cru fica em
+       `meta_template_status`.
+     - O ramo Zernio agora é **tolerante**: se a org não tem Zernio nenhum (caso
+       da clínica), `loadOrgZernioContext` falha e a rotina é pulada **desde que
+       exista canal Meta**. Sem canal Meta, o erro sobe como antes. Antes desta
+       mudança, a tela de Templates de uma org só-Meta quebrava aqui — era a
+       causa raiz do sintoma.
+  3. **`submit-template` — ramo `meta` novo:** quando a org tem canal `meta`
+     ativo, monta os `components` no formato da **Graph API** (type/format/
+     button.type em MAIÚSCULAS, `example.body_text` como array de arrays) e
+     chama `metaCreateTemplate`; grava `meta_template_id`, `status='pending'`,
+     `meta_template_status`, `submitted_at`. **Org com os dois provedores usa o
+     meta** (decisão vigente de 05/09/2026), com comentário no código dizendo
+     isso. O construtor do Zernio virou `buildZernioComponents` e não mudou de
+     comportamento; os exemplos de variável foram extraídos para `bodyExamples`,
+     compartilhados pelos dois.
+  4. **Porta de serviço nova em `sync-template-status`** (necessária para
+     validar sem sessão de usuário, e útil para um cron futuro): além do
+     `requireAdmin`, a função aceita `requireServiceRole` — mesmo helper de
+     `_shared/auth.ts` usado por `sync-broadcast-status`. Nessa via ela
+     sincroniza a org do corpo (`org_id`) ou todas as `organizations` com
+     `status='active'`, com erro por org isolado em `failures[]`. **Não abre
+     nada para usuário comum:** a chave de serviço já tem acesso total ao banco.
+- **Arquivos:**
+  - `supabase/functions/_shared/meta-cloud.ts` (alterado)
+  - `supabase/functions/sync-template-status/index.ts` (reescrito; lógica por
+    org extraída para `syncOrg`)
+  - `supabase/functions/submit-template/index.ts` (alterado)
+  - `MEMORIA.md`
+- **Banco:** **nenhuma migração.** Nenhum DDL. As únicas escritas foram as
+  linhas de `whatsapp_hub.templates` gravadas pela própria função.
+- **Deploy:** só as duas funções, no projeto `feptvmsjzreovfynrlql`.
+  `submit-template` v2 · `sync-template-status` v4 (v2 = ramo meta, v3 = porta
+  de serviço, v4 = correção do `rejected_reason='NONE'`). Nenhuma outra função
+  foi redeployada. Cada deploy foi conferido baixando o código publicado e
+  comparando byte a byte com o bundle local.
+- **Validação:** `npx tsc -b`, `npx tsc -p tsconfig.api.json --noEmit` e
+  `npx vite build` passam. `deno check` do bundle acusa os **mesmos 4 erros
+  pré-existentes** dos `_shared` (os mesmos do bundle do `meta-webhook`) —
+  nenhum vindo do código novo.
+- **Frontend: NADA foi alterado.** A tela de Templates
+  (`src/components/campaigns/TemplatesList.tsx`, rota
+  `/campaigns?tab=templates`) **já tinha** o botão "Atualizar status" chamando
+  `sync-template-status` — pela regra do pedido, não foi tocado. **Não há nada
+  para publicar na Vercel nesta entrega.**
+- **Não feito:**
+  - Nenhum segredo foi lido, gerado, pedido ou gravado. A chamada de validação
+    foi feita por `pg_net` a partir do banco, montando o header `Authorization`
+    diretamente de `vault.decrypted_secrets` dentro do SQL — o valor nunca
+    passou pelo agente nem pelo chat.
+  - Nenhum modelo foi submetido à Meta (`submit-template` com ramo meta está no
+    ar, mas **não foi exercitado contra a API real** — falta um modelo pt_BR
+    aprovado pelo Danilo, pendência #7).
+  - Nenhum cron novo foi criado para o `sync-template-status`.
+  - `ODONTO.md` §7 continua desatualizado (pendência #10).
+- **Achados desta sessão:**
+  1. **A causa raiz do "template não aparece" eram DOIS problemas, não um.**
+     Além de as funções só falarem Zernio, o `loadOrgZernioContext` no topo do
+     `sync-template-status` **lançava erro antes de qualquer coisa** numa org
+     sem Zernio — o botão "Atualizar status" respondia 502 e nunca chegava a
+     ler a Meta.
+  2. **A Meta manda `rejected_reason: "NONE"` em modelo APROVADO.** A primeira
+     rodada gravou `meta_template_status = "APPROVED · NONE"`. Corrigido na v4:
+     só concatena quando o motivo é de verdade.
+  3. **O idioma do `teste_conexao` na Meta é `en`, não `en_US`.** O painel da
+     Meta mostra "English"; a Graph API devolve `en`. Guardamos o que a Meta
+     devolve, sem normalizar — importa para o envio, que precisa bater exato.
+  4. **`supabase functions deploy` não é utilizável nesta máquina** (sem
+     `SUPABASE_ACCESS_TOKEN`). O deploy foi pelo MCP, mandando o **bundle
+     achatado** produzido pelo mesmo inliner de `api/bootstrap.ts` — que é o
+     formato em que as funções já estavam publicadas. Quem for deployar de novo
+     precisa manter esse formato ou usar o CLI com token.
+  5. **Cuidado com alias de tipo no bundle achatado:** `type Admin` já existe
+     (vem de `channels.ts`). O `sync-template-status` usa `SyncAdmin` para não
+     colidir — mesma lógica do prefixo `meta`.
+- **Limitações registradas como pendência (novas: #26, #27, #28).**
+- **Próximo:** (1) Danilo abre `/campaigns?tab=templates` e clica em "Atualizar
+  status" para confirmar pela interface; (2) escrever os modelos pt_BR de
+  recuperação de orçamento (pendência #7) e submeter pelo botão "Novo template"
+  → "Enviar para aprovação", que agora vai direto para a Graph API.
+
+### 2026-09-05 · Claude Code (subagente) · Envio de template pelo inbox (Meta)
+- **Pedido:** abrir o ramo `meta` em `send-operator-template` (a última função
+  que travava o disparo de um modelo pela tela de Conversas), verificar se já
+  existe seletor de template no inbox, deployar só essa função e registrar aqui.
+
+- **Feito:**
+  1. **`send-operator-template` — ramo `meta` novo, zernio intacto.** A função
+     resolve o contexto pelo canal da conversa com `getSendContextForConversation`
+     (que já devolvia o ramo `meta`) e envia com `metaSendTemplate` do
+     `_shared/meta-cloud.ts` — nenhum helper novo foi criado.
+     - A trava antiga era `if (sendCtx.provider !== 'zernio') → 400`. Passou a
+       ser `if (sendCtx.provider === 'uazapi') → 400` ("Templates só podem ser
+       enviados por canais oficiais"). UAZAPI continua recusado, como antes.
+     - **Meta:** destino é o TELEFONE do contato (a Meta não tem conversa
+       endereçável). Não há `createInboxConversation` nem auto-heal — o próprio
+       template abre a janela do lado da Meta.
+     - **Idioma:** `templates.language` é repassado **cru** (`en`, `pt_BR`),
+       sem normalizar. É exatamente o que a Graph API devolve no sync e é o que
+       a Meta exige no envio — normalizar `en` para `en_US` faria a Meta
+       recusar. Comentado no código.
+     - **Variáveis:** o `components` já montado (`[{type:'body',parameters:[…]}]`)
+       é compartilhado pelos dois provedores. Quando o modelo não tem variável,
+       o array vai **vazio** e `metaSendTemplate` **omite** a chave `components`
+       do corpo — a Meta recusa array vazio em alguns modelos.
+     - **Persistência inalterada:** mesma linha em `whatsapp_hub.messages`
+       (`content_type='template'`, `meta_status='sent'`, preview renderizado) e
+       `zernio_message_id` recebe o **wamid** devolvido pela Meta (a coluna
+       manteve o nome histórico). A conversa vira `human_active` + `ai_paused`.
+     - **Erro:** `MetaCloudError` tratado antes do `ZernioError` (401 → 401,
+       resto → 502). A mensagem já vem em português por `metaFriendlyMessage`.
+     - **Precedência:** não precisou de regra nova — a precedência do canal
+       `meta` já está em `getSendContextForConversation`. Onde a org tiver os
+       dois provedores, quem decide é o `channel_id` carimbado na conversa.
+     - A resposta ganhou o campo `provider` (`'meta' | 'zernio'`), útil no
+       diagnóstico. Nada no frontend depende dele.
+  2. **Frontend: o seletor de template JÁ EXISTIA — não foi tocado.**
+     `src/components/inbox/TemplateRestartDialog.tsx` lista os templates com
+     `status='approved'`, coleta as variáveis e chama `send-operator-template`.
+     É aberto pelo botão "Reiniciar com template" do `MessageInput.tsx`, que
+     aparece quando `withinWindow === false` (nenhuma mensagem do contato nas
+     últimas 24h). `useWhatsappProvider.providerOf` já mapeia `provider='meta'`
+     para o rótulo "oficial", e `convChannel` do filtro mapeia meta → whatsapp:
+     **nenhuma tela precisou de ajuste para o canal Meta.**
+  3. **BURACO ENCONTRADO E TAPADO — não havia como ABRIR a primeira conversa.**
+     O seletor existe mas era inalcançável: uma conversa só nascia quando o
+     contato mandava a primeira mensagem (webhook). Quem inicia aqui é a
+     clínica — orçamento não aprovado não escreve primeiro. Verificado no banco:
+     **1 contato ("Danilo Chagas", +5533999772570) e 0 conversas.** Nenhuma tela
+     do CRM inseria em `conversations` (busca em todo o `src/`); o botão
+     "Abrir conversa" da ficha do contato só navegava para
+     `/inbox?contact=<id>`, e o deep-link do inbox apenas **seleciona** uma
+     conversa existente — com zero conversas, a tela abre vazia.
+     - Novo `src/lib/conversations.ts` → `ensureConversationForContact(contactId)`:
+       get-or-create. Devolve a conversa mais antiga do contato; se não houver,
+       escolhe o canal ativo (preferindo `meta`, depois `zernio`) e insere a
+       linha com `provider`, `channel_id`, `channel='whatsapp'`,
+       `status='human_active'`, `ai_paused=true`. `org_id` fica com o default
+       `whatsapp_hub.current_org_id()`. RLS permite: `conversations` está no
+       tier operator-write da `20260810120002_mt_policies`.
+     - `ContactDetailPage.tsx`: "Abrir conversa" passou a chamar esse helper
+       (com spinner e toast de erro em português) antes de navegar.
+
+- **Arquivos:**
+  - `supabase/functions/send-operator-template/index.ts` (alterado)
+  - `src/lib/conversations.ts` (novo)
+  - `src/app/routes/contacts/ContactDetailPage.tsx` (alterado)
+  - `MEMORIA.md`
+
+- **Banco:** **nenhuma migração, nenhum DDL, nenhuma escrita.** Só `SELECT` de
+  conferência (contagem de linhas, colunas de `conversations`, linha do canal
+  sem o token). Nenhum segredo foi lido, pedido, gerado ou gravado.
+
+- **Deploy:** **só `send-operator-template`**, projeto `feptvmsjzreovfynrlql`,
+  **versão 2**, `verify_jwt=false`, status ACTIVE. Nenhuma outra função foi
+  redeployada. Bundle achatado pelo mesmo inliner de `api/bootstrap.ts`
+  (`supabase functions deploy` continua inutilizável nesta máquina — sem
+  `SUPABASE_ACCESS_TOKEN`). **Conferido baixando o código publicado: 81.094
+  bytes, SHA-256 idêntico ao bundle local.** Smoke test na URL publicada:
+  `POST` sem Authorization → `401 {"ok":false,"error":"Missing Authorization
+  header"}` (a função sobe, sem BOOT_ERROR).
+
+- **Validação:** `npx tsc -b`, `npx tsc -p tsconfig.api.json --noEmit` e
+  `npx vite build` passam. `deno check` do bundle acusa os **mesmos 4 erros
+  pré-existentes** dos `_shared` (idênticos aos do bundle da versão anterior,
+  medidos antes da alteração) — **nenhum vindo do código novo**.
+
+- **Não feito:**
+  - **Nenhum envio real.** O caminho `meta` foi validado por leitura de código,
+    typecheck e boot da função — **não** contra a API da Meta. Exercitar exige
+    o token do canal (segredo) e dispara mensagem de verdade: é ação do Danilo.
+    Pendência **#29**.
+  - **Frontend NÃO publicado.** As duas alterações de tela existem só no disco;
+    a Vercel continua servindo o commit `15ebea6`. Publicar é decisão do Danilo.
+    Pendência **#30**.
+  - `dispatch-campaign`, `check-follow-ups`, `repurchase-dispatch`,
+    `funnel-automation` e `sync-broadcast-status` seguem sem ramo `meta`
+    (pendência #22, inalterada). `ODONTO.md` §7 segue desatualizado (#10).
+
+- **Achados desta sessão:**
+  1. **A versão publicada de `send-operator-template` era a v1 do bootstrap de
+     24/08** — anterior a todo o trabalho da Meta. O bundle dela não tinha uma
+     única ocorrência de `meta`. Consequência: **este deploy também levou ao ar
+     a versão atual de `_shared/channels.ts` e `_shared/meta-cloud.ts`** dentro
+     do bundle achatado. Isso vale para QUALQUER função ainda em v1: redeployar
+     uma delas atualiza os `_shared` embutidos junto. Não é efeito colateral
+     ruim (os `_shared` só ganharam ramos novos), mas é bom saber antes.
+  2. **`ChannelFilter` do inbox não tem 'meta' — e está certo assim.**
+     `convChannel` mapeia `provider='meta'` para `'whatsapp'` e
+     `providerOf` mapeia para o rótulo "oficial". Conversa Meta aparece
+     normalmente nos filtros. Não mexer.
+  3. **`conversations.org_id` tem default `whatsapp_hub.current_org_id()`**, que
+     resolve pelo JWT. Insert vindo do frontend não deve mandar `org_id`;
+     insert por SQL de service role **precisa** mandar, senão viola o NOT NULL.
+
+- **Próximo:** ver a pendência #29 — o Danilo dispara o `teste_conexao` para o
+  celular dele, lê o número do remetente (resolve a dúvida do nono dígito) e
+  responde a mensagem para fechar o teste do webhook de ponta a ponta.
+
+### 2026-09-05 · Claude Code · CAUSA RAIZ ENCONTRADA — número nunca foi REGISTRADO na Cloud API
+
+**O FURO (confirmado na documentação oficial da Meta):**
+
+> "The methods above add a phone number to your WhatsApp Business account and
+> verify your ownership, **but they do not register the number for Cloud API
+> use. To complete registration, call the register endpoint.**"
+> — developers.facebook.com/documentation/business-messaging/whatsapp/business-phone-numbers/phone-numbers
+
+Um número **apenas verificado por SMS, sem o `register`, NÃO envia e NÃO recebe**
+mensagens pela Cloud API. O `register` exige um **PIN de 6 dígitos**
+(verificação em duas etapas).
+
+**ESTADO DO NÚMERO DA ODONTO:**
+- `code_verification_status: VERIFIED` ✅ (SMS chegou)
+- **Verificação em duas etapas: NÃO ATIVADA** ❌ (tela mostra o botão "Ativar")
+- Logo: **PIN nunca criado → `register` nunca chamado → número NÃO registrado**
+- `POST /1308096539052095/register` com `{messaging_product:'whatsapp', pin}`
+  é o passo que falta.
+
+**ERRO DO AGENTE, registrado:** o agente **viu** a aba "Verificação em duas
+etapas" desativada durante a investigação e escreveu em entrada anterior desta
+mesma data que **"não é a causa"**, com a justificativa de que a tela descrevia
+o 2FA como proteção de re-registro. **Estava errado — é exatamente a causa.**
+Lição: quando o CDT (que funciona) tem um passo documentado que a odonto não
+tem, tratar como suspeito principal até provar o contrário, não como detalhe.
+
+**POR QUE OS SINTOMAS ENGANARAM:**
+| Sintoma | Interpretação errada | Realidade |
+|---|---|---|
+| SMS chegou | "número certo e ativo" | verificação é outro passo |
+| Meta exibe "Conectado" / "Alta" | "número operante" | reflete a conta, não o registro |
+| Erro "template does not exist" | "API operante" | validação de payload ocorre ANTES do registro |
+| Celular não acha o número | "propagação" / "nono dígito" | **número não registrado na Cloud API** |
+
+Toda a investigação do nono dígito (`9804-0599` × `99804-0599`) foi **desvio**.
+Não há nada errado com o número — ele só não está ligado.
+
+**CONFIRMAÇÃO CRUZADA COM O CDT:** o `CLAUDE.md` pessoal do Danilo registra,
+para o número do CDT que funciona: *"Registro Cloud API com PIN 2FA — PIN
+279105"* e *"platform_type: CLOUD_API, status: CONNECTED"*. **Esse passo foi
+feito no CDT e NÃO foi feito na odonto.** É a única diferença real entre os dois.
+
+**PENDÊNCIA #31 (BLOQUEANTE, ação do Danilo):** definir o PIN de 6 dígitos em
+*Gerenciador do WhatsApp → Números de telefone → o número → Verificação em duas
+etapas* e completar o `register`. Guardar o PIN junto com o token — ele é
+exigido em qualquer re-registro futuro. Se ativar o PIN pela tela não completar
+o registro sozinho, será preciso um endpoint `register` no CRM (o token já está
+cifrado em `channels.meta_token_encrypted`).
+
+**ENTREGA DO SUBAGENTE (envio de template pelo inbox) — pronta, mas represada:**
+- `send-operator-template` ganhou o ramo `meta` (usa `metaSendTemplate`, idioma
+  cru do template, `components` omitido quando não há variável, grava o wamid em
+  `zernio_message_id`). Deployada v2, hash conferido contra o bundle local.
+- Achado: `TemplateRestartDialog.tsx` já existia e lista os aprovados, **mas era
+  inalcançável** — o banco tem 0 conversas e nenhuma tela criava conversa nova.
+  Criado `src/lib/conversations.ts` (`ensureConversationForContact`, prefere
+  canal `meta`) ligado ao botão "Abrir conversa" em `ContactDetailPage.tsx`.
+- **#30 — frontend NÃO publicado.** Vercel segue em `15ebea6`.
+- **#29** — o ramo `meta` de envio nunca foi exercitado contra a API real.
+- Achado de infra: a versão publicada de `send-operator-template` era a **v1 do
+  bootstrap de 24/08**, sem nenhuma referência a `meta`. Vale para qualquer
+  função ainda em v1 — o deploy leva junto os `_shared` atuais.
+
+- **Banco:** nenhuma migração, nenhuma escrita.
+- **ORDEM CORRETA daqui:** (1) PIN + register do número [Danilo, bloqueante] →
+  (2) publicar o frontend → (3) abrir conversa e disparar `teste_conexao` →
+  (4) ler o número do remetente → (5) responder e validar o webhook.

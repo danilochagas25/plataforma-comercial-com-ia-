@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, Filter, Link2, MapPin, MessageSquare, Plus, X } from 'lucide-react';
+import { ArrowLeft, Filter, Link2, Loader2, MapPin, MessageSquare, Plus, X } from 'lucide-react';
 import { useContactProfile } from '@/hooks/useContactProfile';
 import { useContactTimeline, type DayGroup } from '@/hooks/useContactTimeline';
 import { useContactChannelLinks, type ContactChannelLink } from '@/hooks/useContactChannelLinks';
@@ -13,6 +13,7 @@ import { ProximaAcao } from '@/components/crm/ProximaAcao';
 import { Button } from '@/components/ui/button';
 import { type Deal } from '@/types/crm';
 import { VOCAB } from '@/config/vocab';
+import { ensureConversationForContact } from '@/lib/conversations';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const fmtTime = (s: string) => new Date(s).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -41,6 +42,24 @@ export default function ContactDetailPage() {
   const { operators } = useOperators();
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [showPipelineModal, setShowPipelineModal] = useState(false);
+  const [openingChat, setOpeningChat] = useState(false);
+
+  // "Abrir conversa": se o contato ainda não tem conversa (caso normal quando
+  // quem inicia é a clínica), cria uma no número conectado antes de navegar.
+  // Sem isso a Caixa de Entrada abre vazia e o operador não tem onde enviar
+  // o template de reabertura.
+  const openConversation = async () => {
+    if (!contact) return;
+    setOpeningChat(true);
+    try {
+      await ensureConversationForContact(contact.id);
+      navigate(`/inbox?contact=${contact.id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Falha ao abrir a conversa.');
+    } finally {
+      setOpeningChat(false);
+    }
+  };
 
   const authorName = (uid: string | null | undefined) =>
     uid ? operators.find((o) => o.user_id === uid)?.email ?? 'Operador' : 'Sistema';
@@ -98,8 +117,9 @@ export default function ContactDetailPage() {
           <Button variant="outline" onClick={() => setShowLinkModal(true)}>
             <Link2 className="h-4 w-4" /> Vincular canal
           </Button>
-          <Button onClick={() => navigate(`/inbox?contact=${contact.id}`)}>
-            <MessageSquare className="h-4 w-4" /> Abrir conversa
+          <Button disabled={openingChat} onClick={() => void openConversation()}>
+            {openingChat ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />}
+            Abrir conversa
           </Button>
         </div>
       </div>

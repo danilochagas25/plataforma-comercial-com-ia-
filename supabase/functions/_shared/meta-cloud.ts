@@ -82,16 +82,58 @@ function metaNumOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+// Erros conhecidos da Meta traduzidos para português. A mensagem crua da Meta
+// vem em inglês e chega até a tela do admin — quem opera o CRM não lê inglês.
+// Códigos que não estão aqui repassam a frase original (diagnóstico).
+// Nenhum desses textos carrega token, App Secret ou dado de paciente.
+function metaFriendlyMessage(
+  code: number | null,
+  subcode: number | null,
+  raw: string,
+): string {
+  if (code === 190) {
+    return 'Token da Meta inválido ou expirado. Gere um token novo no Usuário do '
+      + 'Sistema e atualize o canal em Configurações → Canais.';
+  }
+  if (code === 200 || code === 10 || code === 3) {
+    return 'A Meta recusou por falta de permissão. Confira se o Usuário do Sistema '
+      + 'tem acesso total ao App e à conta do WhatsApp (WABA), com as permissões '
+      + 'whatsapp_business_management e whatsapp_business_messaging.';
+  }
+  if (code === 100) {
+    // 33 = objeto inexistente ou sem permissão de leitura para este token.
+    if (subcode === 33) {
+      return 'A Meta não encontrou a conta do WhatsApp (WABA) ou o número informado. '
+        + 'Confira o ID da conta e o ID do número no canal.';
+    }
+    return `Parâmetro inválido na chamada à Meta: ${raw}`;
+  }
+  if (code === 132000) {
+    return 'A Meta recusou o modelo: número de variáveis do texto não bate com os '
+      + 'exemplos enviados.';
+  }
+  if (code === 132001) {
+    return 'Já existe um modelo com este nome e idioma na conta da Meta. Use outro '
+      + 'nome ou sincronize os modelos antes de enviar.';
+  }
+  if (code === 131047) {
+    return 'Fora da janela de 24 horas: só é possível enviar modelo aprovado para '
+      + 'este contato.';
+  }
+  return raw;
+}
+
 // Single fetch helper for every Graph API call (GET or JSON POST).
-async function metaFetch(
+// `url` is absolute so pagination (paging.next) can reuse it verbatim.
+async function metaFetchUrl(
   ctx: MetaContext,
-  path: string,
+  url: string,
   init: { method: 'GET' | 'POST'; body?: Record<string, unknown> } = { method: 'GET' },
 ): Promise<Record<string, unknown>> {
   const headers: Record<string, string> = { Authorization: `Bearer ${ctx.token}` };
   if (init.body) headers['Content-Type'] = 'application/json';
 
-  const res = await fetch(`${META_GRAPH_BASE}/${META_GRAPH_VERSION}${path}`, {
+  const res = await fetch(url, {
     method: init.method,
     headers,
     body: init.body ? JSON.stringify(init.body) : undefined,
@@ -105,17 +147,36 @@ async function metaFetch(
   }
   if (!res.ok || json.error) {
     const err = metaAsObject(json.error);
-    const msg = typeof err.message === 'string' && err.message.trim()
+    const raw = typeof err.message === 'string' && err.message.trim()
       ? err.message
       : `Meta respondeu ${res.status}`;
-    throw new MetaCloudError(
-      msg,
-      res.status,
-      metaNumOrNull(err.code),
-      metaNumOrNull(err.error_subcode),
-    );
+    const code = metaNumOrNull(err.code);
+    const subcode = metaNumOrNull(err.error_subcode);
+    throw new MetaCloudError(metaFriendlyMessage(code, subcode, raw), res.status, code, subcode);
   }
   return json;
+}
+
+async function metaFetch(
+  ctx: MetaContext,
+  path: string,
+  init: { method: 'GET' | 'POST'; body?: Record<string, unknown> } = { method: 'GET' },
+): Promise<Record<string, unknown>> {
+  return await metaFetchUrl(ctx, `${META_GRAPH_BASE}/${META_GRAPH_VERSION}${path}`, init);
+}
+
+// A Graph API só aceita as operações de modelo no ID da WABA — o Phone Number
+// ID não serve. Canal criado antes da tela nova pode estar sem o campo.
+function metaRequireWabaId(ctx: MetaContext): string {
+  const wabaId = ctx.wabaId?.trim();
+  if (!wabaId) {
+    throw new MetaCloudError(
+      'Canal Meta sem o ID da conta do WhatsApp (WABA). Edite o canal em '
+      + 'Configurações → Canais e informe o ID da conta.',
+      400,
+    );
+  }
+  return wabaId;
 }
 
 // A Meta aceita o destino em E.164 SEM o '+' (só dígitos).
@@ -274,6 +335,111 @@ export async function metaDownloadMedia(
   return {
     bytes: new Uint8Array(await res.arrayBuffer()),
     mimeType: res.headers.get('content-type'),
+  };
+}
+
+// --- modelos de mensagem (message templates) --------------------------------
+// Endpoints da WABA (não do número):
+//   GET  /v25.0/{waba_id}/message_templates  → lista paginada
+//   POST /v25.0/{waba_id}/message_templates  → submete para aprovação
+// O shape devolvido aqui é próximo do `listTemplates` do Zernio (id/name/status)
+// mais os campos que só a Meta entrega (category, language, components), para o
+// chamador espelhar o modelo na tabela local sem transformar duas vezes.
+
+export type MetaTemplateCategory = 'MARKETING' | 'UTILITY' | 'AUTHENTICATION';
+
+export interface MetaTemplate {
+  id: string | null;
+  name: string | null;
+  status: string | null;
+  category: string | null;
+  language: string | null;
+  components: Record<string, unknown>[];
+  rejectedReason: string | null;
+}
+
+function metaStr(root: Record<string, unknown>, key: string): string | null {
+  const v = root[key];
+  return typeof v === 'string' && v.trim() ? v : null;
+}
+
+function metaComponentsOf(root: Record<string, unknown>): Record<string, unknown>[] {
+  const raw = Array.isArray(root.components) ? root.components : [];
+  return raw.map((c) => metaAsObject(c));
+}
+
+// Lista TODOS os modelos da WABA, seguindo `paging.next` até acabar. A Meta
+// devolve no máximo ~1000 por página; o limite pedido aqui é só o tamanho da
+// página. `metaPageGuard` evita laço infinito se a Meta devolver um cursor que
+// aponta para si mesmo.
+export async function metaListTemplates(
+  ctx: MetaContext,
+  options: { limit?: number } = {},
+): Promise<MetaTemplate[]> {
+  const wabaId = metaRequireWabaId(ctx);
+  const limit = Math.min(Math.max(options.limit ?? 200, 1), 1000);
+  const fields = 'id,name,status,category,language,components,rejected_reason';
+
+  let url = `${META_GRAPH_BASE}/${META_GRAPH_VERSION}/${wabaId}/message_templates`
+    + `?limit=${limit}&fields=${encodeURIComponent(fields)}`;
+
+  const out: MetaTemplate[] = [];
+  const seenPages = new Set<string>();
+  const metaPageGuard = 50; // teto de páginas — 50 × 1000 cobre qualquer WABA real
+
+  for (let page = 0; page < metaPageGuard; page++) {
+    if (seenPages.has(url)) break;
+    seenPages.add(url);
+
+    const root = await metaFetchUrl(ctx, url);
+    const list = Array.isArray(root.data) ? root.data : [];
+    for (const item of list) {
+      const t = metaAsObject(item);
+      out.push({
+        id: metaStr(t, 'id'),
+        name: metaStr(t, 'name'),
+        status: metaStr(t, 'status'),
+        category: metaStr(t, 'category'),
+        language: metaStr(t, 'language'),
+        components: metaComponentsOf(t),
+        rejectedReason: metaStr(t, 'rejected_reason'),
+      });
+    }
+
+    const next = metaStr(metaAsObject(root.paging), 'next');
+    if (!next) break;
+    url = next;
+  }
+
+  return out;
+}
+
+// Submete um modelo para aprovação. `components` já precisa vir no formato da
+// Graph API (type/format/button.type em MAIÚSCULAS).
+export async function metaCreateTemplate(
+  ctx: MetaContext,
+  input: {
+    name: string;
+    language: string;
+    category: MetaTemplateCategory;
+    components: unknown[];
+  },
+): Promise<{ id: string | null; status: string | null; category: string | null }> {
+  const wabaId = metaRequireWabaId(ctx);
+  const root = await metaFetch(ctx, `/${wabaId}/message_templates`, {
+    method: 'POST',
+    body: {
+      name: input.name,
+      language: input.language,
+      category: input.category,
+      components: input.components,
+    },
+  });
+  // Resposta real: { id, status, category }.
+  return {
+    id: metaStr(root, 'id'),
+    status: metaStr(root, 'status'),
+    category: metaStr(root, 'category'),
   };
 }
 

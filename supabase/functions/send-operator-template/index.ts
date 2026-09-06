@@ -4,6 +4,13 @@
 // Operador reinicia uma conversa enviando um template aprovado — necessário
 // quando o contato está FORA da janela de 24h (a Meta só aceita template fora
 // da janela). Persiste a mensagem e marca a conversa como atendimento humano.
+//
+// Dois provedores oficiais atendem template:
+//   provider='meta'   → POST /v25.0/{phone_number_id}/messages (Cloud API
+//                       direta). Destino é o TELEFONE — a Meta não tem
+//                       entidade "conversa" endereçável.
+//   provider='zernio' → mensagem de template na conversa 1:1 do Zernio.
+// UAZAPI (não oficial) não tem template aprovado: é recusado.
 // ============================================================================
 
 import { requireOrgCaller, AuthError } from '../_shared/auth.ts';
@@ -15,6 +22,7 @@ import {
   sendInboxTemplate,
 } from '../_shared/zernio.ts';
 import { getSendContextForConversation } from '../_shared/channels.ts';
+import { MetaCloudError, metaSendTemplate } from '../_shared/meta-cloud.ts';
 
 interface Payload {
   conversation_id?: string;
@@ -96,41 +104,68 @@ Deno.serve(async (req) => {
       ? [{ type: 'body', parameters: Array.from({ length: varCount }, (_, i) => ({ type: 'text', text: params[i] ?? '' })) }]
       : [];
 
-    // Templates só existem no provedor oficial (Meta via Zernio). Resolve o
-    // contexto de envio pelo canal carimbado na conversa.
+    // Templates só existem em provedor oficial. Resolve o contexto de envio
+    // pelo canal carimbado na conversa (getSendContextForConversation já
+    // devolve o ramo 'meta' com o token do canal decifrado).
     const sendCtx = await getSendContextForConversation(admin, {
       org_id: convRow.org_id,
       channel_id: convRow.channel_id,
       provider: convRow.provider,
       zernio_account_id: convRow.zernio_account_id,
     });
-    if (sendCtx.provider !== 'zernio') {
-      return jsonResponse({ ok: false, error: 'Templates só podem ser enviados por canais Zernio (Meta oficial).' }, { status: 400 });
+    if (sendCtx.provider === 'uazapi') {
+      return jsonResponse({ ok: false, error: 'Templates só podem ser enviados por canais oficiais (Meta direta ou Zernio).' }, { status: 400 });
     }
-    const ctx = sendCtx.zernio;
-    let zConvId = convRow.zernio_conversation_id;
+
+    // A coluna `zernio_message_id` manteve o nome histórico: guarda o id da
+    // mensagem devolvido pelo provedor, seja Zernio ou Meta (wamid).
     let zernioMessageId: string | null = null;
 
-    if (zConvId) {
-      const sent = await sendInboxTemplate({
-        apiKey: ctx.apiKey, accountId: ctx.accountId, conversationId: zConvId,
-        name: template.name, language: template.language, components,
-      });
-      zernioMessageId = sent.messageId;
-    } else {
-      // Sem conversa Zernio: cria pelo telefone (a Meta abre a janela ao enviar template).
+    if (sendCtx.provider === 'meta') {
+      // Meta Cloud API direta: o destino é o TELEFONE do contato. Enviar
+      // template é o único caminho permitido fora da janela de 24h e é ele
+      // que reabre a conversa do lado da Meta.
       const { data: contactRow } = await admin.from('contacts').select('phone').eq('id', convRow.contact_id).maybeSingle();
       const phone = (contactRow as { phone?: string } | null)?.phone ?? null;
       if (!phone) return jsonResponse({ ok: false, error: 'Contato sem telefone.' }, { status: 400 });
-      const created = await createInboxConversation({ apiKey: ctx.apiKey, accountId: ctx.accountId, participantId: phone });
-      zConvId = created.conversationId;
+      // O código de idioma tem que bater EXATO com o que está registrado na
+      // Meta. `sync-template-status` grava em templates.language o valor cru
+      // devolvido pela Graph API ('en', 'pt_BR', ...), então repassamos sem
+      // normalizar — normalizar 'en' para 'en_US' faria a Meta recusar.
+      const sent = await metaSendTemplate(sendCtx.meta, {
+        phone,
+        templateName: template.name,
+        languageCode: template.language,
+        // Sem variável no corpo, `components` vai vazio e metaSendTemplate
+        // OMITE a chave — a Meta recusa array vazio em alguns modelos.
+        components,
+      });
+      zernioMessageId = sent.messageId;
+    } else {
+      const ctx = sendCtx.zernio;
+      let zConvId = convRow.zernio_conversation_id;
+
       if (zConvId) {
-        await admin.from('conversations').update({ zernio_conversation_id: zConvId }).eq('id', conversationId);
         const sent = await sendInboxTemplate({
           apiKey: ctx.apiKey, accountId: ctx.accountId, conversationId: zConvId,
           name: template.name, language: template.language, components,
         });
         zernioMessageId = sent.messageId;
+      } else {
+        // Sem conversa Zernio: cria pelo telefone (a Meta abre a janela ao enviar template).
+        const { data: contactRow } = await admin.from('contacts').select('phone').eq('id', convRow.contact_id).maybeSingle();
+        const phone = (contactRow as { phone?: string } | null)?.phone ?? null;
+        if (!phone) return jsonResponse({ ok: false, error: 'Contato sem telefone.' }, { status: 400 });
+        const created = await createInboxConversation({ apiKey: ctx.apiKey, accountId: ctx.accountId, participantId: phone });
+        zConvId = created.conversationId;
+        if (zConvId) {
+          await admin.from('conversations').update({ zernio_conversation_id: zConvId }).eq('id', conversationId);
+          const sent = await sendInboxTemplate({
+            apiKey: ctx.apiKey, accountId: ctx.accountId, conversationId: zConvId,
+            name: template.name, language: template.language, components,
+          });
+          zernioMessageId = sent.messageId;
+        }
       }
     }
 
@@ -151,9 +186,16 @@ Deno.serve(async (req) => {
       last_message_at: new Date().toISOString(),
     }).eq('id', conversationId);
 
-    return jsonResponse({ ok: true, message_id: (ins as { id: string } | null)?.id ?? null, zernio_message_id: zernioMessageId });
+    return jsonResponse({
+      ok: true,
+      provider: sendCtx.provider,
+      message_id: (ins as { id: string } | null)?.id ?? null,
+      zernio_message_id: zernioMessageId,
+    });
   } catch (err) {
     if (err instanceof AuthError) return jsonResponse({ ok: false, error: err.message }, { status: err.status });
+    // MetaCloudError já vem com a mensagem traduzida por metaFriendlyMessage.
+    if (err instanceof MetaCloudError) return jsonResponse({ ok: false, error: err.message }, { status: err.status === 401 ? 401 : 502 });
     if (err instanceof ZernioError) return jsonResponse({ ok: false, error: err.message }, { status: err.status === 401 ? 401 : 502 });
     console.error('send-operator-template error', err);
     return jsonResponse({ ok: false, error: err instanceof Error ? err.message : 'Erro interno' }, { status: 500 });
