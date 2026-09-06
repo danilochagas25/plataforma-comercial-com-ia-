@@ -57,7 +57,8 @@ export function FunnelAutomationsTab() {
     setLoading(true);
     const supabase = getSupabase();
     const [{ data: pipes }, { data: sts }, { data: autos }] = await Promise.all([
-      supabase.from('pipelines').select('id, name, is_default').order('position'),
+      // Funil desativado não aparece em seletor (migração 20260907120000).
+      supabase.from('pipelines').select('id, name, is_default').eq('is_active', true).order('position'),
       supabase.from('stages').select('id, pipeline_id, name, position').order('position'),
       supabase.from('funnel_automations').select('*').order('created_at'),
     ]);

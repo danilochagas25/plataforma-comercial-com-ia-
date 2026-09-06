@@ -39,7 +39,8 @@ export function AddToPipelineDialog({
     const supabase = getSupabase();
     void (async () => {
       const [p, st] = await Promise.all([
-        supabase.from('pipelines').select('id, name').order('position'),
+        // Funil desativado não aparece em seletor (migração 20260907120000).
+        supabase.from('pipelines').select('id, name').eq('is_active', true).order('position'),
         supabase.from('stages').select('id, name, pipeline_id').order('position'),
       ]);
       const ps = (p.data ?? []) as { id: string; name: string }[];

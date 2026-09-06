@@ -34,6 +34,8 @@ export function AddToPipelineModal({ contactId, contactName, onClose, onCreated 
       .from('pipelines')
       .select('*')
       .eq('kind', 'comercial')
+      // Funil desativado não aparece em seletor (migração 20260907120000).
+      .eq('is_active', true)
       .order('position')
       .then(({ data, error }) => {
         if (error) { setErr(error.message); return; }

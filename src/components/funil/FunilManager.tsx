@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Check, GripVertical, Plus, Star, Trash2, X } from 'lucide-react';
+import { Check, GripVertical, Plus, Power, PowerOff, Star, Trash2, X } from 'lucide-react';
 import type { FunilController } from '@/app/routes/funil/FunilPage';
 import type { Stage } from '@/types/crm';
 
@@ -8,8 +8,8 @@ const STAGE_COLORS = ['#D4A574', '#E8C89A', '#10B981', '#FBBF24', '#F87171', '#A
 
 export function FunilManager({ funil, onClose }: { funil: FunilController; onClose: () => void }) {
   const {
-    pipelines, selectedId, select, stages,
-    createPipeline, renamePipeline, deletePipeline, setDefaultPipeline,
+    pipelines, inactivePipelines, selectedId, select, stages,
+    createPipeline, renamePipeline, deletePipeline, setDefaultPipeline, setPipelineActive,
     addStage, renameStage, setStageColor, setStageProbability, setStageAiCriteria, reorderStages, removeStage,
   } = funil;
 
@@ -27,6 +27,14 @@ export function FunilManager({ funil, onClose }: { funil: FunilController; onClo
     await createPipeline(newFunil);
     setNewFunil('');
     setBusy(false);
+  };
+
+  // Desativar é a ação preferida: o funil sai dos seletores mas os deals e o
+  // histórico continuam no banco. Excluir só serve para funil vazio.
+  const handleToggleAtivo = async (id: string, ativo: boolean) => {
+    const res = await setPipelineActive(id, ativo);
+    if (!res.ok) toast.error(res.error ?? 'Falha ao mudar o estado do funil.');
+    else toast.success(ativo ? 'Funil reativado.' : 'Funil desativado (não foi excluído).');
   };
 
   const handleDeleteFunil = async (id: string) => {
@@ -79,6 +87,13 @@ export function FunilManager({ funil, onClose }: { funil: FunilController; onClo
                     >
                       <Star className="h-4 w-4" fill={p.is_default ? '#FBBF24' : 'none'} />
                     </button>
+                    <button
+                      title="Desativar (não exclui: os deals e o histórico ficam)"
+                      onClick={() => void handleToggleAtivo(p.id, false)}
+                      className="text-[var(--color-text-secondary)] hover:text-[#FBBF24]"
+                    >
+                      <PowerOff className="h-4 w-4" />
+                    </button>
                     <button title="Excluir" onClick={() => void handleDeleteFunil(p.id)} className="text-[var(--color-text-secondary)] hover:text-[var(--color-error)]">
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -91,6 +106,29 @@ export function FunilManager({ funil, onClose }: { funil: FunilController; onClo
                 </div>
               ))}
             </div>
+            {inactivePipelines.length > 0 && (
+              <div className="rounded-lg border border-[rgba(212,165,116,0.12)] bg-white/[0.02] p-3">
+                <div className="text-label mb-2">Desativados</div>
+                <div className="space-y-1.5">
+                  {inactivePipelines.map((p) => (
+                    <div key={p.id} className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+                      <span className="flex-1 truncate">{p.name}</span>
+                      <button
+                        title="Reativar"
+                        onClick={() => void handleToggleAtivo(p.id, true)}
+                        className="inline-flex items-center gap-1 rounded border border-[rgba(212,165,116,0.2)] px-2 py-1 text-xs hover:border-[var(--accent-primary)] hover:text-[var(--color-text-primary)]"
+                      >
+                        <Power className="h-3 w-3" /> Reativar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-[var(--color-text-secondary)] opacity-70">
+                  Funil desativado não aparece nos seletores, mas nada foi excluído.
+                </p>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <input value={newFunil} onChange={(e) => setNewFunil(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && newFunil.trim() && !busy) void handleCreateFunil(); }} placeholder="Novo funil…" className={inputCls} />
               <button onClick={handleCreateFunil} disabled={busy || !newFunil.trim()} className="rounded-lg bg-gradient-to-br from-[#182940] to-[#D4A574] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">

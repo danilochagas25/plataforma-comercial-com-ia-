@@ -155,6 +155,8 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
         .from('pipelines')
         .select('*')
         .eq('kind', 'comercial')
+        // Funil desativado não aparece em seletor (migração 20260907120000).
+        .eq('is_active', true)
         .order('position');
       if (!cancelled) setPipelines((data ?? []) as Pipeline[]);
     })();

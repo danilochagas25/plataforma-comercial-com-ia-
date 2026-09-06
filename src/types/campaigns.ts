@@ -2,7 +2,11 @@ import type { TemplateButton } from './templates';
 
 export type CampaignStatus = 'draft' | 'scheduled' | 'sending' | 'completed' | 'paused' | 'failed';
 export type CampaignContactStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'replied' | 'failed';
-export type FollowUpTrigger = 'no_reply' | 'inactivity' | 'no_purchase';
+// `stage_stalled` = "parado na etapa há N dias" (params: pipeline_id, stage_id,
+// days). Entrou no enum do banco em 06/09/2026 para a régua D+1/D+3/D+7 do CRM
+// odonto. ⚠️ A Edge Function `check-follow-ups` AINDA NÃO implementa este
+// gatilho — as regras existem desativadas, e a tela impede ativá-las.
+export type FollowUpTrigger = 'no_reply' | 'inactivity' | 'no_purchase' | 'stage_stalled';
 
 // Mirrors the JSONB shape the dispatcher consumes. `fallback` é usado quando o
 // contato não tem o campo preenchido (ex.: sem nome → "Cliente"); sem fallback,

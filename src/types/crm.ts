@@ -25,6 +25,9 @@ export interface Pipeline {
   kind: PipelineKind;
   position: number;
   is_default: boolean;
+  // Funil desativado some dos seletores mas NÃO é excluído: os deals e o
+  // histórico continuam íntegros (migração 20260907120000).
+  is_active: boolean;
   created_at: string;
 }
 
@@ -48,14 +51,19 @@ export interface Stage {
 // criar classes personalizadas (ex.: 'imovel').
 export type ProductType = string;
 
+// Especialidades odontológicas. A taxonomia de infoproduto do template
+// ('curso', 'mentoria'…) saiu do CHECK de `products.product_type` na migração
+// 20260907120000 — a clínica vende procedimento, não curso.
 export const PRODUCT_TYPE_LABELS: Record<string, string> = {
-  curso: 'Curso',
-  mentoria: 'Mentoria',
-  consultoria: 'Consultoria',
-  ebook: 'Ebook',
-  app: 'App',
-  ia: 'IA',
-  fisico: 'Físico',
+  clinica_geral: 'Clínica Geral',
+  protese: 'Prótese',
+  implante: 'Implantodontia',
+  orto: 'Ortodontia',
+  endo: 'Endodontia',
+  perio: 'Periodontia',
+  cirurgia: 'Cirurgia',
+  odontopediatria: 'Odontopediatria',
+  estetica: 'Estética',
 };
 
 // Label exibível de um tipo (padrão ou personalizado — capitaliza o valor cru).
@@ -336,6 +344,13 @@ export interface Deal {
   origin_channel: string | null;
   // Arquivado: fora do board, visível na visão "Arquivados" (restaurável).
   archived_at: string | null;
+  // 🔴 Relógio de estagnação: quando o deal entrou na etapa ATUAL. É o que
+  // sustenta "orçamento parado há N dias" e a régua D+1/D+3/D+7. Na importação
+  // do WebDental recebe a Dt Orçamento, nunca a data do import.
+  stage_entered_at: string;
+  // Identidade do registro no sistema de origem ('webdental:<paciente>:<data>').
+  // Trava de idempotência: reimportar o mesmo relatório atualiza, não duplica.
+  external_ref: string | null;
   created_at: string;
   updated_at: string;
   contact?: ContactLite | null;

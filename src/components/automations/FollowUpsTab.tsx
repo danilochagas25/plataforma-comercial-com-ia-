@@ -21,7 +21,14 @@ const TRIGGER_LABEL: Record<FollowUpTrigger, string> = {
   no_reply: 'Sem resposta (após campanha)',
   inactivity: 'Inatividade na conversa',
   no_purchase: 'Sem compra há X dias',
+  stage_stalled: 'Parado na etapa há X dias',
 };
+
+// O motor (check-follow-ups) só entende no_reply, inactivity e no_purchase.
+// Enquanto `stage_stalled` não for implementado lá, a regra pode existir e ser
+// editada, mas NÃO pode ser ligada — ligar não enviaria nada e daria a
+// impressão falsa de que a régua está rodando.
+const GATILHOS_SEM_MOTOR: ReadonlySet<string> = new Set(['stage_stalled']);
 
 const inputCls =
   'w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]';
@@ -63,6 +70,10 @@ export function FollowUpsTab() {
     }
     if (r.trigger_condition === 'inactivity') {
       return `Conversa sem movimento há ${r.delay_hours}h`;
+    }
+    if (r.trigger_condition === 'stage_stalled') {
+      const dias = Number(params.days) || Math.round(r.delay_hours / 24);
+      return `Oportunidade parada na etapa há ${dias} dia(s)`;
     }
     return `Sem resposta após ${r.delay_hours}h`;
   };
@@ -131,10 +142,26 @@ export function FollowUpsTab() {
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <button
-                    onClick={() => void update(r.id, { is_active: !r.is_active }).catch((e) => toast.error(e.message))}
+                    onClick={() => {
+                      if (GATILHOS_SEM_MOTOR.has(r.trigger_condition) && !r.is_active) {
+                        toast.error('Régua ainda não pode ser ligada.', {
+                          description:
+                            'O gatilho "parado na etapa" precisa do motor em check-follow-ups e de um modelo ' +
+                            'aprovado. O texto que vai ao paciente é decisão do Danilo (publicidade odontológica).',
+                        });
+                        return;
+                      }
+                      void update(r.id, { is_active: !r.is_active }).catch((e) => toast.error(e.message));
+                    }}
                     role="switch"
                     aria-checked={r.is_active}
-                    className={`relative h-6 w-11 rounded-full transition-colors ${r.is_active ? 'bg-[var(--accent-primary)]' : 'bg-white/10'}`}
+                    disabled={GATILHOS_SEM_MOTOR.has(r.trigger_condition) && !r.is_active}
+                    title={
+                      GATILHOS_SEM_MOTOR.has(r.trigger_condition)
+                        ? 'Estrutura pronta, motor pendente — ver MEMORIA.md'
+                        : undefined
+                    }
+                    className={`relative h-6 w-11 rounded-full transition-colors ${r.is_active ? 'bg-[var(--accent-primary)]' : 'bg-white/10'} ${GATILHOS_SEM_MOTOR.has(r.trigger_condition) && !r.is_active ? 'cursor-not-allowed opacity-50' : ''}`}
                   >
                     <span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${r.is_active ? 'translate-x-5' : 'translate-x-0.5'}`} />
                   </button>

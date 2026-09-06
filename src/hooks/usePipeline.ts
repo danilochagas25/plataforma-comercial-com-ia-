@@ -29,6 +29,9 @@ interface CreateDealInput {
 
 interface UsePipelineResult {
   pipelines: Pipeline[];
+  /** Funis desativados — fora dos seletores, mas restauráveis. */
+  inactivePipelines: Pipeline[];
+  setPipelineActive: (id: string, active: boolean) => Promise<{ ok: boolean; error?: string }>;
   selectedId: string | null;
   select: (id: string) => void;
   pipeline: Pipeline | null;
@@ -62,6 +65,7 @@ interface UsePipelineResult {
 
 export function usePipeline(): UsePipelineResult {
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+  const [inactivePipelines, setInactivePipelines] = useState<Pipeline[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [stages, setStages] = useState<Stage[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -75,14 +79,20 @@ export function usePipeline(): UsePipelineResult {
     [pipelines, selectedId],
   );
 
-  // Carrega a lista de funis comerciais. Mantém a seleção atual se ainda existir,
-  // senão cai no default (ou no primeiro).
+  // Carrega a lista de funis comerciais ATIVOS. Mantém a seleção atual se ainda
+  // existir, senão cai no default (ou no primeiro).
+  //
+  // `is_active` entrou em 06/09/2026: os dois funis do seed do template
+  // ("Vendas" e "Pós-venda") foram DESATIVADOS, não excluídos — o dono
+  // autorizou desativar. Eles somem daqui, mas continuam no banco com seus
+  // deals e histórico. Para reativar: "Gerenciar funis" → "Desativados".
   const loadPipelines = useCallback(async () => {
     const supabase = getSupabase();
     const { data, error: err } = await supabase
       .from('pipelines')
       .select('*')
       .eq('kind', 'comercial')
+      .eq('is_active', true)
       .order('position');
     if (err) {
       setError(err.message);
@@ -94,8 +104,38 @@ export function usePipeline(): UsePipelineResult {
       if (cur && list.some((p) => p.id === cur)) return cur;
       return (list.find((p) => p.is_default) ?? list[0])?.id ?? null;
     });
+    const { data: off } = await supabase
+      .from('pipelines')
+      .select('*')
+      .eq('kind', 'comercial')
+      .eq('is_active', false)
+      .order('position');
+    setInactivePipelines((off ?? []) as Pipeline[]);
     return list;
   }, []);
+
+  // Desativar não exclui: o funil só sai dos seletores. Reativar traz de volta
+  // com todos os deals e o histórico intactos.
+  const setPipelineActive = useCallback<UsePipelineResult['setPipelineActive']>(
+    async (id, active) => {
+      if (!active && pipelines.filter((p) => p.id !== id).length === 0) {
+        return { ok: false, error: 'Não é possível desativar o único funil ativo.' };
+      }
+      const supabase = getSupabase();
+      const patch: Record<string, unknown> = { is_active: active };
+      // Funil desativado não pode continuar sendo o padrão.
+      if (!active) patch.is_default = false;
+      const { error: err } = await supabase.from('pipelines').update(patch).eq('id', id);
+      if (err) return { ok: false, error: err.message };
+      const restantes = await loadPipelines();
+      if (!active && !restantes.some((p) => p.is_default) && restantes[0]) {
+        await supabase.from('pipelines').update({ is_default: true }).eq('id', restantes[0].id);
+        await loadPipelines();
+      }
+      return { ok: true };
+    },
+    [pipelines, loadPipelines],
+  );
 
   // Carrega estágios + deals do funil selecionado.
   const loadBoard = useCallback(async (pipelineId: string | null) => {
@@ -424,6 +464,7 @@ export function usePipeline(): UsePipelineResult {
   return {
     pipelines, selectedId, select, pipeline, stages, deals, nextActionByDeal, convByContact, loading, error, reload,
     moveDeal, createDeal, archiveDeal, unarchiveDeal,
+    inactivePipelines, setPipelineActive,
     createPipeline, renamePipeline, deletePipeline, setDefaultPipeline,
     addStage, renameStage, setStageColor, setStageProbability, setStageAiCriteria, reorderStages, removeStage,
   };

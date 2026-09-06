@@ -91,10 +91,20 @@ Nenhuma até agora.
 
 | 06/09/2026 | `20260906230000_inbox_media_bucket.sql` (aplicada via MCP `apply_migration`, nome no controle: `inbox_media_bucket`) | (1) Bucket **PRIVADO** `whatsapp-hub-inbox-media` em `storage.buckets` (`public=false`, `file_size_limit` 25MB, 27 MIME permitidos: imagem/áudio/vídeo/documento do WhatsApp + `application/octet-stream`). (2) Policy RLS `wh_inbox_media_org_read` em `storage.objects` — **SELECT** para `authenticated` quando `whatsapp_hub.current_user_role() IN ('admin','operator')` **e** `(storage.foldername(name))[1] = current_org_id()::text`. **Nenhuma policy de INSERT/UPDATE/DELETE** para `authenticated`: quem escreve e apaga é a service role (Edge Functions), que não passa por RLS. (3) Cron `wh-purge-inbox-media` (jobid 7) às **03:20 UTC = 00:20 de Itabuna**, chamando `whatsapp_hub._cron_invoke_edge('purge-inbox-media')`. Nenhuma tabela de domínio tocada, nenhum dado alterado, nenhuma outra policy mexida. | **Danilo, 06/09/2026** (decisão D1.1/D1.2: mídia de paciente na nossa base, bucket privado, admin+recepção, expurgo automático em 12 meses) | `BEGIN; SELECT cron.unschedule('wh-purge-inbox-media'); DROP POLICY IF EXISTS wh_inbox_media_org_read ON storage.objects; SELECT set_config('storage.allow_delete_query','true',true); DELETE FROM storage.objects WHERE bucket_id='whatsapp-hub-inbox-media'; DELETE FROM storage.buckets WHERE id='whatsapp-hub-inbox-media'; COMMIT;` — ⚠️ apagar o bucket **destrói a mídia de paciente guardada**; antes de reverter, zerar `messages.media_url` das linhas que apontam para ele (`UPDATE whatsapp_hub.messages SET media_url=NULL WHERE media_url LIKE 'whatsapp-hub-inbox-media/%'`). Reverter só o cron/policy é seguro e não perde arquivo. |
 
+| 06/09/2026 | `20260907120000_odonto_crm_estrutura.sql` (aplicada via MCP `apply_migration`, nome no controle: `odonto_crm_estrutura`) | **(1) 🔴 O RELÓGIO DE ESTAGNAÇÃO, que não existia:** `deals.stage_entered_at TIMESTAMPTZ NOT NULL DEFAULT now()` (backfill com `created_at`; havia 0 deals); trigger `deals_stage_clock_bu` (BEFORE UPDATE) que carimba `now()` quando `stage_id` muda **— mas respeita a data quando o UPDATE a informa explicitamente**, que é como a importação preserva a Dt Orçamento; trigger `deals_stage_change_activity_aiu` (AFTER INSERT OR UPDATE OF stage_id, SECURITY DEFINER, `search_path=''`) que grava `crm_activities(type='stage_change', done=true)` com `org_id = NEW.org_id`; índice `idx_deals_stage_clock (stage_id, stage_entered_at) WHERE archived_at IS NULL`. **(2)** `products_type_chk` trocado da taxonomia de infoproduto para `('clinica_geral','protese','implante','orto','endo','perio','cirurgia','odontopediatria','estetica')`, default `'clinica_geral'`; **`products_quantity_chk` reescrito junto** para `quantity IS NULL OR quantity >= 0` (o antigo exigia `product_type='fisico'`, que deixou de existir — sem isso nenhum procedimento aceitaria quantidade). Tabela estava vazia. **(3)** `custom_fields.key TEXT` + índice único parcial `custom_fields_org_key_uq`; índice `idx_custom_field_values_field_value`. **(4)** `pipelines.is_active BOOLEAN NOT NULL DEFAULT true`. **(5)** `deals.external_ref TEXT` + índice único (trava de idempotência da importação). Nenhuma linha de dado alterada, nenhuma policy RLS tocada. | **Danilo, 06/09/2026** (fecha as decisões pendentes #1 e #2 do ODONTO.md §10) | `BEGIN; DROP TRIGGER IF EXISTS deals_stage_change_activity_aiu ON whatsapp_hub.deals; DROP TRIGGER IF EXISTS deals_stage_clock_bu ON whatsapp_hub.deals; DROP FUNCTION IF EXISTS whatsapp_hub.deals_stage_change_activity(); DROP FUNCTION IF EXISTS whatsapp_hub.deals_stage_clock(); DROP INDEX IF EXISTS whatsapp_hub.idx_deals_stage_clock; DROP INDEX IF EXISTS whatsapp_hub.deals_org_external_ref_uq; ALTER TABLE whatsapp_hub.deals DROP COLUMN IF EXISTS stage_entered_at, DROP COLUMN IF EXISTS external_ref; DROP INDEX IF EXISTS whatsapp_hub.custom_fields_org_key_uq; DROP INDEX IF EXISTS whatsapp_hub.idx_custom_field_values_field_value; ALTER TABLE whatsapp_hub.custom_fields DROP COLUMN IF EXISTS key; ALTER TABLE whatsapp_hub.pipelines DROP COLUMN IF EXISTS is_active; DELETE FROM whatsapp_hub.products; ALTER TABLE whatsapp_hub.products DROP CONSTRAINT IF EXISTS products_type_chk; ALTER TABLE whatsapp_hub.products ADD CONSTRAINT products_type_chk CHECK (product_type IN ('curso','mentoria','consultoria','ebook','app','ia','fisico')); ALTER TABLE whatsapp_hub.products ALTER COLUMN product_type SET DEFAULT 'curso'; ALTER TABLE whatsapp_hub.products DROP CONSTRAINT IF EXISTS products_quantity_chk; ALTER TABLE whatsapp_hub.products ADD CONSTRAINT products_quantity_chk CHECK (quantity IS NULL OR (product_type='fisico' AND quantity >= 0)); COMMIT;` ⚠️ voltar o CHECK antigo **exige apagar os procedimentos odonto** — nenhum deles cabe na taxonomia de infoproduto. |
+
+| 06/09/2026 | `20260907120100_followup_trigger_stage_stalled.sql` (nome no controle: `followup_trigger_stage_stalled`) | `ALTER TYPE whatsapp_hub.follow_up_trigger ADD VALUE 'stage_stalled'` — o gatilho "parado na etapa há N dias", que nenhum dos três existentes (`no_reply`, `inactivity`, `no_purchase`) cobria. Migração **separada de propósito**: `ADD VALUE` não permite USAR o valor novo na mesma transação, e o seed das regras precisa dele. | **Danilo, 06/09/2026** (régua até 7 dias) | ⚠️ **`ALTER TYPE ... ADD VALUE` é IRREVERSÍVEL no PostgreSQL.** Para tirar o valor seria preciso recriar o tipo inteiro: apagar as linhas que o usam, criar `follow_up_trigger_old` sem ele, `ALTER TABLE follow_up_rules ALTER COLUMN trigger_condition TYPE` com USING, e trocar os tipos. Não vale a pena: valor de enum não usado é inerte. |
+
+| 06/09/2026 | `20260907120200_odonto_crm_seed.sql` (nome no controle: `odonto_crm_seed`) | **Dado de configuração, tudo idempotente.** (1) Funil **"Odonto — Orçamentos"** (`kind='comercial'`, `is_default=true`) com as 5 etapas exatas: Orçamento apresentado 20 · Em negociação 45 · Aguardando decisão 70 · **Aprovado (is_won) 100** · **Não aprovado (is_lost) 0**. (2) Os 2 funis do seed do template — **"Vendas" e "Pós-venda" — DESATIVADOS** (`is_active=false`, `is_default=false`), **não excluídos**: continuam no banco com os 10 estágios e o histórico. (3) Os 9 campos do orçamento em `custom_fields`, com `key` estável: `paciente_nome, dt_orcamento, tratamento, especialidade, dentista, tabela_preco, participacao_convenio, dt_agenda, origem_import`. (4) Os 4 procedimentos que existem no arquivo real: Clínica Geral · Prótese · Ortodontia · Implantodontia. (5) A régua **D+1 / D+3 / D+7** em `follow_up_rules` (`trigger_condition='stage_stalled'`, `delay_hours` 24/72/168, `params` com `pipeline_id`+`stage_id`+`days`, `provider='meta'`) — **`is_active=false` e `template_id=NULL`**, porque o texto que vai ao paciente é do dono (publicidade odontológica / CFO). | **Danilo, 06/09/2026** | `BEGIN; DELETE FROM whatsapp_hub.follow_up_rules WHERE trigger_condition='stage_stalled'; DELETE FROM whatsapp_hub.products WHERE name IN ('Clínica Geral','Prótese','Ortodontia','Implantodontia'); DELETE FROM whatsapp_hub.custom_fields WHERE key IN ('paciente_nome','dt_orcamento','tratamento','especialidade','dentista','tabela_preco','participacao_convenio','dt_agenda','origem_import'); DELETE FROM whatsapp_hub.stages WHERE pipeline_id IN (SELECT id FROM whatsapp_hub.pipelines WHERE name='Odonto — Orçamentos'); DELETE FROM whatsapp_hub.pipelines WHERE name='Odonto — Orçamentos'; UPDATE whatsapp_hub.pipelines SET is_active=true WHERE name IN ('Vendas','Pós-venda'); UPDATE whatsapp_hub.pipelines SET is_default=true WHERE name='Vendas'; COMMIT;` ⚠️ só é seguro **enquanto não houver orçamento importado** — apagar as etapas com deals dentro deixaria os deals sem etapa (`ON DELETE SET NULL`). |
+
+| 06/09/2026 | `20260907120300_deals_external_ref_index_full.sql` (nome no controle: `deals_external_ref_index_full`) | **Correção da migração `...120000` deste mesmo dia.** O índice `deals_org_external_ref_uq` nasceu PARCIAL (`WHERE external_ref IS NOT NULL`) e índice único parcial **não é inferível por `INSERT ... ON CONFLICT (org_id, external_ref)`** — que é exatamente como o PostgREST monta o upsert do importador. Daria erro "no unique or exclusion constraint matching the ON CONFLICT specification" na primeira importação, com o dono na frente da tela. Recriado CHEIO. O predicado era desnecessário: NULL não colide com NULL em índice único. | **Danilo, 06/09/2026** | `BEGIN; DROP INDEX IF EXISTS whatsapp_hub.deals_org_external_ref_uq; CREATE UNIQUE INDEX deals_org_external_ref_uq ON whatsapp_hub.deals (org_id, external_ref) WHERE external_ref IS NOT NULL; COMMIT;` |
+
 > **Correção 05/09/2026:** a frase "Nenhuma até agora" acima deixou de valer nesta
 > data. O banco passou a ter 1 migração aplicada por este projeto (linha acima).
 >
 > **Atualização 06/09/2026:** são **3** migrações aplicadas por este projeto.
+>
+> **Atualização 06/09/2026 (fim do dia):** são **7** — as 4 do CRM odonto acima.
 
 ---
 
@@ -125,6 +135,7 @@ Nenhuma até agora.
 | 31c | ~~Registro na Cloud API~~ — **RESOLVIDA 06/09/2026: número registrado, ciclo completo funcionando** | — | fechada |
 | 32 | **URGENTE — responder a mensagem de paciente que já chegou no CRM** e definir quem monitora | Atendimento real | 06/09/2026 |
 | 33 | Verificar, na 1ª campanha, se pacientes antigos da recepção ficam com o estado "não está mais no WhatsApp" | Taxa de resposta | 06/09/2026 |
+| 39 | **Convidar a operadora para o CRM** (perfil `operator`) — hoje só existe 1 usuário. Prazo: 08/09/2026 | Operação | 06/09/2026 |
 | 34 | 🔴 **Nono dígito BR: a Meta entrega telefone sem o 9 e o CRM DUPLICA contato/conversa** — normalizar antes de qualquer campanha | **A campanha inteira** | 06/09/2026 |
 | 34b | Nono dígito — **corrigido e publicado em 06/09** (`bf4e681`). Só fecha com o Danilo validando pela tela | — | aguarda teste |
 | 31b | **#31 tem código, falta o Danilo usar.** Em 06/09 o botão "Registrar número na Cloud API" foi escrito (`src/lib/meta-cloud.ts` + `api/meta-connect.ts` ação `register` + `ChannelsSettings.tsx`). **Não publicado** (depende da #30) e **não executado** — registrar é ação irreversível na conta do dono. #31 só fecha quando o `platform_type` do número voltar `CLOUD_API` | #30 | 06/09/2026 |
@@ -151,6 +162,14 @@ Nenhuma até agora.
 | 23b | **#23 IMPLEMENTADA em 06/09** — bucket privado `whatsapp-hub-inbox-media` criado (RLS admin+recepção por org), `meta-webhook` guarda a mídia recebida, `transcribe-audio` voltou a funcionar, expurgo diário de 12 meses no ar (cron `wh-purge-inbox-media`, 03:20 UTC). **Não fecho sozinho** (regra 4): só fecha com o Danilo confirmando pela tela que foto e áudio de paciente aparecem no thread — o que **depende do deploy na Vercel** (#30) | #30 | 06/09/2026 |
 | 36b | **#36 IMPLEMENTADA e PUBLICADA em 06/09** — `send-operator-media` v3 guarda cópia do que o operador manda no mesmo bucket privado e grava a referência em `media_url`. **Não fecho sozinho:** só fecha quando o Danilo anexar uma imagem pelo clipe e vê-la no balão — o que **depende do deploy na Vercel** (#30) | #30 | 06/09/2026 |
 | 38 | **IA não enxerga a foto do paciente.** `process-ai-message::describeImage` (linha ~89) faz `fetch(imageUrl)` puro — funciona com URL http do Zernio, mas **não abre referência de bucket privado**, que é o formato novo de `media_url`. Correção: bifurcar com `inboxMediaParseRef` + `inboxMediaDownload` (service role), como já foi feito no `transcribe-audio`, e **republicar** (a função está na v3). O `meta-webhook` já chama `process-ai-message` quando chega imagem, então basta corrigir e publicar. **Sem regressão hoje:** ela responde `skipped: sem conteúdo textual`, igual a antes | IA responder a foto | 06/09/2026 |
+| 1b | **#1 RESOLVIDA no banco em 06/09** — `products.product_type` migrado para a taxonomia odonto (opção A do ODONTO.md §5), `products_quantity_chk` reescrito junto, 4 procedimentos semeados. **Não fecho sozinho** (regra 4): só fecha com o Danilo confirmando | — | 06/09/2026 |
+| 2b | **#2 RESOLVIDA no banco em 06/09** — `deals.stage_entered_at` + os 2 triggers + gatilho `stage_stalled` no enum. Testado: insert respeita a data informada, UPDATE sem troca de etapa não mexe no relógio, mover zera, 2 linhas de `stage_change` gravadas. **Não fecho sozinho** | — | 06/09/2026 |
+| 3b | **#3 RESOLVIDA pelo dono em 06/09** — cadência **D+1, D+3, D+7** (não D+15/D+30). As 3 regras existem no banco, **desativadas e sem template** | — | 06/09/2026 |
+| 44 | **`check-follow-ups` NÃO entende `stage_stalled`.** A Edge Function (cron 15min) só implementa `no_reply`, `inactivity` e `no_purchase`; ela lê apenas regras `is_active=true`, então **nada dispara hoje** e não há risco. Falta: (a) o ramo `stage_stalled` na função — consultar `deals` do funil por `stage_entered_at < now() - delay_hours` e não `contacts`, que é o que os outros três fazem; (b) o ramo `meta` de envio (pendência #22); (c) republicar. A tela de Automações já **bloqueia ligar** a regra e explica por quê | A régua funcionar de verdade | 06/09/2026 |
+| 45 | **Textos dos 3 modelos da régua D+1/D+3/D+7.** Estrutura pronta, `template_id = NULL` de propósito — o conteúdo é responsabilidade do dono (publicidade odontológica / CFO). Agente não escreve mensagem para paciente | #44 e qualquer envio | 06/09/2026 |
+| 46 | **Frontend do CRM odonto não publicado.** A tela de importação (`ImportOrcamentosDialog`), o parser (`webdental.ts`), o motor (`odontoImport.ts`), o botão no funil, o ativar/desativar de funil e o filtro `is_active` nos seletores existem **só no disco**. Sem deploy na Vercel **não há como importar orçamento pela interface**. Publicar é decisão do Danilo — reforça a #30 | Toda a importação | 06/09/2026 |
+| 47 | **A inferência "sumiu do relatório = aprovado" é INFERÊNCIA, não confirmação.** Sair do relatório de não aprovados significa aprovado **ou cancelado** no WebDental. O importador grava uma nota em `crm_activities` dizendo isso em cada oportunidade movida, e a tela deixa desmarcar a opção. **Antes de contar como receita, alguém precisa conferir na clínica.** Decisão de processo: quem confere e quando | Confiar no número de conversão | 06/09/2026 |
+| 48 | **Quem opera a importação diária e em que horário** (a #4 continua aberta). O relatório precisa ser exportado do WebDental todo dia e subido no CRM; sem isso a régua e a inferência de aprovação param | Rotina | 06/09/2026 |
 
 ---
 
@@ -2642,3 +2661,363 @@ gravando a referência em `media_url`. Falhar nessa cópia **não desfaz o envio
   tem que virar **texto transcrito**; (3) anexar uma imagem pelo clipe e
   conferir que ela também aparece (fecha a #36); (4) corrigir o
   `describeImage` do `process-ai-message` (#38) para a IA enxergar a foto.
+
+### 2026-09-06 · Claude Code · FASE 1 CONCLUÍDA — guarda de mídia publicada (`cf00214`)
+
+**Publicado** commit `cf00214`. Vercel republicando. **FASE 1 DO PLANO: CONCLUÍDA**
+(pendente de validação do Danilo pela tela).
+
+**O que passou a funcionar:** paciente manda áudio → o CRM baixa da Meta, guarda
+em bucket privado, **transcreve por Whisper**, grava o texto e **a IA responde**.
+Paciente manda foto → guardada e exibida na conversa por URL assinada.
+
+**Bucket `whatsapp-hub-inbox-media`** · `public=false` · 25 MB · 27 MIME.
+Policy de SELECT só para `admin`/`operator` **da própria org**; **nenhuma policy
+de escrita** (só service role). Testado com JWT simulado: admin de outra org e
+`anon` **não** enxergam. Caminho `{org_id}/{conversation_id}/{message_id}.{ext}`
+— `org_id` primeiro porque é o que a policy confere; nome pelo **UUID da
+mensagem**, não pelo wamid (que tem `.` e `=`, e **não existe** na mídia que o
+operador envia). `messages.media_url` passa a guardar **referência**
+`bucket/path`; valor http legado do Zernio segue tratado como URL, sem migração.
+
+**Funções republicadas, todas conferidas por sha256:** `meta-webhook` **v4** ·
+`transcribe-audio` **v2** · `send-operator-media` **v3** (fecha a #36) ·
+`purge-inbox-media` **v1** (nova).
+
+**Expurgo:** cron `wh-purge-inbox-media` às **03:20 UTC = 00:20 de Itabuna**.
+Apaga o arquivo primeiro, depois zera `media_url`; **não apaga a mensagem**.
+Testado pelo caminho real do cron: `200 {"ok":true,"retention_days":365,"purged":0}`.
+
+**Detalhes que evitaram bug:**
+- Download em `EdgeRuntime.waitUntil`, **depois** do 200 — não estoura o timeout
+  do webhook. Reentrega **não duplica**: `claimEvent('meta:msg:<wamid>')` é
+  gravado **antes** do insert, e o upload usa `upsert`.
+- `transcribe-audio::downloadAudio` **bifurca**: referência de bucket → download
+  pela **service role** (não passa por RLS); URL http → `fetch`, como antes.
+  Era exatamente aqui que o bucket privado quebraria.
+- O gatilho `on_audio_inbound` é AFTER **INSERT** e exige `media_url NOT NULL`,
+  então o `meta-webhook` chama a transcrição **explicitamente** depois de gravar.
+
+**⚠️ SEGUNDO CASO DOS "2 BYTES A MAIS":** o 1º envio do `meta-webhook` (v3) saiu
+com dois espaços a mais num comentário do `_shared/zernio.ts` — **exatamente o
+mesmo ponto** do incidente anterior do dia. Reenviado corrigido (v4).
+**Conferir sha256 do deploy pegou os dois casos.** Não é formalidade.
+
+**⚠️ ARMADILHA NOVA DO INLINER (a 5ª registrada):** `import type { X }` em
+`_shared/*` faz o hoister emitir `import type, { …, type X, X }` — **dois
+bindings iguais = SyntaxError e BOOT_ERROR**. Usar `import { type X }`.
+
+**PENDÊNCIA NOVA #38 — a IA ainda não enxerga FOTO.**
+`process-ai-message::describeImage` faz `fetch(media_url)` puro, que não abre
+bucket privado. **Sem regressão hoje** (fonte no disco == publicado v3, sem
+drift), mas a IA descreve imagem só de URL pública. Correção: aplicar a mesma
+bifurcação do `transcribe-audio` e republicar. **Áudio funciona; foto não.**
+
+- **Banco:** migração `20260906230000_inbox_media_bucket.sql` aplicada, com
+  reversão registrada — **com aviso de que apagar o bucket destrói mídia de
+  paciente**.
+- **Próximo:** (a) Danilo valida pela tela (pendências #34b, #23b, #36b);
+  (b) decidir sobre a #38 (IA enxergar foto); (c) **Fase 2 — disparo dos 63
+  orçamentos com freio de ritmo**, travada por D2.1 (números do freio) e D2.4
+  (textos dos modelos).
+
+### 2026-09-06 · Claude Code · TEXTOS DOS TEMPLATES APROVADOS PELO DANILO
+
+**APROVAÇÃO REGISTRADA (pendência #7 — publicidade odontológica).**
+O Danilo pediu que o agente redigisse, revisou e **aprovou explicitamente** em
+06/09/2026 os 6 textos abaixo. Confirmou também o nome da clínica e pediu a
+versão específica para **filiado do Cartão de TODOS**.
+
+**Régua decidida por ele: D+1 · D+3 · D+7**, encerrando como não aprovado
+após 7 dias. (Antes a proposta era D+1/3/7/15/30; ele encurtou.)
+
+**Modelo de escolha:** o CRM decide a versão pela **Tabela do Orçamento** do
+relatório — 58 registros são "Cartão de TODOS" (filiado) e 22 "Particular".
+Ninguém escolhe na mão.
+
+**Nomenclatura respeitada:** FILIADO do Cartão de TODOS, nunca "sócio".
+
+**PARTICULAR**
+- D+1: "Olá, {{1}}! Aqui é da Clínica Amor Saúde Itabuna – Odontologia. Passando
+  para saber se ficou alguma dúvida sobre o orçamento que preparamos para você
+  ontem. Se quiser conversar sobre o tratamento ou sobre as formas de pagamento,
+  é só responder por aqui. Estamos à disposição."
+- D+3: "Olá, {{1}}! Tudo bem? Seu orçamento na Amor Saúde Odontologia continua
+  disponível. Se o valor foi a questão, podemos ver junto as formas de pagamento
+  e as condições da sua tabela. E se ficou alguma dúvida sobre o tratamento, a
+  gente explica com calma. É só responder por aqui."
+- D+7: "Olá, {{1}}. Como não tivemos retorno, vamos encerrar seu orçamento na
+  Amor Saúde Odontologia por enquanto. Se ainda tiver interesse, responda esta
+  mensagem que retomamos de onde paramos — sem precisar refazer a avaliação.
+  Seguimos à disposição quando for melhor para você."
+
+**FILIADO CDT** — mesma estrutura, acrescentando a condição de filiado:
+- D+1: "…Os valores já estão com a condição de filiado do Cartão de TODOS…"
+- D+3: "…com os valores da sua tabela de filiado do Cartão de TODOS…"
+- D+7: "…Sua condição de filiado do Cartão de TODOS continua valendo…"
+
+**CRITÉRIOS DE REDAÇÃO (justificam a conformidade, não apagar):**
+1. **CFO:** nenhum resultado prometido, nenhum apelo sensacionalista, nenhuma
+   banalização de tratamento. Tom informativo e acolhedor.
+2. **Meta:** escritos como acompanhamento de atendimento, para tentarem
+   aprovação como **Utilidade** (mais barato e aprova mais que Marketing).
+3. **Sem valor e sem nome do tratamento no texto.** Dois motivos: dado clínico
+   em mensagem é exposição desnecessária, e **família compartilha telefone** —
+   o orçamento do filho pode chegar no celular da mãe.
+4. **Nenhum desconto ou percentual prometido** — só "ver junto as formas de
+   pagamento" e "os valores já contemplam a condição de filiado". Abre a
+   conversa sem comprometer a clínica.
+5. O D+7 usa encerramento ("vamos encerrar") em vez de insistência, e remove o
+   atrito principal de quem sumiu: "sem precisar refazer a avaliação".
+
+**Nomes técnicos a usar na Meta** (minúsculas, números e underscore):
+`odonto_orcamento_d1_filiado` · `odonto_orcamento_d3_filiado` ·
+`odonto_orcamento_d7_filiado` · `odonto_orcamento_d1_particular` ·
+`odonto_orcamento_d3_particular` · `odonto_orcamento_d7_particular`
+Idioma **pt_BR** · variável `{{1}}` = primeiro nome do paciente.
+⚠️ **Lembrete do CDT (08/05/2026):** template com variável **numerada** `{{1}}`
+exige tipo **"Número"** na Meta; o tipo "Nome" exige `{{nome}}`.
+
+- **Banco:** nenhuma migração nesta entrada.
+- **Próximo:** submeter os 6 pelo CRM (testa `submit-template`, que nunca foi
+  exercitado contra a API real) e aguardar aprovação da Meta.
+
+### 2026-09-06 · Claude Code · PRAZO DEFINIDO — operação começa terça, 08/09/2026
+
+**Decisão do Danilo (06/09):** a pessoa que vai operar o CRM no dia a dia
+**estará disponível a partir de terça-feira, 08/09/2026**. Fecha parcialmente a
+**pendência #4**, aberta desde 05/09 (faltava definir quem opera).
+
+**O que isso implica — tudo abaixo precisa estar pronto ANTES de 08/09:**
+1. Estrutura do CRM Odonto: funil, campos, catálogo, relógio de estagnação
+   *(em construção por subagente)*
+2. Os **6 templates submetidos e APROVADOS** pela Meta (textos já aprovados
+   pelo Danilo em 06/09)
+3. **Importação testada** com o arquivo real (81 tratamentos · 64 orçamentos ·
+   R$ 68.436,03)
+4. **⚠️ ACESSO DA PESSOA AO CRM** — hoje existe **1 único usuário** no sistema
+   (itabuna.danilo@gmail.com, admin + super_admin). A operadora vai precisar de
+   convite com perfil `operator`. Isso **não foi feito** e ninguém lembrou até
+   agora. A Edge Function `invite-team-member` existe (envia link copiável;
+   o e-mail só sai com SMTP próprio no projeto). **Nova pendência #39.**
+
+**Ordem sugerida até terça:** estrutura → templates aprovados → importação
+testada com o arquivo real → convite da operadora → treino dela na tela.
+
+**O que NÃO precisa estar pronto até terça:** o disparo em massa com freio
+(Fase 2 do plano de migração). Com a estrutura e os templates, a operadora
+consegue trabalhar **manualmente** pelo inbox — abrir a conversa, escolher o
+modelo, enviar. O disparo automático escala depois.
+
+- **Banco:** nenhuma migração nesta entrada.
+
+### 2026-09-06 · Claude Code · ESCOPO AJUSTADO pelo Danilo — sem disparos por enquanto
+
+**Correção de entendimento.** O agente vinha tratando o disparo em massa como
+próximo passo e insistiu duas vezes nos números do freio. **O Danilo esclareceu:**
+> *"não vamos fazer disparos no momento, só te enviei o relatório para você
+> entender o relatório que será importado"*
+
+**ESCOPO VIGENTE (06/09/2026):**
+
+✅ **Em construção / a fazer:**
+- Estrutura do CRM Odonto: funil de 5 etapas, campos do orçamento, catálogo de
+  procedimentos, **relógio de "parado há N dias"**
+- **Entrada do relatório** — a importação do arquivo do WebDental
+
+⛔ **FORA de escopo por decisão do dono, até nova ordem:**
+- **Disparo em massa** (Fase 2 do `PLANO-MIGRACAO-META.md`)
+- **Régua automática** de follow-up
+- **Painéis e relatórios de conversão** (o agente ofereceu conversão por
+  dentista, por especialidade e filiado × particular — o Danilo recusou por ora)
+- Definição de quem opera *(ele decidiu tratar depois das funcionalidades)*
+
+**Consequência prática:** as regras de follow-up devem ficar **criadas e
+DESATIVADAS**; nenhum cron de disparo deve ser ligado; nenhum template precisa
+ser submetido com urgência.
+
+**Os 6 templates aprovados em 06/09 ficam guardados** no `MEMORIA.md`, prontos
+para submissão quando o dono quiser. A aprovação da Meta leva minutos.
+
+> **Lição de processo para os próximos agentes:** o dono corrigiu o rumo duas
+> vezes hoje (parar de alertar sobre conversas aguardando, e agora o disparo).
+> **Perguntar o escopo antes de propor a próxima obra**, em vez de assumir que
+> a sequência do plano é o que ele quer agora.
+
+- **Banco:** nenhuma migração nesta entrada.
+
+### 2026-09-06 · Claude Code (subagente) · Estrutura do CRM Odonto
+
+- **Pedido:** montar a estrutura do CRM de odontologia — (1) funil "Odonto —
+  Orçamentos" com as 5 etapas, desativando (não excluindo) os 2 funis do seed;
+  (2) os 9 campos do orçamento; (3) catálogo de procedimentos com a taxonomia
+  odonto; (4) 🔴 **o relógio de "parado há N dias", que não existia**;
+  (5) importação DIÁRIA inteligente com resumo antes de gravar; (6) régua
+  D+1/D+3/D+7 desativada e sem template. Sem `git push`, sem deploy na Vercel,
+  sem tocar em segredo. Autorizado: migrações versionadas e deploy das Edge
+  Functions que eu criasse ou alterasse.
+
+**1. BANCO — 4 migrações, todas com reversão registrada.** Linha completa de
+cada uma na tabela *Mudanças no banco*. `npm run db:push` e `/setup` **não**
+foram rodados.
+
+| Migração | O que entrega |
+|---|---|
+| `20260907120000_odonto_crm_estrutura` | relógio de etapa (coluna + 2 triggers + índice) · taxonomia odonto em `products` · `custom_fields.key` · `pipelines.is_active` · `deals.external_ref` |
+| `20260907120100_followup_trigger_stage_stalled` | `ALTER TYPE follow_up_trigger ADD VALUE 'stage_stalled'` |
+| `20260907120200_odonto_crm_seed` | funil + 5 etapas · 9 campos · 4 procedimentos · 3 regras da régua (desativadas) |
+| `20260907120300_deals_external_ref_index_full` | correção: índice único **parcial** não é inferível por `ON CONFLICT` |
+
+**2. 🔴 O RELÓGIO — o que faltava para o projeto inteiro existir.**
+`deals.stage_entered_at` + `deals_stage_clock_bu` (BEFORE UPDATE) +
+`deals_stage_change_activity_aiu` (AFTER INSERT OR UPDATE OF stage_id) +
+`idx_deals_stage_clock`.
+
+> **A guarda que fez a diferença.** O trigger só carimba `now()` quando o
+> `stage_entered_at` **não foi informado** no próprio UPDATE
+> (`NEW.stage_entered_at IS NOT DISTINCT FROM OLD.stage_entered_at`). É o que
+> permite à importação preservar a **Dt Orçamento**. Sem isso, todo orçamento
+> antigo entraria como se tivesse nascido hoje e a régua dispararia errado —
+> exatamente o erro que o pedido mandava evitar.
+
+**Testado no banco, com deal de verdade, e depois apagado:**
+
+| Passo | Esperado | Resultado |
+|---|---|---|
+| INSERT com `stage_entered_at='2026-09-01T12:00Z'` | respeita a data informada | ✅ ficou 01/09 |
+| UPDATE de `value` (sem trocar etapa) | relógio **não** anda | ✅ inalterado |
+| UPDATE trocando `stage_id` | relógio zera para `now()` | ✅ zerou |
+| UPDATE trocando etapa **e** informando a data | respeita a informada | ✅ ficou 20/08 |
+| `crm_activities(type='stage_change')` | 2 linhas | ✅ `(criado) -> Orçamento apresentado`, `Orçamento apresentado -> Em negociação` |
+
+Base ficou limpa: **0 deals, 0 atividades** ao fim do teste.
+
+**3. O ARQUIVO REAL — dois defeitos que só a simulação revelou.**
+
+> **(a) O `.xls` é HTML, e o SheetJS ERRA A DATA.** O SheetJS lê o arquivo, mas
+> converte "2026-09-01" em `Date` e formata no fuso local: em Itabuna (UTC-3)
+> vira **31/08**. Todo orçamento perderia um dia e a régua D+1/D+3/D+7
+> dispararia errado. Por isso o caminho principal do parser lê o **texto cru**
+> da tabela HTML; o SheetJS ficou só como plano B, e lá a data é lida com os
+> getters **UTC**, que desfazem o deslocamento.
+>
+> **(b) O relatório exporta telefone SEM o código do país** ("73-98882-7126"), e
+> 3 dos 81 vêm sem o nono dígito ("73-8841-4920"). `canonicalPhone` sozinho
+> devolvia `+73988827126` — que não é telefone nenhum. Entrou
+> `telefoneDoRelatorio()`, que repõe o "55" **antes** e só então aplica a regra
+> do nono dígito de `src/lib/phone.ts`. Conferido: `73-8841-4920` →
+> `+5573988414920`.
+
+**Um terceiro achado, menor:** "ConceiÇÃo", "AssunÇÃo", "JoÃo", "GuimarÃes",
+"VictÓria" **não são erro de codificação** — os bytes são UTF-8 válidos. É um
+`strtolower()` byte a byte na origem, que rebaixa só o A-Z e deixa a acentuada
+maiúscula no meio da palavra. `repararCaixa()` conserta com regra conservadora
+(só rebaixa acentuada maiúscula precedida de minúscula **no resultado**), então
+"SÃO BOAVENTURA" passa intacto. `repararMojibake()` ficou como rede de
+segurança para o dia em que o arquivo chegar lido como Latin-1.
+
+**4. SIMULAÇÃO COM O ARQUIVO REAL — bateu R$ 68.436,03.**
+Rodada fora do navegador, com um cliente Supabase de mentira alimentado com o
+**estado real** do banco (3 contatos, 4 procedimentos, 9 campos, o funil e as
+5 etapas). Cinco cenários:
+
+| # | Cenário | Resultado |
+|---|---|---|
+| 1 | Primeira importação | **64 orçamentos · R$ 68.436,03** · 58 contatos novos + 1 reaproveitado · 576 valores de campo (64×9) · 76 itens · **64 de 64 com `stage_entered_at` = Dt Orçamento** · 0 erros |
+| 2 | Reimportar o **mesmo** arquivo | **0 novos, 64 sem mudança, 0 gravações** — idempotente |
+| 3 | Dia seguinte, 10 sumiram e 1 mudou de valor | 10 → **Aprovado** (`status='won'`) com nota da inferência · 1 atualizado, mudança detectada: `valor 213.8 → 313.8` |
+| 4 | 20 dias depois | 54 → **Não aprovado** (`status='lost'`, `lost_reason` explicando a régua) |
+| 5 | Relatório de **outubro** | **0 aprovados** — a inferência não toca orçamento fora do período do export |
+
+**O contato reaproveitado não foi sorte:** "Sérgio O Fernandes"
+(`+5573999374142`, já no banco) é o paciente "Sergio De Oliveira Fernandes" do
+arquivo. A busca por variantes do telefone reconheceu e **não duplicou** — a
+regra do nono dígito de 06/09 trabalhando.
+
+**5. AS ARMADILHAS DO ARQUIVO, uma a uma.**
+
+| Armadilha | Como foi tratada |
+|---|---|
+| 4 telefones atendem **mais de um paciente** (um atende 3) | **Contato = telefone**, orçamento carrega o paciente. `contacts.custom_fields.pacientes` lista a casa inteira. O contato de família ficou com **3 orçamentos** |
+| Duas **próteses idênticas** no mesmo dia (Givaldo) | `deal_products` tem PK `(deal_id, product_id)`: o segundo não cabe em linha própria → vira **quantidade 2**, valor somado (R$ 2.916). Deal fechou em R$ 4.911, correto |
+| 3 telefones com **10 dígitos** | `telefoneDoRelatorio` + regra do nono dígito |
+| 1 orçamento com **valor zero** | Entra assim mesmo (é o dado do dono) e vira aviso no resumo |
+| 14 orçamentos com **mais de 1 tratamento** | Agrupados por `(paciente, data)` → 1 deal com N itens |
+| Reimportação | `deals.external_ref` = `webdental:<slug do paciente>:<data>` + índice único por org |
+
+> **Por que a chave do orçamento NÃO tem o telefone.** Se a recepção corrigir o
+> número num export seguinte, o orçamento continua sendo o mesmo: o CRM
+> atualiza o contato em vez de criar um deal duplicado.
+
+**6. IMPORTAÇÃO — a tela.** `Funil → Importar orçamentos` (só aparece no funil
+da odonto, só para admin). Fluxo: arquivo → **simulação** → confirmação →
+resultado. **Nada é gravado antes do dono confirmar.** O resumo mostra novos /
+atualizados / sem mudança / valor total / contatos / famílias / procedimentos a
+criar / linhas ignoradas, e traz **duas travas que ele pode desmarcar**:
+inferir aprovados e encerrar em 7 dias.
+
+**Decisão que tomei e vale registrar: o encerramento automático em D+7 só pega
+quem NUNCA saiu de "Orçamento apresentado".** Orçamento que uma pessoa já moveu
+para "Em negociação" ou "Aguardando decisão" é apenas **reportado**, nunca
+encerrado — o CRM não desfaz trabalho humano por prazo.
+
+**7. A inferência de aprovação é honesta sobre si mesma.** Cada oportunidade
+movida ganha uma nota em `crm_activities` dizendo que sair do relatório
+significa aprovado **ou cancelado**, que é inferência e não confirmação, e
+citando o período do export. E se um orçamento já encerrado **voltar** ao
+relatório, a importação **não reabre sozinha** — só avisa (pendência #47).
+
+**8. RÉGUA D+1/D+3/D+7 — pronta e DESLIGADA.** 3 regras `stage_stalled`,
+`delay_hours` 24/72/168, `params` com `pipeline_id`+`stage_id`+`days`,
+`provider='meta'`, **`is_active=false` e `template_id=NULL`**. A tela de
+Automações mostra o gatilho ("Oportunidade parada na etapa há N dias") e
+**bloqueia ligar**, explicando que falta o motor e o texto do dono.
+`check-follow-ups` **não foi tocada nem republicada** — ela só lê regras ativas,
+então não há risco hoje, e republicá-la traria o `_shared` novo sem necessidade
+(pendência #35). Pendência **#44** aberta com o que falta na função.
+
+- **Banco:** 4 migrações aplicadas via MCP `apply_migration`, arquivos
+  versionados em `supabase/migrations/`, reversão de cada uma na tabela
+  *Mudanças no banco*.
+
+- **Arquivos:**
+  `supabase/migrations/20260907120000_odonto_crm_estrutura.sql` (**novo**) ·
+  `supabase/migrations/20260907120100_followup_trigger_stage_stalled.sql` (**novo**) ·
+  `supabase/migrations/20260907120200_odonto_crm_seed.sql` (**novo**) ·
+  `supabase/migrations/20260907120300_deals_external_ref_index_full.sql` (**novo**) ·
+  `src/lib/webdental.ts` (**novo**, parser puro) ·
+  `src/lib/odontoImport.ts` (**novo**, plano + aplicação) ·
+  `src/components/funil/ImportOrcamentosDialog.tsx` (**novo**) ·
+  `src/app/routes/funil/FunilPage.tsx` · `src/components/funil/FunilManager.tsx` ·
+  `src/hooks/usePipeline.ts` · `src/types/crm.ts` · `src/types/campaigns.ts` ·
+  `src/components/automations/FollowUpsTab.tsx` ·
+  `src/components/funil/AddToPipelineModal.tsx` ·
+  `src/components/crm/AddToPipelineDialog.tsx` ·
+  `src/components/automations/FunnelAutomationsTab.tsx` ·
+  `src/components/campaigns/CampaignWizard.tsx` · `MEMORIA.md`.
+
+- **Validação:** `npx tsc -b`, `npx tsc -p tsconfig.api.json --noEmit` e
+  `npx vite build` passam sem erro. `npm run validate:sql` valida as **100**
+  migrations. Trigger testado no banco real. Importação simulada 5x com o
+  arquivo real.
+
+- **Não feito / limites desta entrega:**
+  - **Nenhum segredo lido, pedido, gerado ou gravado.**
+  - **Nenhum `git push`, nenhum deploy na Vercel** — pendência **#46**.
+  - **Nenhuma Edge Function deployada.** Não precisei criar nem alterar
+    nenhuma: tudo é banco + frontend. `check-follow-ups` ficou intacta de
+    propósito (ver item 8).
+  - **Nenhum texto de mensagem para paciente foi escrito** — as regras nascem
+    sem template (pendência **#45**).
+  - **Nenhuma pendência fechada por mim** (regra 4). As #1, #2 e #3 têm banco
+    pronto e viraram #1b/#2b/#3b aguardando o Danilo.
+  - **`funnel_automations` está vazia** (0 linhas) — conferido antes, senão
+    importar 64 deals dispararia 64 automações.
+  - A importação roda **no navegador**, com a sessão do usuário e sob RLS.
+    Não há Edge Function nem cron para ela: é o dono que sobe o arquivo.
+
+- **Próximo:** (1) Danilo autoriza o deploy na Vercel (#46); (2) importar o
+  relatório do dia pela tela e conferir os 64 orçamentos no funil; (3) decidir
+  quem exporta o relatório todo dia (#48); (4) escrever os 3 textos da régua
+  (#45); (5) implementar o ramo `stage_stalled` em `check-follow-ups` (#44),
+  que depende do ramo `meta` de envio (#22).

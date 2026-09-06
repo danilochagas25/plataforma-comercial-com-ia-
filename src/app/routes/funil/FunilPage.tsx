@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Archive, ArchiveRestore, ChevronDown, Clock, GitBranchPlus, Plus, RefreshCw, Settings2, X } from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronDown, Clock, FileUp, GitBranchPlus, Plus, RefreshCw, Settings2, X } from 'lucide-react';
 import { getSupabase } from '@/lib/supabase';
 import { usePipeline } from '@/hooks/usePipeline';
 import { useAppUser } from '@/app/providers/AppUserProvider';
 import { LoadErrorBanner } from '@/components/LoadErrorBanner';
 import { DealDrawer } from '@/components/funil/DealDrawer';
 import { FunilManager } from '@/components/funil/FunilManager';
+import { ImportOrcamentosDialog } from '@/components/funil/ImportOrcamentosDialog';
+import { PIPELINE_ODONTO } from '@/lib/odontoImport';
 import { applyFunilFilters, EMPTY_FILTERS, FunilFilters, sortFunilDeals, type FunilFilterState, type FunilSort } from '@/components/funil/FunilFilters';
 import { DUE_TONE_STYLE, dueTone, getDealOrigin, TEMPERATURE_STYLE, TRAFFIC_TYPE_STYLE, type ContactLite, type Deal, type Stage } from '@/types/crm';
 import { VOCAB } from '@/config/vocab';
@@ -38,6 +40,7 @@ export default function FunilPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [filters, setFilters] = useState<FunilFilterState>(EMPTY_FILTERS);
   const [sort, setSort] = useState<FunilSort>('recente');
   const [visibleByStage, setVisibleByStage] = useState<Record<string, number>>({});
@@ -147,6 +150,16 @@ export default function FunilPage() {
               </>
             )}
           </div>
+          {/* Importação diária do WebDental — só no funil da odonto, que é o
+              único que tem orçamento vindo do relatório Controle de Efetivação. */}
+          {role === 'admin' && pipeline?.name === PIPELINE_ODONTO && (
+            <button
+              onClick={() => setImportOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-[rgba(212,165,116,0.25)] px-3 py-2 text-sm text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)]"
+            >
+              <FileUp className="h-4 w-4" /> Importar orçamentos
+            </button>
+          )}
           {role === 'admin' && (
             <button
               onClick={() => setManageOpen(true)}
@@ -258,6 +271,13 @@ export default function FunilPage() {
       {manageOpen && (
         <FunilManager funil={funil} onClose={() => setManageOpen(false)} />
       )}
+
+      <ImportOrcamentosDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onDone={() => void reload()}
+      />
+
 
       {archivedOpen && (
         <ArchivedPanel
