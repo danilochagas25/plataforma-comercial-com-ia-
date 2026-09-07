@@ -12,7 +12,7 @@
 | configuração | 07/09 14:00 | `src/lib/odontoImport.ts` · `src/lib/webdental.ts` · `ImportOrcamentosDialog.tsx` · banco | **concluído** — publicado em `498dddb` |
 | configuração | 07/09 15:00 | `src/lib/odontoImport.ts` (só ele) | **concluído** — bug de classificação de aprovados corrigido. **NÃO publicado**, aguarda o "pode" do Danilo |
 | design | 07/09 13:30 | `globals.css` · `src/components/ui/*` · `src/app/layout/*` · `design/` | publicou `d940f21`, `d259d8e`, `e8669c0`, `0ebc09f` — verificar se segue ativa |
-| configuração | 07/09 15:45 | `src/lib/dashboard.ts` · `src/hooks/useOdontoConversion.ts` (novo) · `src/components/dashboard/OdontoWidgets.tsx` (novo) · `src/app/routes/dashboard/DashboardPage.tsx` (**fronteira com design** — só lógica/dados, sem redesenho) | **em curso** — painel de conversão da odonto |
+| configuração | 07/09 15:45 | `src/lib/dashboard.ts` · `src/hooks/useOdontoConversion.ts` (novo) · `src/components/dashboard/OdontoWidgets.tsx` (novo) · `src/app/routes/dashboard/DashboardPage.tsx` (**fronteira com design** — só lógica/dados, sem redesenho) | **concluído** — painel de conversão da odonto. **NÃO publicado**, aguarda o "pode" do Danilo |
 | WhatsApp/IA | 07/09 15:20 | `supabase/functions/copilot-suggest/` (nova) · `src/components/inbox/CopilotPanel.tsx` (novo) · `src/components/inbox/MessageInput.tsx` · `src/app/routes/inbox/InboxPage.tsx` | **concluído** — copiloto do atendente. Edge Function publicada (v3, sha conferido). **Frontend NÃO publicado**, aguarda o "pode" do Danilo |
 | comercial | — | textos e templates | não declarou |
 

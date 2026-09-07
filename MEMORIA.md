@@ -4746,3 +4746,245 @@ precisa ler esse parâmetro** — hoje ele é ignorado, sem prejuízo.
   paciente**; (3) importar os orçamentos pela tela do funil, senão o bloco de
   contexto sai vazio (hoje `deals` = 0); (4) decidir a #57 antes de carregar a
   base de conhecimento.
+
+---
+
+## 07/09/2026 — As 4 funções publicadas (e como destravar deploy sem terminal)
+
+**🔑 Receita para publicar Edge Function quando o CLI não autentica.** O
+`npx supabase login` guarda o token no **Chaveiro do macOS**, visível só para a
+sessão gráfica do Danilo — o Bash do agente **não alcança**, nem com o sandbox
+desligado, nem usando a mesma versão do CLI. Caminho que funciona:
+
+1. Chrome → `supabase.com/dashboard/account/tokens` → **Generate new token**
+2. Escopo mínimo: *Resource access* = **Project** (só `CRM AMS Odontologia`),
+   *Application services* → **Edge Functions: Read-write**. Nada mais. O resumo
+   final deve dizer "Medium risk · Read-write on 1 capability, across 1 project".
+   **Expira em 7 dias** (default), então o risco se apaga sozinho.
+3. Clicar em **Copy** — o token vai para a área de transferência
+4. `SUPABASE_ACCESS_TOKEN="$(pbpaste)" npx supabase functions deploy ...`
+5. `printf '' | pbcopy` para limpar
+
+**O token nunca entra no contexto do agente nem no chat** — passa do clipboard
+direto para a variável de ambiente. Repetir esse padrão sempre que precisar de
+credencial do Danilo.
+
+**Publicadas:** `process-ai-message`, `transcribe-audio`, `generate-template`,
+`process-knowledge`. O deploy sobe os `_shared` como assets e o Supabase guarda
+tudo achatado num `index.ts` único (visto via `get_edge_function`).
+
+**Descartado:** publicar pelo MCP `deploy_edge_function`. Exigiria eu remontar
+os 12 arquivos / 120 KB de `process-ai-message` à mão no tool call — risco de
+corromper produção por um caractere.
+
+- **Token criado:** `claude-code-deploy-funcoes-ia`, expira **14/09/2026**.
+  Pode ser revogado a qualquer momento na mesma página.
+- **Estado:** `is_active=true`, `model` ainda **gpt-4.1-mini** — vira
+  `claude-sonnet-5` quando o Danilo salvar a tela com a chave da Anthropic.
+- **Falta:** chave Anthropic (só o Danilo cria) e a Vercel terminar o build do
+  commit `ceff3f2` para o campo aparecer.
+
+---
+
+### 2026-09-07 · [FRENTE: configuração] · Painel de conversão da odonto
+
+- **Pedido (do dono):** *"Precisamos ter o total de valor de orçamentos, valores
+  aprovados, % conversão"* — mais a **conversão por especialidade**. O painel
+  tinha que responder de cara: **quanto foi orçado, quanto fechou, quanto está
+  parado e o quanto isso está longe da meta.**
+
+- **Feito.** O Painel deixou de ser o do template do curso (infoproduto:
+  "Fechamentos", "Previsão de caixa", "Quem mais fechou", 8 gráficos de origem
+  por UTM) e passou a ser o painel da clínica:
+
+  | Fileira | O que mostra |
+  |---|---|
+  | 1 | **Orçado no período · Aprovado · Parado** — valor, nº de tratamentos, fatia do valor orçado e média por tratamento |
+  | 2 | **Conversão em valor** e **Conversão em tratamentos**, cada uma com a meta 75% marcada como um traço na régua e o "X% abaixo da meta" escrito por extenso |
+  | 3 | **Conversão por especialidade** contra as metas oficiais da franqueadora (Clínica Geral 85% · Ortodontia 35% · Implantodontia 10% · Prótese 10%) + **Há quanto tempo estão parados** (destaque dos parados há mais de 7 dias, com faixas até 7 / 8-15 / 16-30 / +30 dias) |
+
+  **As duas conversões existem de propósito.** Na base real dão **33,7% em
+  valor** e **43,8% em tratamentos** — 10 pontos de diferença, porque *o que não
+  fecha é o caro*. Mostrar só uma esconde metade do diagnóstico, e a
+  franqueadora cobra as duas separadamente.
+
+- **Regras de negócio codificadas** (`useOdontoConversion.ts`):
+  - cada `deal` é **um tratamento** (decisão do dono, 06/09);
+  - **APROVADO** = etapa `is_won` (ou `status='won'`, para o card que nasceu na
+    etapa certa mas cuja gravação parou no meio);
+    **NÃO APROVADO** = `is_lost` / `status='lost'`; **PARADO** = todo o resto;
+    **ORÇADO** = a soma dos três;
+  - a **especialidade vem de `deal_products → products.product_type`**, nunca do
+    campo de texto `especialidade` — texto livre não sobrevive a renomeação;
+  - o **período é medido pela Dt Orçamento** (`custom_fields.key =
+    'dt_orcamento'`), **não** por `created_at`: a base veio de importação e todos
+    os registros nasceram no mesmo minuto. Sem Dt Orçamento, cai para
+    `created_at`;
+  - **"parado há N dias" é contado a partir da Dt Orçamento**, não de
+    `stage_entered_at`. O `stage_entered_at` da base importada é a hora da
+    importação — mostraria "0 dias" para orçamento de maio. Ele volta a ser o
+    relógio certo quando os operadores começarem a mover os cards.
+
+- **Filtro de período:** entrou o preset **"Tudo"**, que virou o default. A base
+  tem orçamento de **maio ainda em aberto**; com a janela de 30 dias do template
+  o total do painel nunca bateria com o total do funil e o dono acharia que
+  sumiu dinheiro. Os presets de mês (Este mês / Mês anterior / Personalizado)
+  continuam, que é como ele vai comparar mês a mês.
+
+- **O que foi RETIRADO do painel e por quê:**
+  - **os 8 widgets de UTM** (origem de tráfego / canal / campanha / anúncios /
+    posts + 3 de conversão por campanha) — paciente de odontologia chega pela
+    cadeira do dentista, não por anúncio. Nenhum orçamento tem UTM: ficariam
+    eternamente em *"Sem dados de rastreio ainda"*;
+  - **"Fechamentos" e "Não fecharam"** — duplicavam os cartões novos, só que
+    datados por `won_at`/`lost_at` em vez da Dt Orçamento. Dois números de
+    "aprovado" diferentes na mesma tela é o jeito mais rápido de o dono perder a
+    confiança no painel;
+  - **"Previsão de caixa"** — valor × probabilidade da etapa. É um chute
+    ponderado que competiria com o cartão **PARADO**, que dá o número real;
+  - **"Tempo até fechar"** — mede `created_at → won_at`, e `created_at` é a hora
+    da importação: mostraria sempre ~0;
+  - **o formulário "Valor líquido (custos do checkout/imposto)"** dentro de
+    *Escolher o que ver* — só existia para abater custo do cartão "Fechamentos",
+    que saiu. O hook `useSalesCosts.ts` **não foi apagado**, só deixou de ser
+    usado.
+
+- **O que foi MANTIDO do painel antigo:** **"Quem mais fechou"** e **"Tempo até
+  a 1ª resposta"**. Hoje mostram pouco (`owner_id` está nulo em todos os 141
+  orçamentos importados, e ninguém respondeu paciente ainda), mas são
+  exatamente as duas perguntas de cobrança do dia em que a recuperação começar:
+  *quem está recuperando* e *em quanto tempo o paciente é respondido*. Ficam
+  ligáveis/desligáveis em **Escolher o que ver**.
+
+- **Arquivos:**
+  - `src/hooks/useOdontoConversion.ts` — **novo**, toda a matemática e as consultas;
+  - `src/components/dashboard/OdontoWidgets.tsx` — **novo**, os quatro widgets;
+  - `src/lib/dashboard.ts` — registry de widgets reescrito, metas oficiais da
+    franqueadora, rótulos de especialidade e o preset de período "Tudo";
+  - `src/app/routes/dashboard/DashboardPage.tsx` — **território de fronteira com
+    a frente de design**. Mudou só a montagem dos widgets, o default do período,
+    o subtítulo do cabeçalho e a remoção do formulário de custos. **Nenhum token
+    de cor, classe ou componente visual novo**: reaproveita `WidgetCard`,
+    `.glass-card`, `.text-stat`, `.text-label` e as variáveis de
+    `globals.css`. `src/components/dashboard/widgets.tsx` **não foi tocado** —
+    `SalesKpiWidget`, `ForecastWidget`, `OriginDonutWidget` e `OriginBarsWidget`
+    continuam lá, exportados, prontos para voltar.
+
+- **Banco: nenhuma migração e nenhuma escrita.** Só `SELECT`, para conferir
+  esquema e números. A base foi deixada como estava.
+
+- **Publicado: não.** Nenhum `git add`, `commit`, `push` ou deploy.
+
+- **Validação — o código real rodado contra os dados reais.** O hook foi
+  empacotado com esbuild, com `react` e `getSupabase` substituídos por duplês, e
+  alimentado com as 141 linhas reais do banco (só leitura). Não é uma cópia da
+  lógica: é o arquivo que vai para produção.
+
+  | | Banco de hoje (141) | Base completa (144, simulada) | Tabela de validação |
+  |---|---|---|---|
+  | Orçado | 141 · R$ 101.792,88 | **144 · R$ 103.139,34** | 144 · R$ 103.139,34 ✅ |
+  | Aprovado | 63 · R$ 34.703,31 | **63 · R$ 34.703,31** | 63 · R$ 34.703,31 ✅ |
+  | Parado | 78 · R$ 67.089,57 | **81 · R$ 68.436,03** | 81 · R$ 68.436,03 ✅ |
+  | Conversão em valor | 34,09% | **33,65%** | 33,6% ✅ |
+  | Conversão em tratamentos | 44,68% | **43,75%** | 44,1% ⚠️ (ver abaixo) |
+  | Clínica Geral | 44,14% | **42,98%** | 43% ✅ |
+  | Prótese | 35,00% | **35,00%** | 35% ✅ |
+  | Ortodontia | 75,00% | **75,00%** | 75% ✅ |
+  | Implantodontia | 50,00% | **50,00%** | 50% ✅ |
+
+  `npx tsc -b`, `npx tsc -p tsconfig.api.json --noEmit` e `npx vite build`
+  passam sem erro.
+
+- **⚠️ DUAS COISAS PARA O DANILO SABER:**
+
+  1. **A base no banco está com 141 orçamentos, não 144.** Faltam **3 de Clínica
+     Geral não aprovados, R$ 1.346,46**. É exatamente o sintoma do defeito
+     corrigido hoje em `odontoImport.ts` (commit `9f98588`) que **ainda não
+     estava no ar quando a importação rodou, às 18:15 UTC**. Com os 3 no lugar o
+     painel bate ao centavo com a tabela de validação — foi o que a simulação
+     mostrou. **Não é problema do painel: é a importação que precisa ser refeita
+     depois do deploy.**
+  2. **A conversão em tratamentos dá 43,75%, não 44,1%.** 44,1% é 63÷143; o
+     total validado da base é **144** (63 aprovados + 81 parados), e 63÷144 =
+     43,75%. Os R$ 103.139,34 confirmam 144. O painel usa 144.
+
+  Um detalhe correto que parece erro: **"parados há mais de 7 dias" mostra R$ 0**
+  hoje. Todos os 78 parados do banco têm Dt Orçamento entre 01 e 05/09 — nenhum
+  passou de 6 dias ainda. Na semana que vem o cartão enche sozinho.
+
+- **Não feito:**
+  - **conferência pelo navegador** — a tela só abre com sessão do Supabase e não
+    tenho login. A validação foi feita rodando o código real contra os dados
+    reais, fora do navegador;
+  - **o procedimento órfão "DENTALVIDAS"** continua no catálogo (0 orçamentos
+    ligados, então não aparece no painel). Apagar é escrita no banco: não fiz;
+  - nenhum widget novo de origem/UTM foi apagado do arquivo da frente de design,
+    só deixou de ser montado na tela.
+
+- **Próximo:** (1) publicar o `odontoImport.ts` corrigido e **reimportar**, para
+  a base ir a 144 · R$ 103.139,34; (2) o Danilo abrir o Painel e conferir os
+  cartões; (3) decidir se "Quem mais fechou" e "Tempo até a 1ª resposta" ficam
+  ligados; (4) atribuir `owner_id` aos orçamentos para o ranking passar a
+  responder alguma coisa.
+
+---
+
+## 07/09/2026 · 16h — Reimportação conferida: 144 · R$ 103.139,34 ✅
+
+Terceira tentativa de importação, desta vez **depois** de confirmar a publicação.
+Antes de liberar o Danilo, baixei o bundle que estava servindo no ar
+(`assets/FunilPage-mHYXCnNQ.js`) e achei a guarda minificada dentro dele:
+
+```js
+U = o.etapas[he], W = (c,S) => (c.status==="won" || c.stage_id===U) === S.aprovado
+for (const c of V) { const S = o.dealsPorChaveBase.get(c.chaveBase);
+  !S || h.has(S.id) || W(S,c) && (w.set(...), k.set(...), h.add(S.id)) }
+```
+
+Isso é `mesmoLadoDaAprovacao` do commit `9f98588`. **Verificar o artefato
+publicado — não o commit — é o único jeito honesto de dizer "pode importar".**
+Foi o que faltou nas duas importações anteriores.
+
+### Resultado, conferido no banco
+
+| Etapa | Qtd | Valor |
+|---|---|---|
+| Orçamento apresentado | 81 | R$ 68.436,03 |
+| Aprovado | 63 | R$ 34.703,31 |
+| **Total** | **144** | **R$ 103.139,34** |
+
+`external_ref` distintas = 144 (nenhuma colisão), 0 deals sem referência.
+
+**Os três cruzados viraram dois cards cada, como devia:**
+
+| Paciente | Em aberto | Aprovado |
+|---|---|---|
+| Gustavo Pereira Santos | R$ 236,68 | R$ 0,00 |
+| Laura Hage Moraes | R$ 62,40 | R$ 852,07 |
+| Tania Santos Vieira | R$ 1.047,38 | R$ 20,80 |
+
+### Achado novo: 6 orçamentos de Clínica Geral com valor R$ 0,00
+
+Não é defeito da importação — **vieram zerados do próprio WebDental**, conferido
+linha a linha no HTML cru dos dois `.xls`. Anderson Santos De Oliveira, Carlos
+Alberto Dorea Dos Santos, Gustavo Pereira Santos, Juliete Alessandra Paes David,
+Suzane Roberta Costa Pedra e Valber Francisco Dos Santos. Cinco estão como
+aprovados; um (Carlos Alberto) em aberto.
+
+Consequência para o indicador: cada um desses conta como **tratamento aprovado
+sem nenhum valor**, o que **empurra a conversão em tratamentos para cima e a
+conversão em valor para baixo**. É provavelmente avaliação de cortesia lançada
+como tratamento no WebDental. Decidir com a clínica se entram no funil.
+
+### Pendência #52 (fila de recompra) — risco medido, não realizado
+
+A reimportação encheu `repurchase_predictions` com **57 linhas**, todas vencendo
+em 30 dias, a primeira em **12/09/2026**. O cron `repurchase-dispatch-daily`
+(`15 9 * * *`) está **ativo**. Mas os dois freios estão fechados:
+`repurchase_config.auto_send = false` e `template_name = null` — o kill-switch é
+a primeira condição de curto-circuito da função. **Nada será enviado.**
+
+Segue valendo a recomendação de remover a fila: o texto do template
+("seu estoque de {{2}} está acabando") é de varejo e não faz sentido nenhum para
+odontologia. Enquanto a função existir, ela é um disparo a um `UPDATE` de
+distância.

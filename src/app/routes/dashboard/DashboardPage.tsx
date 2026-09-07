@@ -1,44 +1,54 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { LayoutDashboard, RefreshCw, SlidersHorizontal, X } from 'lucide-react';
 import { useSalesDashboard } from '@/hooks/useSalesDashboard';
+import { useOdontoConversion } from '@/hooks/useOdontoConversion';
 import { useDashboardPrefs } from '@/hooks/useDashboardPrefs';
 import { operatorLabel, useOperators } from '@/hooks/useOperators';
-import { hasCosts, netRevenue, parseDecimal, useSalesCosts, type SalesCosts } from '@/hooks/useSalesCosts';
-import { useAppUser } from '@/app/providers/AppUserProvider';
 import {
-  ORIGIN_CHANNEL_LABEL,
   PERIOD_PRESETS,
-  TRAFFIC_LABEL,
   WIDGETS,
+  brl,
   periodRange,
   type PeriodKey,
   type WidgetKey,
 } from '@/lib/dashboard';
+import { DurationWidget, RankingWidget } from '@/components/dashboard/widgets';
 import {
-  DurationWidget,
-  ForecastWidget,
-  OriginBarsWidget,
-  OriginDonutWidget,
-  RankingWidget,
-  SalesKpiWidget,
-} from '@/components/dashboard/widgets';
+  ConversaoWidget,
+  EspecialidadeWidget,
+  OrcamentoKpiWidget,
+  ParadosWidget,
+} from '@/components/dashboard/OdontoWidgets';
 import { LoadErrorBanner } from '@/components/LoadErrorBanner';
 import { CredentialsBanner } from '@/components/CredentialsBanner';
 import { cn } from '@/lib/utils';
 import { VOCAB } from '@/config/vocab';
 
-const NO_UTM = 'Sem dados de rastreio ainda.';
-const NO_WON_UTM = 'Nenhuma venda ganha com rastreio no período.';
+// -----------------------------------------------------------------------------
+// Painel da odontologia (07/09/2026).
+//
+// O painel que veio do template do curso falava de infoproduto — "previsão de
+// caixa", "quem mais fechou", origem de tráfego por UTM — e não respondia
+// nenhuma pergunta de clínica. Foi substituído pelas quatro perguntas do dono:
+// quanto foi orçado, quanto fechou, quanto está parado e o quanto isso está
+// longe da meta da franqueadora.
+//
+// O período é medido pela **Dt Orçamento**, não pela data de criação do
+// registro: a base veio de importação e todos os registros nasceram no mesmo
+// minuto.
+// -----------------------------------------------------------------------------
 
 function isPeriodKey(v: string | null): v is PeriodKey {
-  return v === 'today' || v === 'yesterday' || v === 'this_week' || v === 'last_week' || v === '1d' || v === '7d' || v === '15d' || v === '30d' || v === '60d' || v === '90d' || v === 'this_month' || v === 'last_month' || v === 'custom';
+  return v === 'all' || v === 'today' || v === 'yesterday' || v === 'this_week' || v === 'last_week' || v === '1d' || v === '7d' || v === '15d' || v === '30d' || v === '60d' || v === '90d' || v === 'this_month' || v === 'last_month' || v === 'custom';
 }
 
 export default function DashboardPage() {
   const [params, setParams] = useSearchParams();
-  const periodKey: PeriodKey = isPeriodKey(params.get('period')) ? (params.get('period') as PeriodKey) : '30d';
+  // Default "Tudo": a base importada tem orçamento de maio ainda em aberto, e
+  // uma janela de 30 dias esconderia parte do que está parado.
+  const periodKey: PeriodKey = isPeriodKey(params.get('period')) ? (params.get('period') as PeriodKey) : 'all';
   const customFrom = params.get('from') ?? '';
   const customTo = params.get('to') ?? '';
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -49,23 +59,16 @@ export default function DashboardPage() {
   );
 
   const { metrics, loading, error, reload } = useSalesDashboard(range);
+  const odonto = useOdontoConversion(range);
   const { visibleMap, toggle } = useDashboardPrefs();
   const { operators } = useOperators();
-  const { role } = useAppUser();
-  const { costs, save: saveCosts } = useSalesCosts();
   const [refreshing, setRefreshing] = useState(false);
 
-  // Faturamento líquido em "Vendas ganhas": só quando há algum custo definido.
-  const wonNet = useMemo(
-    () => (hasCosts(costs) ? netRevenue(metrics.won.value, metrics.won.count, costs) : null),
-    [costs, metrics.won.value, metrics.won.count],
-  );
-
-  // Recarrega as vendas no período atual.
+  // Recarrega orçamentos e métricas de atendimento no período atual.
   const refreshAll = async () => {
     setRefreshing(true);
     try {
-      await reload();
+      await Promise.all([reload(), odonto.reload()]);
     } finally {
       setRefreshing(false);
     }
@@ -101,6 +104,13 @@ export default function DashboardPage() {
 
   const show = (key: WidgetKey) => visibleMap[key] !== false;
 
+  const c = odonto.data;
+  const carregando = loading || odonto.loading;
+
+  // Fatias do valor orçado — respondem "quanto do que orcei virou tratamento".
+  const fatiaAprovado = c.orcado.value > 0 ? (c.aprovado.value / c.orcado.value) * 100 : null;
+  const fatiaParado = c.orcado.value > 0 ? (c.parado.value / c.orcado.value) * 100 : null;
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <CredentialsBanner />
@@ -112,7 +122,9 @@ export default function DashboardPage() {
           <div>
             <div className="text-label">Seção</div>
             <h1 className="text-2xl font-bold text-display">{VOCAB.dashboard}</h1>
-            <p className="text-sm text-[var(--color-text-secondary)]">Como está o comercial agora</p>
+            <p className="text-sm text-[var(--color-text-secondary)]">
+              Quanto foi orçado, quanto fechou e quanto está parado
+            </p>
           </div>
         </div>
 
@@ -137,9 +149,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Filtro de período (global) */}
+      {/* Filtro de período (global) — base: Data do orçamento */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1 rounded-lg border border-[rgba(97,193,208,0.30)] p-1 bg-[#FAFDFD]">
+        <div className="flex flex-wrap items-center gap-1 rounded-lg border border-[rgba(97,193,208,0.30)] p-1 bg-[#FAFDFD]">
           {PERIOD_PRESETS.map((p) => (
             <button
               key={p.key}
@@ -183,9 +195,13 @@ export default function DashboardPage() {
             />
           </div>
         )}
+        <span className="text-xs text-[var(--color-text-secondary)]">
+          Período contado pela <strong className="font-semibold">data do orçamento</strong>
+        </span>
       </div>
 
       {error && <LoadErrorBanner message={error} onRetry={() => void reload()} />}
+      {odonto.error && <LoadErrorBanner message={odonto.error} onRetry={() => void odonto.reload()} />}
 
       {/* Painel de personalização */}
       {customizeOpen && (
@@ -210,168 +226,99 @@ export default function DashboardPage() {
               </label>
             ))}
           </div>
-
-          <SalesCostsForm costs={costs} canEdit={role === 'admin'} onSave={saveCosts} />
         </div>
       )}
 
-      {loading ? (
-        <div className="glass-card p-10 text-center text-label opacity-60">Carregando métricas...</div>
+      {carregando ? (
+        <div className="glass-card p-10 text-center text-label opacity-60">Carregando orçamentos...</div>
+      ) : c.semFunil ? (
+        <div className="glass-card p-10 text-center text-sm text-[var(--color-text-secondary)]">
+          O funil <strong>Odonto — Orçamentos</strong> ainda não existe neste banco. Importe os orçamentos do WebDental
+          para o painel começar a contar.
+        </div>
       ) : (
         <>
-        {/* Fileira 1 — KPIs de vendas */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {show('vendas_ganhas') && (
-            <SalesKpiWidget title="Fechamentos" count={metrics.won.count} value={metrics.won.value} series={metrics.won.series} color="#0C6B4A" netValue={wonNet} />
-          )}
-          {show('oportunidades_perdidas') && (
-            <SalesKpiWidget title="Não fecharam" count={metrics.lost.count} value={metrics.lost.value} series={metrics.lost.series} color="#B02D26" />
-          )}
-          {show('forecast') && <ForecastWidget value={metrics.forecast.value} openCount={metrics.forecast.openCount} />}
-        </div>
+        {/* Fileira 1 — Orçado · Aprovado · Parado */}
+        {show('odonto_resumo') && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <OrcamentoKpiWidget
+              title="Orçado no período"
+              bloco={c.orcado}
+              cor="var(--accent-primary)"
+              ajuda="Tudo que foi orçado no período, aprovado ou não. Cada orçamento é um tratamento."
+            />
+            <OrcamentoKpiWidget
+              title="Aprovado"
+              bloco={c.aprovado}
+              cor="var(--color-success)"
+              fatia={fatiaAprovado}
+              ajuda="Orçamentos que o paciente aceitou — a etapa Aprovado do funil."
+            />
+            <OrcamentoKpiWidget
+              title="Parado"
+              bloco={c.parado}
+              cor="var(--color-warning)"
+              fatia={fatiaParado}
+              ajuda="Nem aprovado, nem descartado. É o dinheiro que ainda dá para recuperar."
+            />
+          </div>
+        )}
 
-        {/* Demais widgets */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {show('ranking_vendedores') && (
-            <div className="md:col-span-2">
-              <RankingWidget ranking={metrics.ranking} ownerName={ownerName} />
+        {/* Fileira 2 — as duas conversões, cada uma contra a meta */}
+        {show('odonto_conversao') && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <ConversaoWidget
+              title="Conversão em valor"
+              subtitle="Do dinheiro orçado, quanto virou tratamento"
+              ajuda="Valor aprovado dividido pelo valor orçado no período."
+              valor={c.conversaoValor}
+              meta={c.metaGeral}
+              detalhe={`${brl(c.aprovado.value)} aprovados de ${brl(c.orcado.value)} orçados`}
+            />
+            <ConversaoWidget
+              title="Conversão em tratamentos"
+              subtitle="Dos orçamentos apresentados, quantos fecharam"
+              ajuda="Nº de tratamentos aprovados dividido pelo nº de tratamentos orçados. Se ficar acima da conversão em valor, o que não fecha é o caro."
+              valor={c.conversaoTratamentos}
+              meta={c.metaGeral}
+              detalhe={`${c.aprovado.count.toLocaleString('pt-BR')} aprovados de ${c.orcado.count.toLocaleString('pt-BR')} orçados`}
+            />
+          </div>
+        )}
+
+        {/* Fileira 3 — conversão por especialidade + tempo parado */}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          {show('odonto_especialidade') && (
+            <div className="xl:col-span-2">
+              <EspecialidadeWidget linhas={c.especialidades} />
             </div>
           )}
-          {show('tempo_primeira_resposta') && (
-            <DurationWidget
-              title="Tempo até a 1ª resposta"
-              subtitle="Da primeira mensagem da pessoa até alguém do time responder"
-              avgMs={metrics.firstResponse.avgMs}
-              byOwner={metrics.firstResponse.byOwner}
-              ownerName={ownerName}
-            />
-          )}
-          {show('tempo_conclusao') && (
-            <DurationWidget
-              title="Tempo até fechar"
-              subtitle="Da abertura da oportunidade até o fechamento"
-              avgMs={metrics.closeTime.avgMs}
-              byOwner={metrics.closeTime.byOwner}
-              ownerName={ownerName}
-            />
-          )}
-          {show('origem_trafego') && (
-            <OriginDonutWidget title="% Origem do tráfego" data={metrics.origin.traffic} labelMap={TRAFFIC_LABEL} emptyText={NO_UTM} />
-          )}
-          {show('origem_canal') && (
-            <OriginBarsWidget title="% Canal de origem" data={metrics.origin.channel} labelMap={ORIGIN_CHANNEL_LABEL} emptyText={NO_UTM} />
-          )}
-          {show('origem_campanha') && (
-            <OriginBarsWidget title="% Campanha de origem" data={metrics.origin.campaign} emptyText={NO_UTM} />
-          )}
-          {show('origem_anuncios') && (
-            <OriginBarsWidget title="% Anúncios de origem" data={metrics.origin.ads} emptyText={NO_UTM} />
-          )}
-          {show('origem_posts_organicos') && (
-            <OriginBarsWidget title="% Posts orgânicos de origem" data={metrics.origin.organicPosts} emptyText={NO_UTM} />
-          )}
-          {/* Conversão: mesmas dimensões, mas contando só os deals GANHOS no período */}
-          {show('conversao_campanhas') && (
-            <OriginBarsWidget title="Campanhas de maior conversão" data={metrics.conversion.campaigns} emptyText={NO_WON_UTM} unit="vendas" color="#0C6B4A" />
-          )}
-          {show('conversao_anuncios') && (
-            <OriginBarsWidget title="Anúncios de maior conversão" data={metrics.conversion.ads} emptyText={NO_WON_UTM} unit="vendas" color="#0C6B4A" />
-          )}
-          {show('conversao_posts') && (
-            <OriginBarsWidget title="Posts de maior conversão" data={metrics.conversion.organicPosts} emptyText={NO_WON_UTM} unit="vendas" color="#0C6B4A" />
+          {show('odonto_parados') && (
+            <ParadosWidget paradoMais7={c.paradoMais7} parado={c.parado} faixas={c.faixasParado} />
           )}
         </div>
+
+        {/* Atendimento — passa a fazer sentido quando a recuperação começar */}
+        {(show('ranking_vendedores') || show('tempo_primeira_resposta')) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {show('ranking_vendedores') && (
+              <div className="md:col-span-2">
+                <RankingWidget ranking={metrics.ranking} ownerName={ownerName} />
+              </div>
+            )}
+            {show('tempo_primeira_resposta') && (
+              <DurationWidget
+                title="Tempo até a 1ª resposta"
+                subtitle="Da primeira mensagem do paciente até alguém do time responder"
+                avgMs={metrics.firstResponse.avgMs}
+                byOwner={metrics.firstResponse.byOwner}
+                ownerName={ownerName}
+              />
+            )}
+          </div>
+        )}
         </>
       )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Faturamento líquido: custos abatidos do card "Vendas ganhas".
-// Config da instância (app_settings.sales_costs) — escrita admin-only via RLS.
-// ---------------------------------------------------------------------------
-function SalesCostsForm({
-  costs, canEdit, onSave,
-}: {
-  costs: SalesCosts;
-  canEdit: boolean;
-  onSave: (c: SalesCosts) => Promise<string | null>;
-}) {
-  const [checkout, setCheckout] = useState('');
-  const [tax, setTax] = useState('');
-  const [other, setOther] = useState('');
-  const [otherKind, setOtherKind] = useState<SalesCosts['other_kind']>('fixed');
-  const [saving, setSaving] = useState(false);
-
-  // Sincroniza o form quando os custos carregam do banco.
-  useEffect(() => {
-    setCheckout(costs.checkout_pct ? String(costs.checkout_pct) : '');
-    setTax(costs.tax_pct ? String(costs.tax_pct) : '');
-    setOther(costs.other_value ? String(costs.other_value) : '');
-    setOtherKind(costs.other_kind);
-  }, [costs]);
-
-  const inputCls =
-    'w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-2 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)] disabled:opacity-50';
-  const labelCls = 'mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]';
-
-  const handleSave = async () => {
-    setSaving(true);
-    // parseDecimal aceita vírgula decimal ("4,99") — Number() puro viraria 0.
-    const err = await onSave({
-      checkout_pct: parseDecimal(checkout),
-      tax_pct: parseDecimal(tax),
-      other_value: parseDecimal(other),
-      other_kind: otherKind,
-    });
-    setSaving(false);
-    if (err) toast.error('Não foi possível salvar os custos.', { description: err });
-    else toast.success('Custos salvos. "Fechamentos" agora mostra o valor líquido.');
-  };
-
-  return (
-    <div className="mt-4 border-t border-[rgba(97,193,208,0.16)] pt-4">
-      <div className="text-label mb-1">Valor líquido (Fechamentos)</div>
-      <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
-        Custos abatidos do valor bruto das vendas ganhas. Deixe em 0 para exibir só o bruto.
-        {!canEdit && ' Somente administradores podem alterar.'}
-      </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-        <div>
-          <span className={labelCls}>Taxa do checkout (%)</span>
-          <input type="number" min="0" step="0.01" placeholder="Ex.: 4,99" value={checkout} onChange={(e) => setCheckout(e.target.value)} disabled={!canEdit} className={inputCls} />
-        </div>
-        <div>
-          <span className={labelCls}>Imposto (%)</span>
-          <input type="number" min="0" step="0.01" placeholder="Ex.: 6" value={tax} onChange={(e) => setTax(e.target.value)} disabled={!canEdit} className={inputCls} />
-        </div>
-        <div>
-          <span className={labelCls}>Outros custos por venda</span>
-          <div className="flex items-center gap-1.5">
-            <input type="number" min="0" step="0.01" placeholder="Ex.: 2,50" value={other} onChange={(e) => setOther(e.target.value)} disabled={!canEdit} className={inputCls} />
-            <select
-              value={otherKind}
-              onChange={(e) => setOtherKind(e.target.value as SalesCosts['other_kind'])}
-              disabled={!canEdit}
-              className="rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-2 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)] disabled:opacity-50 [&>option]:bg-[#FFFFFF]"
-            >
-              <option value="fixed">R$</option>
-              <option value="pct">%</option>
-            </select>
-          </div>
-        </div>
-        <div className="flex items-end">
-          <button
-            type="button"
-            onClick={() => void handleSave()}
-            disabled={!canEdit || saving}
-            className="w-full rounded-lg bg-[var(--accent-primary)] px-3 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
-          >
-            {saving ? 'Salvando…' : 'Salvar custos'}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
