@@ -4468,3 +4468,281 @@ imagem nem RAG. Não pesa **porque a IA passa tudo para o humano de todo jeito**
   (as duas que mudaram); e o frontend (Vercel) para o campo da chave aparecer.
   `generate-template` e `process-knowledge` também importam os `_shared`
   alterados — republicar por consistência.
+
+### 2026-09-07 · Claude Code · Copiloto de IA para o atendente — decisão e base de conhecimento
+
+**PEDIDO DO DANILO:** *"criar um assistente com IA para ajudar meus atendentes
+na conversão, dando insights e orientações na condução das negociações."*
+
+**DECISÃO DE PRODUTO (dele, após o desenho ser apresentado): é COPILOTO, não
+piloto.** A IA **sugere**; a atendente lê, edita se quiser, e **é ela quem
+envia**. A IA **nunca** manda mensagem sozinha para paciente.
+Motivos que sustentaram a escolha:
+1. Odontologia é **regulada** (CFO) — o humano é o filtro de responsabilidade
+2. A equipe **aprende** em vez de virar dependente
+3. **Ninguém sabe ainda o que converte** (nunca houve abordagem) — deixar a IA
+   decidir sozinha agora seria automatizar um chute
+
+**DESENHO APROVADO — três blocos no painel do inbox:**
+1. **Contexto do caso** — procedimento · valor · dias parado · filiado ou
+   particular · dentista · template enviado · **qual botão o paciente tocou**
+2. **Leitura do caso** — o que trava (dinheiro/dúvida/agenda), a alavanca, o
+   que evitar. Ex.: *"Ela tocou em parcelamento — o caminho é 24x no boleto,
+   ~R$ 61/mês. Não repita o valor cheio."*
+3. **Sugestão de resposta** — [Usar] preenche o campo; **o envio é da atendente**
+
+**REGRA DE OURO REGISTRADA:** se não estiver na base de conhecimento, a IA
+responde *"não tenho essa informação"* — **nunca inventa**.
+
+**CRIADO:** `BASE-CONHECIMENTO-ODONTO.md` na raiz (155 linhas). O agente
+preencheu o que já se sabe do negócio (clínica, 12x cartão / 24x boleto, filiado
+CDT × particular com os números reais 58/22, os 4 procedimentos com ticket
+médio, tom de voz, e as **7 proibições do CFO**) e marcou com 🟡 o que só a
+clínica sabe.
+
+**LACUNAS PRIORITÁRIAS (🟡) — o Danilo informou em 07/09 que NÃO TEM essas
+informações e vai buscar a partir de 08/09:**
+1. **As dúvidas do paciente** (seção 5) — "dói?", "quanto tempo demora?",
+   "tem garantia?", "posso fazer só uma parte?". **É o mais importante:** sem
+   isso a IA não ajuda em nada no dia a dia.
+2. **O que acontece quando o paciente quer marcar** (seção 9) — é onde a
+   conversa vira dinheiro.
+3. **Piso do parcelamento** — um tratamento de R$ 300 chega a 24x? Entrada?
+   Desconto à vista? PIX? A atendente pode negociar mais parcelas?
+4. Descrição de cada procedimento em linguagem de paciente.
+
+> Orientação dada: **essas respostas não são do Danilo, são da equipe** — a
+> recepção sabe o que mais perguntam, o dentista sabe as sessões, o financeiro
+> sabe o piso. Repassar o arquivo para cada um preencher a sua parte.
+
+**A seção 6 (objeções) foi deixada em branco DE PROPÓSITO.** Hoje seria chute.
+Os **botões dos templates** vão responder isso com fato: quem toca em "Quero
+parcelar" diz que é dinheiro; quem toca em "Tenho uma dúvida" diz que é
+insegurança. **Revisar depois das primeiras ~60 conversas.**
+
+**EM CONSTRUÇÃO (subagente):** Edge Function `copilot-suggest` + painel no
+inbox. Não construir agora, registrado como fase 2: aprendizado com histórico
+de conversas convertidas e métricas por especialidade/botão (o dono recusou
+painéis por ora).
+
+- **Banco:** nenhuma migração.
+- **Arquivos:** `BASE-CONHECIMENTO-ODONTO.md` (novo), `MEMORIA.md`.
+- **Próximo:** Danilo preenche as lacunas 🟡 a partir de 08/09.
+
+### 2026-09-07 · Claude Code (chat WhatsApp/IA) · ⚠️ MEXI EM ARQUIVO DO OUTRO CHAT — DealDrawer
+
+**AVISO AO OUTRO CHAT (dono do território do funil):** este chat alterou
+`src/components/funil/DealDrawer.tsx`. Autorizado pelo Danilo em 07/09 após o
+conflito de território ser apresentado a ele (opção "a": eu faço e registro).
+
+**BUG RELATADO PELO DANILO:** *"na parte dos orçamentos, quando você clica em
+abrir conversa, ele deveria abrir uma conversa mesmo se ela não existir; hoje
+ele abre a parte das conversas, mas não referente ao orçamento."*
+
+**CAUSA:** `DealDrawer.tsx:360` tinha
+`<Link to={/inbox?contact=${deal.contact_id}}>` — **só navegava**. O inbox
+apenas **SELECIONA** conversa existente; não cria. Resultado: caía na lista sem
+selecionar nada.
+
+**É EXATAMENTE O MESMO DEFEITO** corrigido em 06/09 na ficha do contato
+(`ContactDetailPage.tsx`), quando `ensureConversationForContact` foi criada.
+**Faltou aplicar no orçamento.** Lição: ao criar um get-or-create desses,
+varrer TODOS os pontos de entrada — havia dois, só um foi coberto.
+
+**CORREÇÃO:** o `<Link>` virou botão que chama
+`ensureConversationForContact(deal.contact_id)` e navega para
+`/inbox?conversation=<id>&deal=<deal.id>`. Reusa conversa existente e a do
+"gêmeo" (telefone sem o nono dígito). Erro tratado com toast em português
+(sem contato vinculado / sem número conectado). Estado "Abrindo…" no botão.
+
+**O `&deal=` é novo e proposital:** um paciente pode ter vários orçamentos
+parados; a conversa precisa saber de qual o operador veio. **É contexto para o
+copiloto de IA** que está sendo construído neste chat. **Quem cuidar do inbox
+precisa ler esse parâmetro** — hoje ele é ignorado, sem prejuízo.
+
+- **Arquivos:** `src/components/funil/DealDrawer.tsx` (import `useNavigate` no
+  lugar de `Link`; import de `ensureConversationForContact`; estado
+  `abrindoConversa`; função `abrirConversa`).
+- **Banco:** nenhuma migração.
+- **Validação:** `npx tsc -b` e `npx vite build` passam.
+- **NÃO PUBLICADO ainda:** o subagente do copiloto está com `InboxPage.tsx` e
+  `MessageInput.tsx` abertos; publicar agora subiria trabalho pela metade.
+  Publicar junto quando ele terminar.
+- **Estado do repo ao começar:** `ceff3f2` (o outro chat publicou dois commits
+  no intervalo: `ceff3f2` Claude como provedor do atendente, `9f98588` travessia
+  aprovado/não aprovado na importação).
+
+### 2026-09-07 · Claude Code (subagente) · Copiloto de IA para o atendente
+
+- **Pedido:** *"Criar um assistente com IA para ajudar meus atendentes na conversão,
+  dando insights e orientações na condução das negociações."* Decisão de produto
+  já tomada pelo dono: **é COPILOTO, não piloto.** A IA sugere; a atendente lê,
+  edita se quiser, e **é ela quem envia**. A IA nunca manda mensagem sozinha.
+
+**Feito**
+
+1. **Edge Function `copilot-suggest`** — nova, publicada, **versão 3**.
+   Entrada `{ conversation_id, apenas_contexto? }`. Devolve JSON com os três
+   blocos do desenho: `{ contexto, leitura, sugestao, avisos, origem }`.
+   Autenticação por `requireOrgCaller` (`_shared/auth.ts`) — usei a variante
+   que **exige org no token** em vez de `requireCaller` puro, porque a função
+   roda com service_role e ignora RLS: o `org_id` da conversa é conferido
+   contra o do caller, senão qualquer usuário logado leria conversa de outra
+   organização. **Não grava nada em `messages`.** Sugestão não é mensagem.
+
+2. **🔴 O BLOCO DE FATOS NÃO PASSA PELA LLM.** `contexto` é montado no código,
+   a partir do SELECT. A LLM recebe o bloco pronto e só escreve `leitura` e
+   `sugestao`. Motivo: se o modelo redigisse valor ou data, um número errado
+   apareceria com a mesma cara de verdade que um certo — e a atendente
+   repassaria ao paciente. O que a tela mostra e o que o modelo leu são o
+   mesmo texto, por construção (`copilotContextoTexto`).
+
+3. **ONDE O PROMPT FICA GUARDADO — e por quê.** Constante
+   `COPILOT_SYSTEM_PROMPT` **no código da função**, não em `ai_agent_config`.
+   Três razões: (a) `ai_agent_config` é singleton por org e **já está ocupado
+   pelo agente que responde o paciente**, hoje `is_active = true` — dividir a
+   coluna faria um sobrescrever o outro, e coluna nova exigiria migração;
+   (b) o texto é a **trava de conformidade** da seção 7 do
+   `BASE-CONHECIMENTO-ODONTO.md` (CFO) — editável na tela por qualquer admin,
+   as proibições cairiam sem revisão de ninguém; (c) o prompt tem **contrato
+   com o código** (precisa devolver `{"leitura","sugestao"}` ou a tela quebra),
+   então prompt e parser mudam no mesmo commit.
+   **Os FATOS da clínica não entram no prompt** — vêm da base de conhecimento
+   pelo RAG e dos dados do orçamento. Assim o dono muda conteúdo sem deploy e
+   a regra de segurança continua versionada.
+
+4. **Travas escritas no prompt** (seção 7 da base): proibido prometer
+   resultado, dar diagnóstico/prognóstico, estimar prazo de cura ou garantir
+   ausência de dor, inventar preço/desconto/condição, comparar com outra
+   clínica, citar caso de outro paciente, insistir após um "não", constranger
+   pela demora. Obrigatório: falar em **parcela mensal** e nunca no valor
+   cheio; **FILIADO** do Cartão de TODOS, nunca "sócio"; dúvida se responde
+   ANTES do preço; quando não souber, dizer que vai confirmar com a equipe.
+
+5. **A parcela é ESTIMATIVA, e isso está dito em três lugares.** `valor/24` e
+   `valor/12` por divisão simples. O mínimo por parcela e a exigência de
+   entrada continuam 🟡 na base — então o número vai rotulado como ordem de
+   grandeza no JSON, no prompt e na tela ("Confirme a condição com a equipe
+   antes de fechar"). Sem isso o copiloto fecharia condição que ninguém
+   aprovou.
+
+6. **Painel `CopilotPanel.tsx`** na tela de Conversas, entre a thread e a
+   caixa de mensagem — onde a atendente já está olhando.
+   **[Usar] e [Editar] apenas PREENCHEM o `MessageInput`; não enviam.**
+   [Escrever eu mesma] limpa a sugestão. `MessageInput` ganhou a prop opcional
+   `prefill: { text, token }` — o `token` cresce a cada clique para o efeito
+   não reescrever por cima do que a atendente digitou num re-render.
+
+7. **CUSTO: o bloco 1 é de graça, os blocos 2 e 3 são sob demanda.** Ao abrir
+   a conversa a tela chama com `apenas_contexto: true` — zero LLM. A leitura e
+   a sugestão só saem no clique em "Analisar o caso e sugerir resposta".
+   Com 81 orçamentos abertos, gerar sugestão a cada clique na lista queimaria
+   dinheiro em conversa que ninguém ia responder. **Se o dono preferir
+   automático, é trocar uma linha** — está registrado como escolha, não como
+   limitação.
+   Cache de 60s por conversa, com a chave incluindo o id da **última
+   mensagem**: mensagem nova invalida na hora, senão a atendente leria uma
+   sugestão anterior à mensagem que acabou de chegar.
+
+8. **🟡 O BOTÃO TOCADO PELO PACIENTE NÃO ESTÁ SENDO DISTINGUIDO.** Conferido em
+   `meta-webhook/index.ts`, função `decodeInbound`: os tipos `button` e
+   `interactive` da Meta são achatados em `contentType: 'text'` — o título do
+   botão vira o `content` e **nada marca a linha como "veio de botão"**. O dado
+   chega, mas indistinguível de texto digitado.
+   **Não consertei de propósito.** O conserto exige coluna nova (migração) ou
+   mudar o `content` gravado, o que alteraria o que a atendente vê na thread e
+   o que a IA do paciente recebe — na véspera da operação começar, na tela mais
+   usada. Virou **pendência #55**.
+   Como contorno honesto, o copiloto **infere**: se o texto do paciente bate
+   com o rótulo de um botão de algum modelo cadastrado, marca
+   `confianca: 'provavel'` e diz na tela "(provável)". Hoje quase nunca vai
+   casar, porque `whatsapp_hub.templates` só tem `teste_conexao` — os 3 modelos
+   odonto foram criados no painel da Meta e não estão sincronizados no banco
+   (**pendência #56**).
+
+9. **⚠️ CONFLITO REGISTRADO — a base de conhecimento é COMPARTILHADA.**
+   `knowledge_search` é a mesma para o copiloto e para `process-ai-message`,
+   que responde o paciente e está `is_active = true`. Em 07/09 o dono decidiu
+   deixar a base com **0 entradas de propósito** (vetou citar tratamentos e
+   falar do Cartão de TODOS para o paciente). Carregar o
+   `BASE-CONHECIMENTO-ODONTO.md` para dar preço e objeções ao copiloto faria
+   **a IA do paciente passar a usar o mesmo conteúdo**. Por isso **não carreguei
+   nada** — não é território de decisão de agente. **Pendência #57:** ou separar
+   o corpus por finalidade, ou desligar a IA do paciente antes de carregar.
+   Enquanto a base estiver vazia, o copiloto avisa na tela que a sugestão se
+   apoia só no orçamento e no histórico.
+
+- **Banco:** **nenhuma migração, nenhuma escrita.** Só SELECTs de leitura
+  (schema, `custom_fields`, `org_settings` — chaves, nunca valores — e
+  contagens). Conferido: `knowledge_base` 0 · `knowledge_chunks` 0 · `deals` 0
+  · `conversations` 3 · `messages` 11.
+
+- **Estado que encontrei e que muda o teste:** `public.org_settings` só tem
+  `meta_app_secret` e `meta_webhook_verify_token`. **Não há chave de LLM
+  cadastrada** (nem OpenAI nem Anthropic). Então hoje o bloco 1 funciona e os
+  blocos 2 e 3 devolvem "Chave da IA não configurada. Cadastre em Ajustes →
+  Atendente IA." — com o contexto ainda preenchido na tela.
+
+- **Arquivos:** `supabase/functions/copilot-suggest/index.ts` (novo) ·
+  `src/components/inbox/CopilotPanel.tsx` (novo) ·
+  `src/components/inbox/MessageInput.tsx` (prop `prefill`, aditiva) ·
+  `src/app/routes/inbox/InboxPage.tsx` (monta o painel) · `MEMORIA.md`.
+
+- **Publicado: não.** Nenhum `git add`, `git commit`, `git push`, nenhum deploy
+  na Vercel. **O painel só aparece para o dono depois de publicar na Vercel.**
+
+- **Deploy da Edge Function:** `copilot-suggest` **versão 3**, `verify_jwt:false`
+  (igual às demais — a validação é interna). Bundle achatado pelo inliner de
+  `api/bootstrap.ts`, **sha256 `b104abc0c4f9e3dabc95de927ecd510f3c30274b5a4fc32d555357d515c58ffd`,
+  48.134 bytes**, conferido contra o código publicado: **bate**.
+  Smoke test: POST sem Authorization → **401** `{"ok":false,"error":"Não
+  autorizado."}` · token inválido → **401** · OPTIONS → **204**. Sem BOOT_ERROR.
+
+- **🔑 ARMADILHA NOVA DO DEPLOY (custou dois envios) — escape de barra
+  invertida não sobrevive ao JSON do MCP.** A v2 saiu com bytes diferentes do
+  bundle local: o `̀-ͯ` do `copilotNormalize` virou os caracteres
+  combinantes literais ao passar pelo JSON do `deploy_edge_function`.
+  Funcionalmente igual, **byte a byte diferente** — e só apareceu na
+  conferência, exatamente como a armadilha 4 previa. Corrigido **na origem**:
+  troquei a faixa por `\p{Diacritic}` com flag `u`, que não precisa de escape
+  `\u` nenhum. **Regra que fica: não use escape `\uXXXX` no fonte de Edge
+  Function publicada por MCP.** As outras 21 sequências (`\n`, `\s`, `\S`,
+  `\p`) passam intactas — conferidas uma a uma no publicado.
+
+- **Convivência com as outras frentes:** durante esta sessão a outra frente
+  publicou **`9f98588`** e **`ceff3f2`** ("Habilita o Claude como provedor de
+  resposta do atendente"), que alteraram `_shared/llm.ts` e
+  `_shared/tenant-credentials.ts` — arquivos que o meu bundle inlina. Percebi
+  porque o bundle saiu com `anthropic_api_key` e `claude-sonnet-5`, que não
+  existiam quando li os arquivos. Conferido `git status`: estavam **commitados**,
+  não trabalho pela metade, então o bundle publicado está sobre HEAD limpo.
+  Não toquei em `odontoImport.ts`, `webdental.ts`, `ImportOrcamentosDialog.tsx`,
+  `FunilPage.tsx` nem `FunilManager.tsx`.
+
+- **⚠️ DIVERGÊNCIA DE DOCUMENTAÇÃO que resolvi a favor do dono:** o briefing
+  desta tarefa mandava usar **dark glassmorphism**, e o `CLAUDE.md` ainda diz
+  isso. Mas `src/styles/globals.css` registra que **o dono revogou a regra em
+  07/09** e o app é claro. Segui o repositório e os tokens do tema claro
+  (`--color-bg-surface`, `--accent-primary`, `PARADO_CHIP_CLASS`), não o
+  briefing. **O `CLAUDE.md` continua desatualizado nesse ponto.**
+
+- **Não feito (fora de escopo por decisão do dono):** aprendizado com histórico
+  de conversas que converteram (fase 2) · métricas de conversão por
+  especialidade/botão (o dono recusou painéis por ora). Nenhuma pendência
+  fechada. Nenhum segredo lido, pedido ou gravado.
+
+- **Pendências novas:** **#55** webhook não distingue botão de texto digitado ·
+  **#56** os 3 modelos odonto não estão em `whatsapp_hub.templates` (impede
+  casar o botão) · **#57** base de conhecimento é compartilhada com a IA do
+  paciente — decidir antes de carregar conteúdo · **#58** decidir se a
+  sugestão passa a ser automática ao abrir a conversa (hoje é sob demanda,
+  para economizar LLM).
+
+- **Próximo:** (1) publicar na Vercel os 3 arquivos de frontend, senão o painel
+  não existe para a atendente; (2) o dono cadastrar a chave da IA em
+  Ajustes → Atendente IA — **atenção à armadilha já registrada em 07/09: essa
+  tela envia prompt + temperature + max_tokens junto com a chave, e salvar com
+  o `DEFAULT_PROMPT` carregado APAGA o `system_prompt` aprovado da IA do
+  paciente**; (3) importar os orçamentos pela tela do funil, senão o bloco de
+  contexto sai vazio (hoje `deals` = 0); (4) decidir a #57 antes de carregar a
+  base de conhecimento.

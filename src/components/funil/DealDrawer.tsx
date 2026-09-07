@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { X, Phone, Mail, Building2, ChevronDown, Clock, MessageSquare, Plus, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { getSupabase } from '@/lib/supabase';
+import { ensureConversationForContact } from '@/lib/conversations';
 import { useDealDetail } from '@/hooks/useDealDetail';
 import { operatorLabel, useOperators } from '@/hooks/useOperators';
 import { VOCAB } from '@/config/vocab';
@@ -53,6 +54,30 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
   const [stageId, setStageId] = useState(deal.stage_id ?? '');
   const [lostReasonOpen, setLostReasonOpen] = useState(false);
   const [lostReason, setLostReason] = useState(deal.lost_reason ?? '');
+  const [abrindoConversa, setAbrindoConversa] = useState(false);
+  const navigate = useNavigate();
+
+  // "Abrir em Conversas": o inbox só SELECIONA conversa existente. Sem criar
+  // antes, o clique caía na lista vazia — era o que acontecia aqui. O deal vai
+  // na URL para a conversa saber de qual orçamento o operador veio (contexto
+  // do copiloto: um mesmo paciente pode ter vários orçamentos parados).
+  async function abrirConversa() {
+    if (!deal.contact_id) {
+      toast.error('Este orçamento não tem contato vinculado.');
+      return;
+    }
+    setAbrindoConversa(true);
+    try {
+      const conversationId = await ensureConversationForContact(deal.contact_id);
+      navigate(`/inbox?conversation=${conversationId}&deal=${deal.id}`);
+    } catch (err) {
+      toast.error('Não foi possível abrir a conversa', {
+        description: err instanceof Error ? err.message : 'Erro interno',
+      });
+    } finally {
+      setAbrindoConversa(false);
+    }
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -357,9 +382,15 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
               )}
             </section>
 
-            <Link to={`/inbox?contact=${deal.contact_id}`} className="flex items-center justify-center gap-2 rounded-lg border border-[var(--color-border-card)] py-2.5 text-sm font-medium text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)] hover:bg-[var(--color-bg-subtle)]">
-              <MessageSquare className="h-4 w-4" /> Abrir em {VOCAB.inbox}
-            </Link>
+            <button
+              type="button"
+              onClick={() => void abrirConversa()}
+              disabled={abrindoConversa}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-[var(--color-border-card)] py-2.5 text-sm font-medium text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)] hover:bg-[var(--color-bg-subtle)] disabled:opacity-60"
+            >
+              <MessageSquare className="h-4 w-4" />
+              {abrindoConversa ? 'Abrindo…' : `Abrir em ${VOCAB.inbox}`}
+            </button>
 
             {/* Tags */}
             <ChipEditor

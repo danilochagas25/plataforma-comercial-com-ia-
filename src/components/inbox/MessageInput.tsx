@@ -14,17 +14,44 @@ interface MessageInputProps {
   // Envio OTIMISTA de texto/nota: o balão aparece na hora e a requisição roda
   // em segundo plano (dono do estado é o useMessages).
   onSendText: (text: string, isPrivate: boolean) => Promise<SendResult>;
+  // Texto empurrado de fora para DENTRO da caixa — hoje só o botão "Usar" do
+  // copiloto. Preenche e dá foco; NÃO envia. O envio continua sendo o clique
+  // da atendente em Enviar.
+  //
+  // Por que `token` e não só o texto: se a atendente apagar a sugestão e o
+  // componente re-renderizar, um efeito que dependesse do texto reescreveria o
+  // campo por cima do que ela fez. O token muda a cada clique em "Usar", então
+  // o campo só é reescrito quando ela pede de novo.
+  prefill?: { text: string; token: number } | null;
 }
 
 const MAX_BYTES = 25 * 1024 * 1024;
 
-export function MessageInput({ conversationId, disabled, withinWindow = true, onSendText }: MessageInputProps) {
+export function MessageInput({ conversationId, disabled, withinWindow = true, onSendText, prefill = null }: MessageInputProps) {
   const [content, setContent] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false); // só para mídia (upload real bloqueia)
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // "Usar" do copiloto: escreve a sugestão na caixa, tira o modo nota privada
+  // (sugestão é mensagem para o paciente) e põe o cursor no fim, para a
+  // atendente já editar. Não dispara envio nenhum.
+  const prefillToken = prefill?.token ?? 0;
+  useEffect(() => {
+    if (!prefill || prefillToken === 0) return;
+    setContent(prefill.text);
+    setIsPrivate(false);
+    const el = textareaRef.current;
+    if (el) {
+      el.focus();
+      const end = prefill.text.length;
+      el.setSelectionRange(end, end);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillToken]);
 
   // Gravação de áudio (voice note) via MediaRecorder.
   const [recording, setRecording] = useState(false);
@@ -291,6 +318,7 @@ export function MessageInput({ conversationId, disabled, withinWindow = true, on
         )}
         {!recording && (
         <textarea
+          ref={textareaRef}
           value={content}
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={handleKey}

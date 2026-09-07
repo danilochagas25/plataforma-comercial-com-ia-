@@ -13,6 +13,7 @@ import { useTags } from '@/hooks/useTags';
 import { ConversationList } from '@/components/inbox/ConversationList';
 import { MessageThread } from '@/components/inbox/MessageThread';
 import { MessageInput } from '@/components/inbox/MessageInput';
+import { CopilotPanel } from '@/components/inbox/CopilotPanel';
 import { ContactPanel } from '@/components/inbox/ContactPanel';
 import { InboxFilters } from '@/components/inbox/InboxFilters';
 import {
@@ -35,6 +36,14 @@ export default function InboxPage() {
     searchParams.get('conversation'),
   );
   const [sort, setSort] = useState<InboxSort>('recente');
+  // Ponte copiloto → caixa de mensagem. O botão "Usar" empurra o texto para o
+  // MessageInput e PARA ALI: quem envia continua sendo a atendente, no botão
+  // Enviar. O `token` cresce a cada clique para o efeito do input saber que é
+  // um pedido novo, e não um re-render.
+  const [copilotPrefill, setCopilotPrefill] = useState<{ text: string; token: number } | null>(null);
+  const usarSugestao = useCallback((texto: string) => {
+    setCopilotPrefill((prev) => ({ text: texto, token: (prev?.token ?? 0) + 1 }));
+  }, []);
   // No mobile (<lg) mostramos uma coluna por vez: lista quando nada está
   // selecionado, senão a thread. O painel de contato vira um overlay.
   const [showPanelMobile, setShowPanelMobile] = useState(false);
@@ -312,11 +321,17 @@ export default function InboxPage() {
                 onDismiss={dismissFailed}
               />
               {selected.status !== 'closed' && (
-                <MessageInput
-                  conversationId={selected.id}
-                  withinWindow={effectiveWithinWindow}
-                  onSendText={sendText}
-                />
+                <>
+                  {/* Copiloto entre a conversa e a caixa: a atendente lê o caso
+                      e a sugestão logo acima de onde vai digitar. */}
+                  <CopilotPanel conversationId={selected.id} onUsar={usarSugestao} />
+                  <MessageInput
+                    conversationId={selected.id}
+                    withinWindow={effectiveWithinWindow}
+                    onSendText={sendText}
+                    prefill={copilotPrefill}
+                  />
+                </>
               )}
             </>
           ) : (
