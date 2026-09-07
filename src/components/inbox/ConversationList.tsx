@@ -1,4 +1,4 @@
-import { Bot, Inbox, Instagram, Lock, MessageCircle, User } from 'lucide-react';
+import { Bot, Inbox, Instagram, Lock, MessageCircle, Pause, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Avatar } from '@/components/ui/Avatar';
 import type { WhatsappProvider } from '@/hooks/useWhatsappProvider';
@@ -8,12 +8,12 @@ import type { ConversationChannel, ConversationWithContact } from '@/types/inbox
 // janela de 24h) ou Instagram.
 function channelBadge(channel: ConversationChannel | undefined, provider: WhatsappProvider) {
   if (channel === 'instagram') {
-    return { Icon: Instagram, label: 'Instagram', color: 'text-[#E1306C]', chip: 'bg-[rgba(225,48,108,0.14)] text-[#E1306C]' };
+    return { Icon: Instagram, label: 'Instagram', color: 'text-[#C82461]', chip: 'bg-[rgba(225,48,108,0.14)] text-[#C82461]' };
   }
   if (provider === 'uazapi') {
-    return { Icon: MessageCircle, label: 'UAZAPI', color: 'text-[#2DD4BF]', chip: 'bg-[rgba(45,212,191,0.14)] text-[#2DD4BF]' };
+    return { Icon: MessageCircle, label: 'UAZAPI', color: 'text-[var(--accent-secondary)]', chip: 'bg-[rgba(45,212,191,0.14)] text-[var(--accent-secondary)]' };
   }
-  return { Icon: MessageCircle, label: 'WhatsApp Meta', color: 'text-[#25D366]', chip: 'bg-[rgba(37,211,102,0.14)] text-[#25D366]' };
+  return { Icon: MessageCircle, label: 'WhatsApp Meta', color: 'text-[var(--color-success)]', chip: 'bg-[rgba(37,211,102,0.14)] text-[var(--color-success)]' };
 }
 
 interface ConversationListProps {
@@ -72,23 +72,23 @@ export function ConversationList({
 }: ConversationListProps) {
   if (loading) {
     return (
-      <div className="p-6 text-center text-label opacity-60">Carregando...</div>
+      <div className="p-6 text-center text-label">Carregando...</div>
     );
   }
   if (conversations.length === 0) {
     return (
       <div className="p-6 text-center">
         <div className="text-label mb-2">Nenhuma conversa ainda</div>
-        <div className="text-xs text-[var(--color-text-secondary)] opacity-70 max-w-[240px] mx-auto">
-          Conversas aparecem aqui assim que um contato enviar a primeira mensagem
-          ou você simular uma mensagem inbound (botão acima).
+        <div className="text-xs text-[var(--color-text-label)] max-w-[240px] mx-auto">
+          As conversas aparecem aqui assim que um paciente mandar a primeira
+          mensagem no WhatsApp da clínica.
         </div>
       </div>
     );
   }
 
   return (
-    <ul className="divide-y divide-[rgba(212,165,116,0.06)]">
+    <ul className="divide-y divide-[var(--color-border-soft)]">
       {conversations.map((c) => {
         const locked = isLocked?.(c) ?? false;
         const assignedName = operatorName?.(c.assigned_to) ?? null;
@@ -107,10 +107,10 @@ export function ConversationList({
               onClick={() => { if (!locked) onSelect(c.id); }}
               title={locked ? `Conversa atribuída a ${assignedName ?? 'outro operador'}` : undefined}
               className={cn(
-                'w-full text-left p-3 transition-colors',
-                locked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white/[0.03]',
-                isActive && !locked && 'bg-[rgba(212,165,116,0.08)] border-l-2 border-[var(--accent-primary)]',
-                (!isActive || locked) && 'border-l-2 border-transparent',
+                'w-full text-left px-4 py-3.5 transition-colors',
+                locked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[var(--color-bg-subtle)]',
+                isActive && !locked && 'bg-[var(--color-bg-subtle)] border-l-[3px] border-[var(--accent-primary)]',
+                (!isActive || locked) && 'border-l-[3px] border-transparent',
               )}
             >
               <div className="flex items-start gap-3">
@@ -118,14 +118,17 @@ export function ConversationList({
                   <Avatar src={contact?.profile_pic_url} name={displayName} size="md" />
                   <span
                     title={chan.label}
-                    className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#0A0A0F] ring-1 ring-[rgba(212,165,116,0.2)]"
+                    className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--color-bg-surface)] ring-1 ring-[var(--color-border-card)]"
                   >
                     <ChanIcon className={cn('h-2.5 w-2.5', chan.color)} />
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-[var(--color-text-primary)] truncate">
+                    <div className={cn(
+                      'truncate text-[13.5px] text-[var(--color-text-primary)]',
+                      isActive ? 'font-semibold' : 'font-medium',
+                    )}>
                       {displayName}
                     </div>
                     <div className="text-[10px] text-[var(--color-text-secondary)] shrink-0 inline-flex items-center gap-1">
@@ -133,7 +136,7 @@ export function ConversationList({
                       {formatTimestamp(c.last_message_at)}
                     </div>
                   </div>
-                  <div className="text-xs text-[var(--color-text-secondary)] truncate mt-0.5">
+                  <div className="mt-1 truncate text-[12.5px] leading-snug text-[var(--color-text-secondary)]">
                     {locked ? <span className="italic opacity-70">Conversa em atendimento</span> : (c.lastMessagePreview ?? <span className="opacity-40">-</span>)}
                   </div>
                   {/* Fontes reduzidas + nowrap para os badges não quebrarem em 2
@@ -144,19 +147,19 @@ export function ConversationList({
                       <span className="truncate">{badge.label}</span>
                     </span>
                     {/* Badge do provedor/canal: WhatsApp Meta · UAZAPI · Instagram */}
-                    <span className={cn('inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-1.5 py-0.5 text-[8px] font-semibold', chan.chip)}>
+                    <span className={cn('inline-flex shrink-0 items-center whitespace-nowrap rounded-[5px] px-1.5 py-0.5 text-[9px] font-bold', chan.chip)}>
                       {chan.label}
                     </span>
                     {/* "IA pausada" só faz sentido quando a IA está LIGADA para o
                         canal. Com a IA desativada, ai_paused=true é só efeito do
                         roteamento pra humano — não mostramos o selo. */}
                     {c.ai_paused && aiEnabled && (
-                      <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[9px] uppercase tracking-wide font-semibold text-[#FBBF24]">
-                        ⏸ IA pausada
+                      <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[9px] uppercase tracking-wide font-semibold text-[var(--color-warning)]">
+                        <Pause className="h-2.5 w-2.5 shrink-0" /> IA pausada
                       </span>
                     )}
                     {c.unread_count > 0 && (
-                      <span className="ml-auto shrink-0 text-[10px] font-bold bg-[var(--accent-primary)] text-white rounded-full px-2 py-0.5">
+                      <span className="ml-auto shrink-0 rounded-full bg-[var(--color-brand-red)] px-2 py-0.5 text-[10px] font-bold text-white">
                         {c.unread_count}
                       </span>
                     )}

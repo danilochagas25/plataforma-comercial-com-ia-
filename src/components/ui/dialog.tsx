@@ -56,7 +56,7 @@ export function Dialog({
           'relative w-full glass-card p-6 shadow-2xl max-h-[calc(100vh-4rem)] overflow-auto',
           // background-color sólida por baixo do gradiente translúcido do
           // glass-card: nada do fundo vaza, mantendo o tint azul e a borda.
-          opaque && 'bg-[#0d101f]',
+          opaque && 'bg-[#FFFFFF]',
           widthClass,
         )}
         onClick={(e) => e.stopPropagation()}
@@ -65,7 +65,7 @@ export function Dialog({
           type="button"
           aria-label="Fechar"
           onClick={onClose}
-          className="absolute top-4 right-4 h-8 w-8 rounded-lg flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-white/5"
+          className="absolute top-4 right-4 h-8 w-8 rounded-lg flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[#EEF6F7]"
         >
           <X className="h-4 w-4" />
         </button>

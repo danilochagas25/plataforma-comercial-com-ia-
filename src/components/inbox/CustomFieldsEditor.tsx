@@ -72,7 +72,7 @@ export function CustomFieldsEditor({
           </button>
         </div>
         {entries.length === 0 ? (
-          <div className="text-xs text-[var(--color-text-secondary)] opacity-60">Nenhum campo.</div>
+          <div className="text-xs text-[var(--color-text-label)]">Nenhum campo.</div>
         ) : (
           <dl className="text-sm space-y-1.5">
             {entries.map(({ key, value }) => (

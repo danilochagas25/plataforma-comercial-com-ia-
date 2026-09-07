@@ -74,13 +74,13 @@ function StatusTicks({ status }: { status: Message['meta_status'] }) {
   if (!status) return null;
   if (status === 'failed') {
     return (
-      <span className="inline-flex items-center gap-1 font-semibold text-[#FCA5A5] text-[10px]">
+      <span className="inline-flex items-center gap-1 font-semibold text-[var(--color-error)] text-[10px]">
         <AlertCircle className="h-3 w-3" />
         não entregue
       </span>
     );
   }
-  if (status === 'read') return <CheckCheck className="h-3 w-3 text-[#D4A574]" />;
+  if (status === 'read') return <CheckCheck className="h-3 w-3 text-[var(--accent-primary)]" />;
   if (status === 'delivered') return <CheckCheck className="h-3 w-3 opacity-60" />;
   return <Check className="h-3 w-3 opacity-60" />;
 }
@@ -116,11 +116,11 @@ function formatDayLabel(iso: string): string {
 function DateSeparator({ iso }: { iso: string }) {
   return (
     <div className="flex items-center gap-3 py-2">
-      <div className="h-px flex-1 bg-[rgba(212,165,116,0.08)]" />
-      <span className="rounded-full border border-[rgba(212,165,116,0.15)] bg-white/[0.03] px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-secondary,#94A3B8)]">
+      <div className="h-px flex-1 bg-[var(--color-bg-subtle)]" />
+      <span className="rounded-full border border-[var(--color-border-card)] bg-[var(--color-bg-primary)] px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]">
         {formatDayLabel(iso)}
       </span>
-      <div className="h-px flex-1 bg-[rgba(212,165,116,0.08)]" />
+      <div className="h-px flex-1 bg-[var(--color-bg-subtle)]" />
     </div>
   );
 }
@@ -247,7 +247,7 @@ export function MessageThread({ messages, loading, onRetry, onDismiss }: Message
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <div className="text-label opacity-60">Carregando mensagens...</div>
+        <div className="text-label">Carregando mensagens...</div>
       </div>
     );
   }
@@ -255,13 +255,13 @@ export function MessageThread({ messages, loading, onRetry, onDismiss }: Message
   if (messages.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <div className="text-label opacity-60">Nenhuma mensagem nesta conversa.</div>
+        <div className="text-label">Nenhuma mensagem nesta conversa.</div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-3">
+    <div className="flex-1 overflow-y-auto bg-[var(--color-bg-primary)] p-6 space-y-3.5">
       {messages.map((m, i) => {
         const showDate = i === 0 || dayKey(m.created_at) !== dayKey(messages[i - 1].created_at);
         const separator = showDate ? <DateSeparator iso={m.created_at} /> : null;
@@ -280,12 +280,12 @@ export function MessageThread({ messages, loading, onRetry, onDismiss }: Message
               {separator}
             <div
               className={cn(
-                'mx-auto max-w-[85%] rounded-lg border border-[rgba(245,158,11,0.25)] bg-[rgba(245,158,11,0.06)] p-3',
+                'mx-auto max-w-[85%] rounded-lg border border-[rgba(154,74,7,0.28)] bg-[var(--color-warning-bg)] p-3',
                 m._state === 'pending' && 'opacity-70',
                 isFresh && 'message-in',
               )}
             >
-              <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-[#FBBF24] mb-1">
+              <div className="flex items-center gap-2 text-[10px] uppercase tracking-wide text-[var(--color-warning)] mb-1">
                 <StickyNote className="h-3 w-3" />
                 Nota privada entre operadores
                 <span className="ml-auto opacity-70 inline-flex items-center gap-1">
@@ -312,10 +312,10 @@ export function MessageThread({ messages, loading, onRetry, onDismiss }: Message
           >
             <div
               className={cn(
-                'max-w-[70%] rounded-2xl px-4 py-2.5 text-sm shadow-sm transition-opacity',
+                'max-w-[70%] rounded-[15px] px-4 py-3 text-[13.5px] leading-relaxed transition-opacity',
                 isInbound
-                  ? 'bg-white/[0.04] text-[var(--color-text-primary)] rounded-bl-md'
-                  : 'bg-[var(--accent-primary)] text-white rounded-br-md',
+                  ? 'rounded-bl-[4px] border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] text-[var(--color-text-primary)]'
+                  : 'rounded-br-[4px] bg-[var(--accent-primary)] text-white',
                 m._state === 'pending' && 'opacity-70',
                 (m._state === 'failed' || m.meta_status === 'failed') &&
                   'ring-1 ring-[var(--color-error)]',
@@ -343,7 +343,7 @@ export function MessageThread({ messages, loading, onRetry, onDismiss }: Message
                 <MediaContent message={m} />
               )}
               {!isInbound && m.meta_status === 'failed' && m.error_reason && (
-                <div className="mt-1.5 rounded-md bg-black/25 px-2 py-1.5 text-[11px] leading-snug text-[#FCA5A5]">
+                <div className="mt-1.5 rounded-md bg-[var(--color-error-bg)] px-2 py-1.5 text-[11px] leading-snug text-[var(--color-error)]">
                   <span className="font-semibold">Motivo: </span>
                   {m.error_reason}
                 </div>

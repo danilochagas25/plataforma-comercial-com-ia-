@@ -11,6 +11,7 @@ import { ImportOrcamentosDialog } from '@/components/funil/ImportOrcamentosDialo
 import { PIPELINE_ODONTO } from '@/lib/odontoImport';
 import { applyFunilFilters, EMPTY_FILTERS, FunilFilters, sortFunilDeals, type FunilFilterState, type FunilSort } from '@/components/funil/FunilFilters';
 import { DUE_TONE_STYLE, dueTone, getDealOrigin, TEMPERATURE_STYLE, TRAFFIC_TYPE_STYLE, type ContactLite, type Deal, type Stage } from '@/types/crm';
+import { diasParado, PARADO_CHIP_CLASS, rotuloParado, tomParado } from '@/lib/diasParado';
 import { VOCAB } from '@/config/vocab';
 
 const fmtDueShort = (s: string) =>
@@ -97,7 +98,7 @@ export default function FunilPage() {
           <div className="text-label">{VOCAB.funnel}</div>
           <h1 className="text-2xl font-bold text-display truncate">{pipeline?.name ?? VOCAB.funnel}</h1>
           <p className="text-sm text-[var(--color-text-secondary)]">
-            {boardDeals.length} oportunidade(s) · {brl(totalPipeline)} no quadro · arraste entre as etapas
+            {boardDeals.length} orçamento(s) · {brl(totalPipeline)} no quadro · arraste entre as etapas
           </p>
         </div>
 
@@ -107,17 +108,17 @@ export default function FunilPage() {
             onClick={() => void reload()}
             disabled={loading}
             title="Atualizar funil"
-            className="inline-flex items-center gap-2 rounded-lg border border-[rgba(212,165,116,0.25)] px-3 py-2 text-sm text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)] disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)] disabled:opacity-60"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Atualizar
           </button>
           <button
             onClick={() => setArchivedOpen(true)}
-            className="inline-flex items-center gap-2 rounded-lg border border-[rgba(212,165,116,0.25)] px-3 py-2 text-sm text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)]"
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)]"
           >
             <Archive className="h-4 w-4" /> Arquivados
             {archivedDeals.length > 0 && (
-              <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-text-secondary)]">
+              <span className="rounded-full bg-[var(--color-bg-highlight)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent-secondary)]">
                 {archivedDeals.length}
               </span>
             )}
@@ -125,7 +126,7 @@ export default function FunilPage() {
           <div className="relative">
             <button
               onClick={() => setPickerOpen((v) => !v)}
-              className="inline-flex items-center gap-2 rounded-lg border border-[rgba(212,165,116,0.25)] bg-white/[0.03] px-3 py-2 text-sm text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)]"
+              className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm font-medium text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)]"
             >
               {pipeline?.name ?? 'Funil'}
               <ChevronDown className="h-4 w-4 opacity-70" />
@@ -133,12 +134,12 @@ export default function FunilPage() {
             {pickerOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setPickerOpen(false)} />
-                <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-[rgba(212,165,116,0.25)] bg-[#0A0A0F] p-1 shadow-[0_0_30px_rgba(212,165,116,0.15)]">
+                <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg surface-float rounded-lg p-1">
                   {pipelines.map((p) => (
                     <button
                       key={p.id}
                       onClick={() => { select(p.id); setPickerOpen(false); }}
-                      className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition hover:bg-white/5 ${
+                      className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition hover:bg-[var(--color-bg-subtle)] ${
                         p.id === selectedId ? 'text-[var(--accent-secondary)]' : 'text-[var(--color-text-primary)]'
                       }`}
                     >
@@ -155,7 +156,7 @@ export default function FunilPage() {
           {role === 'admin' && pipeline?.name === PIPELINE_ODONTO && (
             <button
               onClick={() => setImportOpen(true)}
-              className="inline-flex items-center gap-2 rounded-lg border border-[rgba(212,165,116,0.25)] px-3 py-2 text-sm text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)]"
+              className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)]"
             >
               <FileUp className="h-4 w-4" /> Importar orçamentos
             </button>
@@ -163,7 +164,7 @@ export default function FunilPage() {
           {role === 'admin' && (
             <button
               onClick={() => setManageOpen(true)}
-              className="inline-flex items-center gap-2 rounded-lg border border-[rgba(212,165,116,0.25)] px-3 py-2 text-sm text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)]"
+              className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm font-medium text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)]"
             >
               <Settings2 className="h-4 w-4" /> Gerenciar funis
             </button>
@@ -176,7 +177,7 @@ export default function FunilPage() {
       {error && <LoadErrorBanner message={error} onRetry={() => void reload()} />}
 
       {loading ? (
-        <div className="text-label opacity-60">Carregando…</div>
+        <div className="text-label">Carregando…</div>
       ) : !pipeline ? (
         <div className="glass-card p-6 text-sm text-[var(--color-text-secondary)]">
           Nenhum funil comercial configurado.
@@ -197,18 +198,20 @@ export default function FunilPage() {
                   if (dragId) void moveDeal(dragId, stage.id);
                   setDragId(null);
                 }}
-                className="flex w-72 shrink-0 flex-col rounded-xl border border-[rgba(212,165,116,0.12)] bg-white/[0.02]"
+                className="flex w-[286px] shrink-0 flex-col rounded-[14px] border border-[var(--color-border-card)] bg-[var(--color-bg-subtle)]"
               >
-                <div className="flex items-center justify-between border-b border-[rgba(212,165,116,0.1)] px-3 py-2.5">
-                  <span className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]">
-                    {stage.color && <span className="h-2.5 w-2.5 rounded-full" style={{ background: stage.color }} />}
-                    {stage.name}
+                <div className="flex items-center justify-between gap-2 border-b border-[var(--color-border-soft)] px-3.5 py-2.5">
+                  <span className="flex min-w-0 items-center gap-2 text-[13px] font-semibold text-[var(--color-text-primary)]">
+                    {stage.color && <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: stage.color }} />}
+                    <span className="truncate">{stage.name}</span>
                   </span>
-                  <span className="text-xs text-[var(--color-text-secondary)]">{list.length}</span>
+                  <span className="shrink-0 rounded-full bg-[var(--color-bg-highlight)] px-2 py-0.5 text-[11px] font-bold text-[var(--accent-secondary)]">
+                    {list.length}
+                  </span>
                 </div>
-                <div className="px-3 pt-1 text-xs text-[var(--color-text-secondary)]">{brl(total)}</div>
+                <div className="px-3.5 pt-2 text-[11px] font-semibold text-[var(--color-text-secondary)]">{brl(total)}</div>
 
-                <div className="flex-1 space-y-2 p-3">
+                <div className="flex-1 space-y-2 p-2.5">
                   {/* + Negócio no topo da etapa */}
                   {adding === stage.id ? (
                     <AddDealForm
@@ -222,9 +225,9 @@ export default function FunilPage() {
                   ) : (
                     <button
                       onClick={() => setAdding(stage.id)}
-                      className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-[rgba(212,165,116,0.25)] py-1.5 text-xs text-[var(--color-text-secondary)] transition hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)]"
+                      className="flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-[var(--color-border-strong)] py-1.5 text-xs text-[var(--color-text-secondary)] transition hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)]"
                     >
-                      <Plus className="h-3 w-3" /> Oportunidade
+                      <Plus className="h-3 w-3" /> Orçamento
                     </button>
                   )}
 
@@ -244,7 +247,7 @@ export default function FunilPage() {
                       onClick={() =>
                         setVisibleByStage((cur) => ({ ...cur, [stage.id]: visible + PAGE_SIZE }))
                       }
-                      className="flex w-full items-center justify-center gap-1 rounded-lg border border-[rgba(212,165,116,0.2)] py-1.5 text-xs text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)]"
+                      className="flex w-full items-center justify-center gap-1 rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] py-1.5 text-xs font-medium text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)]"
                     >
                       Exibir mais ({remaining})
                     </button>
@@ -305,24 +308,24 @@ function ArchivedPanel({
   const stageName = (id: string | null) => stages.find((s) => s.id === id)?.name ?? '-';
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-l border-[rgba(212,165,116,0.2)] bg-[#0A0A0F] shadow-[0_0_60px_rgba(212,165,116,0.15)]">
-        <div className="flex items-center justify-between border-b border-[rgba(212,165,116,0.1)] px-4 py-3">
+      <div className="fixed inset-0 z-40 bg-[rgba(23,40,43,0.35)]" onClick={onClose} />
+      <div className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-l border-[var(--color-border-card)] bg-[var(--color-bg-surface)] shadow-[-8px_0_32px_rgba(23,40,43,0.10)]">
+        <div className="flex items-center justify-between border-b border-[var(--color-border-soft)] px-4 py-3">
           <span className="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]">
-            <Archive className="h-4 w-4 text-[var(--accent-primary)]" /> Oportunidades arquivadas ({deals.length})
+            <Archive className="h-4 w-4 text-[var(--accent-primary)]" /> Orçamentos arquivados ({deals.length})
           </span>
-          <button onClick={onClose} className="rounded-md p-1 text-[var(--color-text-secondary)] transition hover:bg-white/5">
+          <button onClick={onClose} className="rounded-md p-1 text-[var(--color-text-secondary)] transition hover:bg-[var(--color-bg-subtle)]">
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="flex-1 space-y-2 overflow-y-auto p-4">
           {deals.length === 0 && (
-            <div className="text-sm text-[var(--color-text-secondary)]">Nenhuma oportunidade arquivada neste funil.</div>
+            <div className="text-sm text-[var(--color-text-secondary)]">Nenhum orçamento arquivado neste funil.</div>
           )}
           {deals.map((d) => {
             const leadName = d.contact?.name?.trim() || d.contact?.phone || 'Sem nome';
             return (
-              <div key={d.id} className="rounded-xl border border-[rgba(212,165,116,0.2)] p-3" style={{ background: '#0F1223' }}>
+              <div key={d.id} className="rounded-xl border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] p-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 cursor-pointer" onClick={() => onOpen(d.id)}>
                     <div className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{leadName}</div>
@@ -335,7 +338,7 @@ function ArchivedPanel({
                   <button
                     onClick={() => onRestore(d.id)}
                     title="Restaurar para o funil"
-                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[rgba(212,165,116,0.25)] px-2 py-1 text-[11px] text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)]"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--color-border-card)] px-2 py-1 text-[11px] font-medium text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)]"
                   >
                     <ArchiveRestore className="h-3.5 w-3.5" /> Restaurar
                   </button>
@@ -368,6 +371,7 @@ function DealCard({
   const origin = getDealOrigin(deal);
   // Subtítulo minimizado: 1º produto comprado (+ "e outros" se houver mais);
   // sem produtos, cai no título do negócio.
+  const parado = diasParado(deal.stage_entered_at);
   const products = deal.products ?? [];
   const subtitle =
     products.length > 0
@@ -380,14 +384,13 @@ function DealCard({
       onDragStart={() => { draggedRef.current = true; onDragStart(); }}
       onDragEnd={() => { window.setTimeout(() => { draggedRef.current = false; }, 50); }}
       onClick={() => { if (!draggedRef.current) onOpen(); }}
-      className="group relative cursor-pointer p-3 transition hover:border-[rgba(212,165,116,0.45)] active:cursor-grabbing rounded-xl border border-[rgba(212,165,116,0.25)] shadow-[0_0_20px_rgba(212,165,116,0.06),inset_0_1px_0_rgba(212,165,116,0.1)]"
-      style={{ background: '#0F1223' }}
+      className="group relative cursor-pointer rounded-xl border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] p-3 shadow-[0_1px_2px_rgba(23,40,43,0.04)] transition hover:border-[var(--color-border-strong)] hover:shadow-[0_2px_8px_rgba(23,40,43,0.07)] active:cursor-grabbing"
     >
       <div className="flex items-start justify-between gap-2">
         {/* Ajuste 3: nome do LEAD em destaque, produto(s) como subtítulo */}
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{leadName}</div>
-          <div className="truncate text-xs text-[var(--color-text-secondary)]">{subtitle}</div>
+          <div className="truncate text-[13.5px] font-semibold leading-tight text-[var(--color-text-primary)]">{leadName}</div>
+          <div className="mt-0.5 truncate text-[12px] leading-snug text-[var(--color-text-secondary)]">{subtitle}</div>
         </div>
         {temp && (
           <span className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${temp.className}`}>
@@ -396,19 +399,30 @@ function DealCard({
           </span>
         )}
       </div>
-      <div className="mt-1 flex items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-[var(--accent-secondary)]">{brl(Number(deal.value) || 0)}</span>
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <span className="text-[12.5px] font-bold text-[var(--accent-secondary)]">{brl(Number(deal.value) || 0)}</span>
         {deal.lead_type === 'Cliente' && (
-          <span className="rounded-full bg-[rgba(16,185,129,0.12)] px-2 py-0.5 text-[10px] font-semibold text-[#10B981]">Cliente</span>
+          <span className="rounded-full bg-[var(--color-success-bg)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-success)]">Cliente</span>
         )}
       </div>
+      {/* Relógio de estagnação: há quantos dias o orçamento está parado NESTA
+          etapa. É o dado que ordena o dia da recepção — com 81 orçamentos
+          abertos, o que decide a fila não é o valor, é o silêncio. Vem de
+          deals.stage_entered_at, que já chega no board (usePipeline usa `*`). */}
+      {parado !== null && (
+        <div className="mt-1.5 flex items-center">
+          <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${PARADO_CHIP_CLASS[tomParado(parado)]}`}>
+            <Clock className="h-2.5 w-2.5" />
+            Parado {rotuloParado(parado)}
+          </span>
+        </div>
+      )}
       {/* Arquivar: overlay absoluto no canto inferior direito, só no hover —
           fora do fluxo, não desloca nenhum badge. */}
       <button
         onClick={(e) => { e.stopPropagation(); onArchive(); }}
-        title="Arquivar oportunidade"
-        className="absolute bottom-2 right-2 rounded-md border border-[rgba(212,165,116,0.25)] p-1 text-[var(--color-text-secondary)] opacity-0 transition group-hover:opacity-100 hover:bg-white/10 hover:text-[var(--color-text-primary)]"
-        style={{ background: '#0F1223' }}
+        title="Arquivar orçamento"
+        className="absolute bottom-2 right-2 rounded-md border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] p-1 text-[var(--color-text-secondary)] opacity-0 transition group-hover:opacity-100 hover:bg-[var(--color-bg-highlight)] hover:text-[var(--color-text-primary)]"
       >
         <Archive className="h-3.5 w-3.5" />
       </button>
@@ -461,7 +475,7 @@ function AddDealForm({
   const [busy, setBusy] = useState(false);
 
   const inputCls =
-    'w-full rounded-md border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-2 py-1 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]';
+    'w-full rounded-md border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] px-2 py-1 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]';
 
   return (
     <form
@@ -472,21 +486,21 @@ function AddDealForm({
         await onSubmit({ title: title.trim(), contact_id: contactId, value: Number(value) || 0 });
         setBusy(false);
       }}
-      className="space-y-2 rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] p-2"
+      className="space-y-2 rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] p-2"
     >
       <select value={contactId} onChange={(e) => setContactId(e.target.value)} className={inputCls}>
-        <option value="">Pessoa…</option>
+        <option value="">Paciente…</option>
         {contacts.map((c) => (
           <option key={c.id} value={c.id}>{c.name ?? c.phone}</option>
         ))}
       </select>
-      <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título da oportunidade" className={inputCls} />
+      <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título do orçamento" className={inputCls} />
       <input value={value} onChange={(e) => setValue(e.target.value)} type="number" step="0.01" placeholder="Valor (R$)" className={inputCls} />
       <div className="flex gap-2">
         <button type="submit" disabled={busy} className="flex-1 rounded-md bg-[var(--accent-primary)] px-2 py-1 text-xs font-semibold text-white disabled:opacity-60">
           {busy ? 'Salvando…' : 'Salvar'}
         </button>
-        <button type="button" onClick={onCancel} className="rounded-md border border-[rgba(212,165,116,0.2)] px-2 py-1 text-xs text-[var(--color-text-secondary)]">
+        <button type="button" onClick={onCancel} className="rounded-md border border-[var(--color-border-card)] px-2 py-1 text-xs text-[var(--color-text-secondary)]">
           <X className="h-3 w-3" />
         </button>
       </div>

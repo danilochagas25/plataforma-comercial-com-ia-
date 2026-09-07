@@ -25,14 +25,14 @@ export function Header({ onMenuClick }: HeaderProps) {
     // empilhamento; sem z-index os dropdowns de notificacoes e organizacao
     // ficavam atras dos cards do <main>. Modais sao fixed z-40+ e seguem acima.
     <header
-      className="relative z-30 h-16 shrink-0 glass-surface border-b border-[rgba(212,165,116,0.08)] flex items-center justify-between px-4 sm:px-6 gap-4"
+      className="relative z-30 h-16 shrink-0 glass-surface border-b border-[rgba(97,193,208,0.16)] flex items-center justify-between px-4 sm:px-6 gap-4"
       role="banner"
     >
       <div className="flex items-center gap-2">
         <button
           onClick={onMenuClick}
           aria-label="Abrir menu"
-          className="md:hidden h-11 w-11 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
+          className="md:hidden h-11 w-11 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[#EEF6F7] hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
         >
           <Menu className="h-5 w-5" />
         </button>

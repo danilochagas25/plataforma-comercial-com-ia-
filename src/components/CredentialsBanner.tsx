@@ -14,7 +14,7 @@ export function CredentialsBanner() {
 
   return (
     <div className="glass-card flex items-center gap-3 px-4 py-3">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[rgba(245,158,11,0.15)] text-[#FBBF24]">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[rgba(245,158,11,0.15)] text-[#9A4A07]">
         <KeyRound className="h-4 w-4" />
       </div>
       <div className="min-w-0 flex-1 text-sm text-[var(--color-text-primary)]">
@@ -32,7 +32,7 @@ export function CredentialsBanner() {
         type="button"
         onClick={() => setDismissed(true)}
         aria-label="Dispensar aviso"
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition hover:bg-white/5 hover:text-[var(--color-text-primary)]"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition hover:bg-[#EEF6F7] hover:text-[var(--color-text-primary)]"
       >
         <X className="h-4 w-4" />
       </button>

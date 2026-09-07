@@ -38,7 +38,7 @@ interface Props {
 }
 
 const inputCls =
-  'w-full rounded-md border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-2 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]';
+  'w-full rounded-md border border-[var(--color-border-card)] bg-[var(--color-bg-primary)] px-2 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]';
 const labelCls =
   'mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]';
 
@@ -92,8 +92,8 @@ function Chip({
       className={cn(
         'rounded-full px-2.5 py-1 text-xs font-semibold border transition-colors',
         active
-          ? 'border-[var(--accent-primary)] bg-[rgba(212,165,116,0.15)] text-[var(--color-text-primary)]'
-          : 'border-[rgba(212,165,116,0.15)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-[rgba(212,165,116,0.35)]',
+          ? 'border-[var(--accent-primary)] bg-[var(--color-bg-highlight)] text-[var(--color-text-primary)]'
+          : 'border-[var(--color-border-card)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)]',
       )}
     >
       {children}
@@ -139,14 +139,14 @@ function MultiSelect({
         <ChevronDown className="h-3.5 w-3.5 opacity-70" />
       </button>
       {open && (
-        <div className="absolute z-[60] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-[rgba(212,165,116,0.25)] bg-[#0A0A0F] p-1 shadow-[0_0_30px_rgba(212,165,116,0.15)]">
+        <div className="absolute z-[60] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] p-1 shadow-[0_6px_20px_rgba(23,40,43,0.10)]">
           {options.length === 0 && (
             <div className="px-2 py-1.5 text-xs text-[var(--color-text-secondary)]">Nenhuma opção</div>
           )}
           {options.map((o) => (
             <label
               key={o.id}
-              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--color-text-primary)] hover:bg-white/5"
+              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-bg-subtle)]"
             >
               <input
                 type="checkbox"
@@ -241,7 +241,7 @@ export function InboxFilters({ filters, onChange, sort, onSortChange, operators,
         <button
           onClick={() => setOpen(false)}
           aria-label="Fechar filtros"
-          className="h-9 w-9 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-white/5"
+          className="h-9 w-9 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-subtle)]"
         >
           <X className="h-4.5 w-4.5" />
         </button>
@@ -249,7 +249,7 @@ export function InboxFilters({ filters, onChange, sort, onSortChange, operators,
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Nome">
-          <input value={filters.nome} onChange={(e) => set('nome', e.target.value)} placeholder="Nome da pessoa" className={inputCls} />
+          <input value={filters.nome} onChange={(e) => set('nome', e.target.value)} placeholder="Nome do paciente" className={inputCls} />
         </Field>
         <Field label="Email">
           <input value={filters.email} onChange={(e) => set('email', e.target.value)} placeholder="email@..." className={inputCls} />
@@ -358,7 +358,7 @@ export function InboxFilters({ filters, onChange, sort, onSortChange, operators,
         <div className="mt-3 flex justify-end">
           <button
             onClick={() => onChange({ ...DEFAULT_FILTERS })}
-            className="inline-flex items-center gap-1 rounded-md border border-[rgba(212,165,116,0.2)] px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)] transition hover:border-[var(--accent-primary)] hover:text-[var(--color-text-primary)]"
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--color-border-card)] px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)] transition hover:border-[var(--accent-primary)] hover:text-[var(--color-text-primary)]"
           >
             <X className="h-3 w-3" /> Limpar filtros
           </button>
@@ -376,8 +376,8 @@ export function InboxFilters({ filters, onChange, sort, onSortChange, operators,
         className={cn(
           'flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors',
           count > 0
-            ? 'border-[var(--accent-primary)] bg-[rgba(212,165,116,0.12)] text-[var(--color-text-primary)]'
-            : 'border-[rgba(212,165,116,0.2)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]',
+            ? 'border-[var(--accent-primary)] bg-[var(--color-bg-highlight)] text-[var(--color-text-primary)]'
+            : 'border-[var(--color-border-card)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]',
         )}
       >
         <Filter className="h-3.5 w-3.5" />
@@ -390,12 +390,12 @@ export function InboxFilters({ filters, onChange, sort, onSortChange, operators,
       </button>
 
       {/* Ordenação da lista (mesmo padrão do funil). */}
-      <label className="inline-flex items-center gap-1.5 rounded-lg border border-[rgba(212,165,116,0.2)] px-2.5 py-2 text-xs text-[var(--color-text-secondary)] transition hover:border-[var(--accent-primary)]">
+      <label className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-card)] px-2.5 py-2 text-xs text-[var(--color-text-secondary)] transition hover:border-[var(--accent-primary)]">
         <ArrowUpDown className="h-3.5 w-3.5 opacity-70" />
         <select
           value={sort}
           onChange={(e) => onSortChange(e.target.value as InboxSort)}
-          className="bg-transparent text-xs text-[var(--color-text-primary)] outline-none [&>option]:bg-[#0A0A0F]"
+          className="bg-transparent text-xs text-[var(--color-text-primary)] outline-none [&>option]:bg-[var(--color-bg-surface)]"
         >
           {(Object.keys(INBOX_SORT_LABEL) as InboxSort[]).map((s) => (
             <option key={s} value={s}>{INBOX_SORT_LABEL[s]}</option>
@@ -408,7 +408,7 @@ export function InboxFilters({ filters, onChange, sort, onSortChange, operators,
           <>
             {/* Desktop: popover ancorado. Mobile: bottom-sheet com overlay. */}
             <div
-              className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm sm:hidden"
+              className="fixed inset-0 z-40 bg-[rgba(23,40,43,0.32)] backdrop-blur-sm sm:hidden"
               onClick={() => setOpen(false)}
             />
             <div
@@ -419,7 +419,7 @@ export function InboxFilters({ filters, onChange, sort, onSortChange, operators,
                   : undefined
               }
               className={cn(
-                'z-50 bg-[#0F1223] border border-[rgba(212,165,116,0.25)] shadow-[0_0_40px_rgba(0,0,0,0.6)]',
+                'z-50 bg-[var(--color-bg-surface)] border border-[var(--color-border-strong)] shadow-[0_8px_28px_rgba(23,40,43,0.12)]',
                 'fixed inset-x-0 bottom-0 max-h-[80vh] overflow-y-auto rounded-t-2xl',
                 'sm:inset-x-auto sm:bottom-auto sm:w-[34rem] sm:max-w-[92vw] sm:rounded-xl',
                 'sm:top-[var(--pop-top)] sm:left-[var(--pop-left)]',

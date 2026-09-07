@@ -65,7 +65,7 @@ export function TemplateRestartDialog({ open, onClose, conversationId, onSent }:
               setTemplateId(e.target.value);
               setValues({});
             }}
-            className="h-11 w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-4 text-sm text-[var(--color-text-primary)]"
+            className="h-11 w-full rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-primary)] px-4 text-sm text-[var(--color-text-primary)]"
           >
             <option value="">Selecione…</option>
             {approved.map((t) => (
@@ -73,14 +73,14 @@ export function TemplateRestartDialog({ open, onClose, conversationId, onSent }:
             ))}
           </select>
           {approved.length === 0 && (
-            <p className="text-[11px] text-[var(--color-text-secondary)] opacity-70">
+            <p className="text-[11px] text-[var(--color-text-label)]">
               Nenhum template aprovado. Crie e aprove um em Templates.
             </p>
           )}
         </div>
 
         {selected && (
-          <div className="rounded-lg border border-[rgba(212,165,116,0.12)] bg-white/[0.02] p-3 text-sm text-[var(--color-text-secondary)] whitespace-pre-wrap">
+          <div className="rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] p-3 text-sm text-[var(--color-text-secondary)] whitespace-pre-wrap">
             {selected.body}
           </div>
         )}
@@ -90,7 +90,7 @@ export function TemplateRestartDialog({ open, onClose, conversationId, onSent }:
             <Label>Variáveis</Label>
             {vars.map((idx) => (
               <div key={idx} className="flex items-center gap-2">
-                <span className="font-mono text-xs bg-white/5 rounded px-2 py-1 text-[var(--accent-primary)]">
+                <span className="font-mono text-xs bg-[var(--color-bg-subtle)] rounded px-2 py-1 text-[var(--accent-primary)]">
                   {`{{${idx}}}`}
                 </span>
                 <Input

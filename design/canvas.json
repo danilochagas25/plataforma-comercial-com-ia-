@@ -1,0 +1,37 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1440, "h": 900, "title": "Direção A — Escuro com a cor da marca" },
+    { "file": "Claro.dc.html", "x": 1560, "y": 0, "w": 1440, "h": 900, "title": "Direção B — Claro, como a AmorSaúde" }
+  ],
+  "annotations": [
+    {
+      "id": "cores-oficiais",
+      "x": 0,
+      "y": -190,
+      "w": 660,
+      "text": "Cores tiradas do logotipo oficial da AmorSaúde (arquivo vetorial do site):\n\nTurquesa  #61C1D0\nVermelho  #D53E36\n\nSão as duas únicas cores do logo. A fonte da marca é Arboria (Adobe Fonts) — nos desenhos usei Figtree, que tem desenho parecido e é gratuita."
+    },
+    {
+      "id": "nota-direcao-a",
+      "x": 0,
+      "y": 960,
+      "w": 620,
+      "text": "DIREÇÃO A — mantém o fundo escuro que o CRM já tem e troca o dourado pelo turquesa da marca.\n\nA favor: mudança pequena, sem retrabalho. Menos cansaço em quem passa o dia na tela.\nContra: a AmorSaúde é uma marca clara e acolhedora. Escuro não parece 'clínica'."
+    },
+    {
+      "id": "nota-direcao-b",
+      "x": 1560,
+      "y": 960,
+      "w": 620,
+      "text": "DIREÇÃO B — claro, como o site e o material da AmorSaúde.\n\nA favor: qualquer pessoa reconhece a marca. Combina com o tom 'Quem ama, cuida'.\nContra: mexe em mais telas. E tela clara cansa mais em uso longo, se a recepção ficar o dia inteiro nela."
+    },
+    {
+      "id": "o-que-mudei",
+      "x": 700,
+      "y": -190,
+      "w": 700,
+      "text": "Além da cor, mudei o vocabulário para o da clínica: 'Oportunidades' virou Orçamentos, 'Pessoas' virou Pacientes.\n\nE acrescentei o que faltava na tela: quantos dias o orçamento está parado, o valor, a tabela de preço e o dentista — sem isso a recepção precisa abrir outra aba para saber com quem está falando."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

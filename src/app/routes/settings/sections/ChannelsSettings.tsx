@@ -57,9 +57,9 @@ interface MetaChannelStatus {
 
 type ConnState = boolean | null; // null = carregando
 
-const ZERNIO_COLOR = '#25D366';
-const UAZAPI_COLOR = '#2DD4BF';
-const META_COLOR = '#0866FF';
+const ZERNIO_COLOR = '#0B7A43';
+const UAZAPI_COLOR = '#0B6E7D';
+const META_COLOR = '#0757D9';
 
 // Identificadores da conta Meta da clínica (Odontologia), confirmados na tela
 // do Gerenciador em 05/09/2026. Não são segredo — só pré-preenchem o
@@ -78,22 +78,22 @@ const META_WEBHOOK_URL_FALLBACK =
 // Mesma pintura dos inputs das outras seções, extraída porque o formulário da
 // Meta tem sete campos.
 const FIELD_CLASS =
-  'w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:border-[var(--accent-primary)] focus:outline-none';
+  'w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:border-[var(--accent-primary)] focus:outline-none';
 
 function StatusBadge({ active }: { active: boolean }) {
   return (
     <span
       className={
         active
-          ? 'inline-flex items-center gap-1.5 rounded-full bg-[rgba(16,185,129,0.12)] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.05em] text-[#10B981]'
+          ? 'inline-flex items-center gap-1.5 rounded-full bg-[rgba(16,185,129,0.12)] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.05em] text-[#0C6B4A]'
           : 'inline-flex items-center gap-1.5 rounded-full bg-[rgba(148,163,184,0.12)] px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.05em] text-[var(--color-text-secondary)]'
       }
     >
       <span
         className={
           active
-            ? 'h-1.5 w-1.5 rounded-full bg-[#10B981] shadow-[0_0_6px_rgba(16,185,129,0.8)]'
-            : 'h-1.5 w-1.5 rounded-full bg-[#64748B]'
+            ? 'h-1.5 w-1.5 rounded-full bg-[#0C6B4A] shadow-[0_0_6px_rgba(16,185,129,0.8)]'
+            : 'h-1.5 w-1.5 rounded-full bg-[#5C7378]'
         }
       />
       {active ? 'Ativo' : 'Desativado'}
@@ -112,7 +112,7 @@ function MemberAvatar({ name, avatarUrl }: { name: string; avatarUrl: string | n
     .map((p) => p[0]?.toUpperCase() ?? '')
     .join('');
   return (
-    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[rgba(212,165,116,0.18)] text-[10px] font-bold text-[#E8C89A]">
+    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[rgba(97,193,208,0.38)] text-[10px] font-bold text-[#0B6E7D]">
       {initials || <UserRound className="h-3.5 w-3.5" />}
     </span>
   );
@@ -554,14 +554,14 @@ export function ChannelsSettings() {
           <button
             onClick={() => void toggleActive(channel)}
             disabled={busy === channel.id}
-            className="shrink-0 rounded-lg border border-[rgba(212,165,116,0.25)] bg-white/[0.03] px-3 py-1.5 text-xs font-medium text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)] disabled:opacity-50"
+            className="shrink-0 rounded-lg border border-[rgba(97,193,208,0.55)] bg-[#F7FBFC] px-3 py-1.5 text-xs font-medium text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)] disabled:opacity-50"
           >
             {channel.is_active ? 'Desativar' : 'Reativar'}
           </button>
         </div>
 
         {/* Operador responsável — conversas deste número vão direto para ele. */}
-        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[rgba(212,165,116,0.08)] pt-3">
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[rgba(97,193,208,0.16)] pt-3">
           {owner ? (
             <MemberAvatar name={operatorLabel(owner)} avatarUrl={owner.avatar_url} />
           ) : (
@@ -573,7 +573,7 @@ export function ChannelsSettings() {
             value={channel.assigned_member ?? ''}
             disabled={busy === channel.id}
             onChange={(e) => void setAssignedMember(channel, e.target.value || null)}
-            className="min-w-0 flex-1 rounded-lg border border-[rgba(212,165,116,0.2)] bg-[rgba(15,18,35,0.8)] px-3 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
+            className="min-w-0 flex-1 rounded-lg border border-[rgba(97,193,208,0.45)] bg-[rgba(255,255,255,0.97)] px-3 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-[var(--accent-primary)] focus:outline-none"
             title="Operador responsável: conversas deste número são atribuídas a ele"
           >
             <option value="">Sem operador fixo (round-robin da equipe)</option>
@@ -586,10 +586,10 @@ export function ChannelsSettings() {
         </div>
 
         {/* IA por número — refina o toggle global (Configurações → Agente IA). */}
-        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[rgba(212,165,116,0.08)] pt-3">
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[rgba(97,193,208,0.16)] pt-3">
           <Bot
             className="h-4 w-4 shrink-0"
-            style={{ color: channel.ai_enabled ? '#E8C89A' : 'var(--color-text-secondary)' }}
+            style={{ color: channel.ai_enabled ? '#0B6E7D' : 'var(--color-text-secondary)' }}
           />
           <div className="min-w-0 flex-1">
             <span className="text-xs font-medium text-[var(--color-text-primary)]">
@@ -705,7 +705,7 @@ export function ChannelsSettings() {
               <span
                 className={
                   instagram
-                    ? 'inline-flex items-center gap-1.5 rounded-full bg-[rgba(225,48,108,0.1)] px-2.5 py-1 text-[11px] font-semibold text-[#E1306C]'
+                    ? 'inline-flex items-center gap-1.5 rounded-full bg-[rgba(225,48,108,0.1)] px-2.5 py-1 text-[11px] font-semibold text-[#C82461]'
                     : 'inline-flex items-center gap-1.5 rounded-full bg-[rgba(148,163,184,0.1)] px-2.5 py-1 text-[11px] font-semibold text-[var(--color-text-secondary)]'
                 }
               >
@@ -716,12 +716,12 @@ export function ChannelsSettings() {
           </div>
 
           {/* Zernio API Key — única ação disponível no CRM */}
-          <div className="rounded-xl border border-[rgba(212,165,116,0.15)] bg-white/[0.02] p-4">
+          <div className="rounded-xl border border-[rgba(97,193,208,0.38)] bg-[#FAFDFD] p-4">
             <button
               onClick={() => setShowZernioKey((v) => !v)}
               className="flex w-full items-center gap-3 text-left"
             >
-              <KeyRound className="h-4 w-4 shrink-0 text-[#E8C89A]" />
+              <KeyRound className="h-4 w-4 shrink-0 text-[#0B6E7D]" />
               <div className="min-w-0 flex-1">
                 <span className="text-sm font-medium text-[var(--color-text-primary)]">
                   Zernio API Key
@@ -729,8 +729,8 @@ export function ChannelsSettings() {
                 <span
                   className={
                     zernioKeyExists
-                      ? 'ml-2 text-xs text-[#10B981]'
-                      : 'ml-2 text-xs text-[#F59E0B]'
+                      ? 'ml-2 text-xs text-[#0C6B4A]'
+                      : 'ml-2 text-xs text-[#9A4A07]'
                   }
                 >
                   {zernioKeyExists ? '· configurada' : '· pendente'}
@@ -741,14 +741,14 @@ export function ChannelsSettings() {
               />
             </button>
             {showZernioKey ? (
-              <div className="mt-3 space-y-3 border-t border-[rgba(212,165,116,0.08)] pt-3">
+              <div className="mt-3 space-y-3 border-t border-[rgba(97,193,208,0.16)] pt-3">
                 <input
                   value={zernioKey}
                   onChange={(e) => setZernioKey(e.target.value)}
                   type="password"
                   autoComplete="off"
                   placeholder={zernioKeyExists ? '•••••••••••• (configurada)' : 'Cole a Zernio API Key'}
-                  className="w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:border-[var(--accent-primary)] focus:outline-none"
+                  className="w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:border-[var(--accent-primary)] focus:outline-none"
                 />
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs text-[var(--color-text-secondary)]">
@@ -758,7 +758,7 @@ export function ChannelsSettings() {
                   <button
                     onClick={() => void saveZernioKey()}
                     disabled={!zernioKey.trim() || savingZernioKey || connectingZernio}
-                    className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-gradient-to-br from-[#182940] to-[#D4A574] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                    className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-gradient-to-br from-[#0B6E7D] to-[#0A7787] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
                   >
                     {savingZernioKey || connectingZernio ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -778,7 +778,7 @@ export function ChannelsSettings() {
 
           {/* Seletor de conta Zernio (API Key com várias contas WhatsApp) */}
           {zernioChoices ? (
-            <div className="rounded-xl border border-[rgba(212,165,116,0.15)] bg-white/[0.02] p-4">
+            <div className="rounded-xl border border-[rgba(97,193,208,0.38)] bg-[#FAFDFD] p-4">
               <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">
                 Escolha a conta WhatsApp para conectar
               </h4>
@@ -788,7 +788,7 @@ export function ChannelsSettings() {
                     key={acc.id}
                     onClick={() => void connectZernio(acc.id)}
                     disabled={connectingZernio}
-                    className="flex w-full items-center justify-between rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.02] p-3 text-left text-sm text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)]"
+                    className="flex w-full items-center justify-between rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#FAFDFD] p-3 text-left text-sm text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)]"
                   >
                     <span className="truncate">{acc.name}</span>
                     <span className="ml-3 shrink-0 font-mono text-[11px] text-[var(--color-text-secondary)]">
@@ -861,7 +861,7 @@ export function ChannelsSettings() {
 
           {/* Form de nova instância UAZAPI */}
           {showUazapiForm ? (
-            <div className="space-y-3 rounded-xl border border-[rgba(212,165,116,0.15)] bg-white/[0.02] p-4">
+            <div className="space-y-3 rounded-xl border border-[rgba(97,193,208,0.38)] bg-[#FAFDFD] p-4">
               <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">
                 Nova instância UAZAPI
               </h4>
@@ -869,32 +869,32 @@ export function ChannelsSettings() {
               value={uazForm.label}
               onChange={(e) => setUazForm((f) => ({ ...f, label: e.target.value }))}
               placeholder="Nome do número (ex: WhatsApp da Maria)"
-              className="w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:border-[var(--accent-primary)] focus:outline-none"
+              className="w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:border-[var(--accent-primary)] focus:outline-none"
             />
             <input
               value={uazForm.serverUrl}
               onChange={(e) => setUazForm((f) => ({ ...f, serverUrl: e.target.value }))}
               placeholder="Server URL (https://…uazapi.com)"
-              className="w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:border-[var(--accent-primary)] focus:outline-none"
+              className="w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:border-[var(--accent-primary)] focus:outline-none"
             />
             <input
               value={uazForm.token}
               onChange={(e) => setUazForm((f) => ({ ...f, token: e.target.value }))}
               placeholder="Instance Token"
               type="password"
-              className="w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:border-[var(--accent-primary)] focus:outline-none"
+              className="w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)] focus:border-[var(--accent-primary)] focus:outline-none"
             />
               <div className="flex justify-end gap-2">
                 <button
                   onClick={() => setShowUazapiForm(false)}
-                  className="rounded-lg border border-[rgba(212,165,116,0.2)] px-4 py-2 text-sm text-[var(--color-text-secondary)]"
+                  className="rounded-lg border border-[rgba(97,193,208,0.45)] px-4 py-2 text-sm text-[var(--color-text-secondary)]"
                 >
                   Cancelar
                 </button>
                 <button
                   onClick={() => void saveUazapiChannel()}
                   disabled={savingUaz || !uazForm.serverUrl.trim() || !uazForm.token.trim()}
-                  className="rounded-lg bg-gradient-to-br from-[#182940] to-[#D4A574] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                  className="rounded-lg bg-gradient-to-br from-[#0B6E7D] to-[#0A7787] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
                 >
                   {savingUaz ? 'Conectando...' : 'Conectar e cadastrar webhook'}
                 </button>
@@ -967,7 +967,7 @@ export function ChannelsSettings() {
           {/* Formulário do canal Meta — identificadores já preenchidos com os
               dados da conta da clínica; segredos sempre em branco. */}
           {showMetaForm ? (
-            <div className="space-y-3 rounded-xl border border-[rgba(212,165,116,0.15)] bg-white/[0.02] p-4">
+            <div className="space-y-3 rounded-xl border border-[rgba(97,193,208,0.38)] bg-[#FAFDFD] p-4">
               <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">
                 Dados do número na Meta
               </h4>
@@ -1010,7 +1010,7 @@ export function ChannelsSettings() {
                 </label>
               </div>
 
-              <div className="space-y-3 border-t border-[rgba(212,165,116,0.08)] pt-3">
+              <div className="space-y-3 border-t border-[rgba(97,193,208,0.16)] pt-3">
                 <label className="space-y-1.5">
                   <span className="block text-label">Token de acesso</span>
                   <input
@@ -1063,14 +1063,14 @@ export function ChannelsSettings() {
               <div className="flex justify-end gap-2">
                 <button
                   onClick={() => setShowMetaForm(false)}
-                  className="rounded-lg border border-[rgba(212,165,116,0.2)] px-4 py-2 text-sm text-[var(--color-text-secondary)]"
+                  className="rounded-lg border border-[rgba(97,193,208,0.45)] px-4 py-2 text-sm text-[var(--color-text-secondary)]"
                 >
                   Cancelar
                 </button>
                 <button
                   onClick={() => void saveMetaChannel()}
                   disabled={savingMeta || !metaForm.phoneNumberId.trim()}
-                  className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-[#182940] to-[#D4A574] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-[#0B6E7D] to-[#0A7787] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
                 >
                   {savingMeta ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                   Salvar e testar conexão
@@ -1086,7 +1086,7 @@ export function ChannelsSettings() {
           >
             <div className="text-label">URL do webhook</div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <code className="min-w-0 flex-1 truncate rounded-lg bg-[rgba(15,18,35,0.8)] px-3 py-2 font-mono text-[11px] text-[var(--color-text-primary)]">
+              <code className="min-w-0 flex-1 truncate rounded-lg bg-[rgba(255,255,255,0.97)] px-3 py-2 font-mono text-[11px] text-[var(--color-text-primary)]">
                 {metaWebhookUrl}
               </code>
               <button
@@ -1150,7 +1150,7 @@ export function ChannelsSettings() {
                         style={{
                           borderColor: 'rgba(16,185,129,0.3)',
                           background: 'rgba(16,185,129,0.08)',
-                          color: '#10B981',
+                          color: '#0C6B4A',
                         }}
                       >
                         <CheckCheck className="h-3.5 w-3.5" />
@@ -1219,7 +1219,7 @@ export function ChannelsSettings() {
                                 disabled={
                                   registeringId === channel.id || registerPin.trim().length !== 6
                                 }
-                                className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-[#182940] to-[#D4A574] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                                className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-[#0B6E7D] to-[#0A7787] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
                               >
                                 {registeringId === channel.id ? (
                                   <Loader2 className="h-4 w-4 animate-spin" />

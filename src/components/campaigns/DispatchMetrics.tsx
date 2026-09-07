@@ -27,11 +27,11 @@ const PERIODS: { value: DashboardPeriod; label: string }[] = [
 
 // Recharts default colors don't mix with the dark glass theme; we hand-pick
 // palette slots that echo the sidebar / status chips used elsewhere.
-const CHART_BLUE = '#D4A574';
-const CHART_GREEN = '#22C55E';
-const CHART_AMBER = '#F59E0B';
-const CHART_ROSE = '#EF4444';
-const CHART_GRAY = '#64748B';
+const CHART_BLUE = '#0A7787';
+const CHART_GREEN = '#0C6B4A';
+const CHART_AMBER = '#9A4A07';
+const CHART_ROSE = '#B02D26';
+const CHART_GRAY = '#5C7378';
 
 // Métricas de disparo WhatsApp — antes moravam no Dashboard; agora vivem na
 // aba "Métricas" de Campanhas (Módulo 2). A lógica (hooks) permanece intacta.
@@ -78,7 +78,7 @@ export function DispatchMetrics() {
           </div>
         </div>
 
-        <div className="flex items-center gap-1 rounded-lg border border-[rgba(212,165,116,0.12)] p-1 bg-white/[0.02]">
+        <div className="flex items-center gap-1 rounded-lg border border-[rgba(97,193,208,0.30)] p-1 bg-[#FAFDFD]">
           {PERIODS.map((p) => (
             <button
               key={p.value}
@@ -128,7 +128,7 @@ export function DispatchMetrics() {
                   .map(([label, v]) => (
                     <span
                       key={label}
-                      className="rounded-full border border-[rgba(212,165,116,0.2)] bg-white/[0.02] px-3 py-1 text-[11px] text-[var(--color-text-secondary)]"
+                      className="rounded-full border border-[rgba(97,193,208,0.45)] bg-[#FAFDFD] px-3 py-1 text-[11px] text-[var(--color-text-secondary)]"
                     >
                       {label}: <span className="font-mono text-[var(--color-text-primary)]">{v}</span>
                     </span>
@@ -155,13 +155,13 @@ export function DispatchMetrics() {
           color="success"
         />
         <MetricCard
-          icon={<Eye className="h-4 w-4 text-[#A78BFA]" />}
+          icon={<Eye className="h-4 w-4 text-[#6D28D9]" />}
           label="Taxa de leitura"
           value={`${totals.readRate.toFixed(1)}%`}
           subtitle={`${totals.read.toLocaleString('pt-BR')} lidas`}
         />
         <MetricCard
-          icon={<MessageSquare className="h-4 w-4 text-[#FBBF24]" />}
+          icon={<MessageSquare className="h-4 w-4 text-[#9A4A07]" />}
           label="Taxa de resposta"
           value={`${totals.replyRate.toFixed(1)}%`}
           subtitle={`${totals.replied.toLocaleString('pt-BR')} respondidas`}
@@ -183,22 +183,22 @@ export function DispatchMetrics() {
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={volumeByDay} margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid stroke="rgba(212,165,116,0.08)" vertical={false} />
+                  <CartesianGrid stroke="rgba(97,193,208,0.16)" vertical={false} />
                   <XAxis
                     dataKey="day"
-                    tick={{ fontSize: 11, fill: '#94A3B8' }}
+                    tick={{ fontSize: 11, fill: '#4E666B' }}
                     tickFormatter={(d) => (typeof d === 'string' ? d.slice(5) : '')}
-                    stroke="rgba(212,165,116,0.2)"
+                    stroke="rgba(97,193,208,0.45)"
                   />
-                  <YAxis tick={{ fontSize: 11, fill: '#94A3B8' }} stroke="rgba(212,165,116,0.2)" allowDecimals={false} />
+                  <YAxis tick={{ fontSize: 11, fill: '#4E666B' }} stroke="rgba(97,193,208,0.45)" allowDecimals={false} />
                   <Tooltip
                     contentStyle={{
-                      background: 'rgba(15,18,35,0.95)',
-                      border: '1px solid rgba(212,165,116,0.25)',
+                      background: 'rgba(255,255,255,0.97)',
+                      border: '1px solid rgba(97,193,208,0.55)',
                       borderRadius: 10,
                       fontSize: 12,
                     }}
-                    labelStyle={{ color: '#F8FAFC' }}
+                    labelStyle={{ color: '#17282B' }}
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Line
@@ -256,8 +256,8 @@ export function DispatchMetrics() {
                   </Pie>
                   <Tooltip
                     contentStyle={{
-                      background: 'rgba(15,18,35,0.95)',
-                      border: '1px solid rgba(212,165,116,0.25)',
+                      background: 'rgba(255,255,255,0.97)',
+                      border: '1px solid rgba(97,193,208,0.55)',
                       borderRadius: 10,
                       fontSize: 12,
                     }}
@@ -293,19 +293,19 @@ export function DispatchMetrics() {
                 margin={{ top: 4, right: 10, left: 90, bottom: 0 }}
                 barCategoryGap={10}
               >
-                <CartesianGrid stroke="rgba(212,165,116,0.08)" horizontal={false} />
-                <XAxis type="number" tick={{ fontSize: 11, fill: '#94A3B8' }} stroke="rgba(212,165,116,0.2)" allowDecimals={false} />
+                <CartesianGrid stroke="rgba(97,193,208,0.16)" horizontal={false} />
+                <XAxis type="number" tick={{ fontSize: 11, fill: '#4E666B' }} stroke="rgba(97,193,208,0.45)" allowDecimals={false} />
                 <YAxis
                   type="category"
                   dataKey="name"
                   width={90}
-                  tick={{ fontSize: 11, fill: '#CBD5E1' }}
-                  stroke="rgba(212,165,116,0.2)"
+                  tick={{ fontSize: 11, fill: '#5C7378' }}
+                  stroke="rgba(97,193,208,0.45)"
                 />
                 <Tooltip
                   contentStyle={{
-                    background: 'rgba(15,18,35,0.95)',
-                    border: '1px solid rgba(212,165,116,0.25)',
+                    background: 'rgba(255,255,255,0.97)',
+                    border: '1px solid rgba(97,193,208,0.55)',
                     borderRadius: 10,
                     fontSize: 12,
                   }}
@@ -313,7 +313,7 @@ export function DispatchMetrics() {
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 <Bar dataKey="sent" name="Enviadas" stackId="a" fill={CHART_BLUE} />
                 <Bar dataKey="delivered" name="Entregues" stackId="a" fill={CHART_GREEN} />
-                <Bar dataKey="read" name="Lidas" stackId="a" fill="#A78BFA" />
+                <Bar dataKey="read" name="Lidas" stackId="a" fill="#6D28D9" />
                 <Bar dataKey="replied" name="Respondidas" stackId="a" fill={CHART_AMBER} />
                 <Bar dataKey="failed" name="Falhas" stackId="a" fill={CHART_ROSE} />
               </BarChart>

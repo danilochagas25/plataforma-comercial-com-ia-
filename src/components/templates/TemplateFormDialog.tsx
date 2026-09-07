@@ -198,7 +198,7 @@ export function TemplateFormDialog({
         {/* -- IA Generator -- */}
         <div className="rounded-lg border border-[rgba(139,92,246,0.25)] bg-[rgba(139,92,246,0.05)] p-4 space-y-3">
           <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-[#A78BFA]" />
+            <Sparkles className="h-4 w-4 text-[#6D28D9]" />
             <span className="text-sm font-semibold">Gerar com IA</span>
             <span className="text-xs text-[var(--color-text-secondary)] opacity-70">
               preenche body/footer/buttons com base no objetivo
@@ -209,7 +209,7 @@ export function TemplateFormDialog({
             onChange={(e) => setAiPrompt(e.target.value)}
             placeholder="Ex: Confirmação de pedido no e-commerce, com nome do cliente e número do pedido"
             rows={2}
-            className="w-full rounded-lg border border-[rgba(139,92,246,0.2)] bg-white/[0.03] px-4 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[#A78BFA]"
+            className="w-full rounded-lg border border-[rgba(139,92,246,0.2)] bg-[#F7FBFC] px-4 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[#6D28D9]"
             disabled={generating || saving}
           />
           <div className="flex items-center justify-end gap-3">
@@ -256,7 +256,7 @@ export function TemplateFormDialog({
               value={category}
               onChange={(e) => setCategory(e.target.value as TemplateCategory)}
               disabled={saving}
-              className="h-11 w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-4 text-sm text-[var(--color-text-primary)]"
+              className="h-11 w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-4 text-sm text-[var(--color-text-primary)]"
             >
               {CATEGORIES.map((c) => (
                 <option key={c.value} value={c.value}>
@@ -291,7 +291,7 @@ export function TemplateFormDialog({
               value={headerType}
               onChange={(e) => setHeaderType(e.target.value as HeaderType)}
               disabled={saving}
-              className="h-11 w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-4 text-sm text-[var(--color-text-primary)]"
+              className="h-11 w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-4 text-sm text-[var(--color-text-primary)]"
             >
               {HEADER_TYPES.map((h) => (
                 <option key={h.value} value={h.value}>
@@ -334,7 +334,7 @@ export function TemplateFormDialog({
             placeholder="Olá! Seu pedido foi confirmado e já está em separação."
             rows={5}
             disabled={saving}
-            className="w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-4 py-3 text-sm font-mono text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+            className="w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-4 py-3 text-sm font-mono text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
           />
           <div className="flex items-center justify-between gap-2">
             <p className="text-[11px] text-[var(--color-text-secondary)] opacity-70">
@@ -344,7 +344,7 @@ export function TemplateFormDialog({
               type="button"
               onClick={() => setBody((cur) => `${cur}{{${extractVariables(cur).length + 1}}}`)}
               disabled={saving}
-              className="shrink-0 rounded-md border border-[rgba(212,165,116,0.25)] px-2 py-1 text-[11px] text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)]"
+              className="shrink-0 rounded-md border border-[rgba(97,193,208,0.55)] px-2 py-1 text-[11px] text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)]"
             >
               + Variável
             </button>
@@ -352,7 +352,7 @@ export function TemplateFormDialog({
         </div>
 
         {detectedVars.length > 0 && (
-          <div className="space-y-2 rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.02] p-3">
+          <div className="space-y-2 rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#FAFDFD] p-3">
             <div className="text-xs font-semibold text-[var(--color-text-primary)]">
               Exemplos das variáveis (exigidos pela Meta para aprovação)
             </div>

@@ -169,7 +169,7 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
       opaque
     >
       {erro && (
-        <div className="mb-4 flex items-start gap-3 rounded-lg border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.06)] p-4">
+        <div className="mb-4 flex items-start gap-3 rounded-lg border border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] p-4">
           <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-[var(--color-error)]" />
           <div className="text-sm text-[var(--color-text-primary)]">{erro}</div>
         </div>
@@ -178,7 +178,7 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
       {passo === 'arquivo' && (
         <label
           htmlFor="orcamentos_file"
-          className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[rgba(212,165,116,0.25)] bg-white/[0.02] p-10 hover:border-[rgba(212,165,116,0.5)]"
+          className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[var(--color-border-card)] bg-[var(--color-bg-subtle)] p-10 hover:border-[var(--color-accent-primary)]"
         >
           <FileUp className="h-8 w-8 text-[var(--accent-primary)]" />
           <div className="text-center">
@@ -240,7 +240,7 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
                 {plano.porEspecialidade.map((e) => (
                   <span
                     key={e.especialidade}
-                    className="rounded-full border border-[rgba(59,130,246,0.25)] bg-[rgba(59,130,246,0.06)] px-3 py-1 text-xs text-[var(--color-text-secondary)]"
+                    className="rounded-full border border-[var(--color-accent-border)] bg-[var(--color-accent-bg)] px-3 py-1 text-xs text-[var(--color-text-secondary)]"
                   >
                     <strong className="text-[var(--color-text-primary)]">{e.especialidade}</strong>{' '}
                     {e.quantidade} · {brl(e.valor)}
@@ -371,7 +371,7 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
               </summary>
               <div className="mt-3 max-h-64 overflow-auto">
                 <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-[#0d101f]">
+                  <thead className="sticky top-0 bg-[var(--color-bg-surface)]">
                     <tr className="text-left text-[var(--color-text-secondary)]">
                       <th className="p-1.5">Paciente</th>
                       <th className="p-1.5">Tratamento</th>
@@ -382,7 +382,7 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
                   </thead>
                   <tbody>
                     {plano.novos.map((n) => (
-                      <tr key={n.externalRef} className="border-t border-[rgba(212,165,116,0.06)]">
+                      <tr key={n.externalRef} className="border-t border-[var(--color-border-divider)]">
                         <td className="p-1.5 text-[var(--color-text-primary)]">{n.paciente}</td>
                         <td className="p-1.5 text-[var(--color-text-secondary)]">{n.tratamento ?? '—'}</td>
                         <td className="p-1.5 font-mono text-[var(--color-text-secondary)]">{n.telefone}</td>
@@ -442,7 +442,7 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
 
       {passo === 'pronto' && resultado && (
         <div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-lg border border-[rgba(16,185,129,0.3)] bg-[rgba(16,185,129,0.05)] p-4">
+          <div className="flex items-start gap-3 rounded-lg border border-[var(--color-success-border)] bg-[var(--color-success-bg)] p-4">
             <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-[var(--color-success)]" />
             <div className="text-sm">
               <div className="font-semibold text-[var(--color-text-primary)]">Importação aplicada</div>
@@ -512,12 +512,12 @@ function Aviso({ icone, children }: { icone: 'alerta' | 'ok'; children: ReactNod
     <div
       className={`flex items-start gap-3 rounded-lg border p-3 text-sm ${
         alerta
-          ? 'border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.05)]'
-          : 'border-[rgba(59,130,246,0.25)] bg-[rgba(59,130,246,0.05)]'
+          ? 'border-[var(--color-warning-border)] bg-[var(--color-warning-bg)]'
+          : 'border-[var(--color-accent-border)] bg-[var(--color-accent-bg)]'
       }`}
     >
       {alerta ? (
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#F59E0B]" />
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-warning-text)]" />
       ) : (
         <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-primary)]" />
       )}

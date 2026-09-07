@@ -17,11 +17,11 @@ const STATUS_LABEL: Record<CampaignStatus, string> = {
 };
 
 const STATUS_COLORS: Record<CampaignStatus, string> = {
-  draft: 'bg-white/5 text-[var(--color-text-secondary)]',
-  scheduled: 'bg-[rgba(245,158,11,0.12)] text-[#FBBF24]',
-  sending: 'bg-[rgba(212,165,116,0.18)] text-[var(--accent-primary)] animate-pulse',
+  draft: 'bg-[#EEF6F7] text-[var(--color-text-secondary)]',
+  scheduled: 'bg-[rgba(245,158,11,0.12)] text-[#9A4A07]',
+  sending: 'bg-[rgba(97,193,208,0.38)] text-[var(--accent-primary)] animate-pulse',
   completed: 'bg-[rgba(16,185,129,0.12)] text-[var(--color-success)]',
-  paused: 'bg-white/10 text-[var(--color-text-secondary)]',
+  paused: 'bg-[#E4F5F8] text-[var(--color-text-secondary)]',
   failed: 'bg-[rgba(239,68,68,0.12)] text-[var(--color-error)]',
 };
 
@@ -145,9 +145,9 @@ export function CampaignsList() {
                         sem bumpar total_contacts (corrigido no check-follow-ups). */}
                     <span>{pct}% · {Math.min(c.sent + c.failed, c.total_contacts)}/{c.total_contacts}</span>
                   </div>
-                  <div className="h-2.5 rounded-full bg-white/5 overflow-hidden">
+                  <div className="h-2.5 rounded-full bg-[#EEF6F7] overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-gradient-to-r from-[#182940] to-[#D4A574] shadow-[0_0_12px_rgba(212,165,116,0.5)] transition-all"
+                      className="h-full rounded-full bg-gradient-to-r from-[#0B6E7D] to-[#0A7787] shadow-[0_4px_14px_rgba(23,40,43,0.08)] transition-all"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -193,7 +193,7 @@ function Metric({
           : 'text-[var(--color-text-primary)]';
   const rate = pctOf && pctOf > 0 ? Math.round((value / pctOf) * 100) : null;
   return (
-    <div className="rounded-xl bg-white/[0.02] border border-[rgba(212,165,116,0.1)] p-3 text-center transition hover:border-[rgba(212,165,116,0.3)]">
+    <div className="rounded-xl bg-[#FAFDFD] border border-[rgba(97,193,208,0.30)] p-3 text-center transition hover:border-[rgba(97,193,208,0.70)]">
       <div className={`text-xl font-bold ${colorClass}`}>{value}</div>
       <div className="text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)] mt-0.5">
         {label}

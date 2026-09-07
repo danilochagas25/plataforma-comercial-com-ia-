@@ -86,3 +86,7 @@ public/__preview-*
 *.xlsx
 *.xls
 ~$*
+
+# Canvas de design gerado (alguns MB, com fontes embutidas).
+# As fontes ficam versionadas: design/*.dc.html e design/canvas.json
+design/*-*.html

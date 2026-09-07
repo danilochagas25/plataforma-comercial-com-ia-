@@ -3268,3 +3268,369 @@ existir.
   voltar ao escopo, começar pela **#49** (agrupamento por contato) — antes do
   ramo `stage_stalled` do `check-follow-ups` (#44), porque a #49 é o que impede
   a régua de queimar o número.
+
+### 2026-09-07 · Claude Code · ⚠️ DOIS CHATS EM PARALELO — divisão de território
+
+**O Danilo abriu um segundo chat** para trabalhar em paralelo no mesmo projeto.
+Confirmado: o commit `c56a637` ("Um orçamento por tratamento") foi publicado
+pelo **outro** chat, não por este.
+
+**DIVISÃO ACORDADA (07/09/2026):**
+
+| Chat | Território |
+|---|---|
+| **Outro chat** | Importação, funil, campos do orçamento, relógio de estagnação — o miolo do CRM |
+| **ESTE chat** | **WhatsApp, templates e régua** |
+
+**RISCOS de trabalhar em paralelo, e as regras que os evitam:**
+1. **Migração de banco** — o risco mais grave, sem desfazer fácil. **Só um chat
+   aplica migração.** Este chat **não aplica** sem combinar antes; entrega o SQL
+   pronto se precisar.
+2. **Deploy de Edge Function** — um publica por cima do outro e o trabalho some
+   sem aviso. Cada chat só deploya função do **seu** território.
+3. **`MEMORIA.md`** — os dois escrevem no mesmo arquivo. Escrita simultânea
+   sobrescreve registro. Sempre **acrescentar ao fim**, nunca reescrever.
+4. **Git** — conferir `git log` e `git status` **antes** de qualquer commit; o
+   outro chat pode ter publicado no intervalo.
+
+**Ponto de encontro entre os territórios:** a régua (`follow_up_rules`,
+`check-follow-ups`) e os templates vinculados a ela. As 3 regras `stage_stalled`
+existem **desativadas**. Este chat cuida delas.
+
+- **Banco:** nenhuma migração nesta entrada.
+- **Próximo:** trabalhar os textos dos templates para **conversão**.
+
+### 2026-09-07 · Claude Code · IDENTIDADE VISUAL AmorSaúde — decisão do Danilo
+
+**⚠️ ATENÇÃO — DOIS CHATS EM PARALELO.** O Danilo abriu um segundo chat neste
+mesmo projeto. Divisão combinada:
+- **Este chat: LAYOUT e IDENTIDADE VISUAL**
+- **O outro chat: importação, funil, banco** (foi ele que publicou `c56a637`)
+> **Regra de convivência:** este chat **não toca** em `src/lib/odontoImport.ts`,
+> `src/lib/webdental.ts`, `ImportOrcamentosDialog.tsx` nem em migrações. Quem
+> aplica migração e mexe em banco é o outro chat.
+
+**CORES OFICIAIS DA AMORSAÚDE — extraídas do logotipo vetorial**
+(`https://www.amorsaude.com/images/logo_as.svg`, lido via `fetch` no navegador).
+O SVG contém **exatamente duas cores**:
+
+| Cor | Hex |
+|---|---|
+| **Turquesa** | **`#61C1D0`** |
+| **Vermelho** | **`#D53E36`** |
+
+**Tipografia da marca: `Arboria`** (Adobe Fonts, licença paga). Nos desenhos foi
+usada **Figtree** (Google Fonts, gratuita, desenho próximo). Se a clínica tiver
+licença da Arboria, trocar.
+
+Confirmado também no site `.com.br`: `arboria` aparece 334×; `#61C1D0` 59×;
+`#D53E36` 26×. O site da rede é **claro**, tom acolhedor ("Quem ama, cuida").
+
+**🔴 DECISÃO DO DANILO (07/09/2026): DIREÇÃO B — TEMA CLARO.**
+Duas direções foram desenhadas e publicadas como canvas
+(`design/crm-odonto-identidade.html`, artifact
+`f75f9006-7e91-4dc3-bf10-c6654b8c3784`): A = escuro com a cor da marca;
+B = claro, como a AmorSaúde. **Ele escolheu a B.**
+
+**⚠️ ISSO REVOGA A REGRA DO `CLAUDE.md`** que diz *"A plataforma é dark mode
+only. Não implementar light mode. Não criar toggle de tema."* — essa regra veio
+do template do curso e **não vale mais**. O `CLAUDE.md` precisa ser corrigido
+(pendência), senão o próximo agente desfaz o trabalho achando que corrige.
+
+**TAMANHO MEDIDO DA OBRA:** 48 arquivos com cor escrita à mão · 295 ocorrências
+de hex · **420 ocorrências do dourado `#D4A574`/`#E8C89A`/`rgba(212,165,116)`**.
+O CRM **não tem sistema de cores central** — a cor está espalhada dentro de cada
+tela, então trocar o token do topo resolve pouco.
+
+**PLANO EM 3 ETAPAS (Danilo autorizou 1 e 2 em 07/09):**
+1. **Sistema de cores claro** — paleta completa em tokens; telas passam a
+   consumir da paleta em vez de hex solto
+2. **Telas da recepção** — **Conversas** e **Orçamentos/Funil** (as duas que a
+   operadora usa o dia inteiro). Com elas prontas o CRM já é utilizável
+3. **O resto** — Painel, Pacientes, Disparos, Ajustes, instalação *(não autorizada
+   ainda)*
+
+**Mudanças de vocabulário aprovadas no desenho:** "Oportunidades" → **Orçamentos**;
+"Pessoas" → **Pacientes**. E o painel lateral da conversa passa a mostrar
+**há quantos dias o orçamento está parado**, valor, tabela de preço e dentista —
+hoje a recepção precisaria de outra aba para saber com quem fala.
+
+- **Banco:** nenhuma migração. **Arquivos:** `design/` (novo, canvas) + este registro.
+
+### 2026-09-07 · Claude Code · TEMPLATES v2 APROVADOS — com botões e parcelamento
+
+**SUBSTITUEM os 6 textos aprovados em 06/09** (que ficam como histórico, não
+foram submetidos). O Danilo pediu templates "bem atrativos, para melhor
+conversão" e aprovou esta versão em 07/09/2026.
+
+**CONTEXTO DE NEGÓCIO DESCOBERTO NESTA CONVERSA (não estava registrado):**
+1. **Hoje NÃO existe nenhuma abordagem** ao paciente que não fecha o orçamento.
+   O CRM não melhora um processo — **preenche um vazio**. Qualquer conversão é
+   ganho puro. Ninguém na clínica sabe por que o paciente não fecha.
+2. **Parcelamento: até 12x no cartão e ATÉ 24x NO BOLETO**, conforme o valor.
+   **Essa informação nunca chegou ao paciente.** Com o ticket médio de
+   R$ 1.069, 24x dá ~R$ 44/mês — o paciente foi embora achando que não cabia
+   no bolso e ninguém disse a ele.
+3. **Quando o paciente responder "quero marcar", a atendente agenda** — o
+   caminho depois da mensagem existe e é curto.
+
+**DECISÃO DE PRODUTO — BOTÕES DE RESPOSTA RÁPIDA.** É a maior alavanca de
+conversão, maior que qualquer palavra do texto: sem botão o paciente precisa
+parar e digitar, e adiar é não responder. Com botão é um toque. **Bônus
+estratégico:** cada botão revela **por que** o paciente não fechou — depois de
+~60 orçamentos a clínica terá, com número, se o problema é dinheiro, dúvida ou
+agenda. Informação que hoje não existe.
+
+**OS 3 TEMPLATES (conjunto único, serve filiado e particular):**
+
+- **D+1** `odonto_orcamento_d1` — abre a porta. Cita "12x no cartão ou 24x no
+  boleto" e "a condição que cabe no seu bolso".
+  Botões: `Quero saber as condições` · `Tenho uma dúvida` · `Quero remarcar`
+- **D+3** `odonto_orcamento_d3` — parcelamento no centro. **Boleto vem ANTES do
+  cartão** (quem tinha limite no cartão já teria fechado).
+  Botões: `Quero parcelar` · `Tenho uma dúvida` · `Quero remarcar`
+- **D+7** `odonto_orcamento_d7` — encerra sem fechar a porta. Remove o atrito
+  principal: "sem precisar refazer a avaliação".
+  Botões: `Ainda tenho interesse` · `Quero remarcar`
+
+**CRITÉRIOS DE REDAÇÃO (justificam a conformidade — não apagar):**
+- **Nenhum valor em reais no texto.** Preço é o que mais atrai fiscalização do
+  CFO, e cada orçamento é diferente. O paciente faz a conta sozinho.
+- Nenhum resultado prometido, nenhuma foto, nenhuma comparação com concorrente.
+- Falar de parcelamento com paciente que **já recebeu orçamento** é
+  continuidade de atendimento, não anúncio de captação.
+- "em até 12x/24x **conforme o tratamento**" — não vira promessa para todos.
+- Sem nome de tratamento e sem valor no texto: **família compartilha telefone**
+  (4 casos no arquivo real, um com 3 pacientes) — o orçamento do filho pode
+  chegar no celular da mãe.
+
+**CATEGORIA NA META: Marketing.** Com botões e oferta de parcelamento, a Meta
+classificaria assim de qualquer forma; tentar passar como Utilidade tende à
+reprovação. Custa mais por mensagem — informado ao Danilo.
+
+**Pendente de decisão:** variação para **filiado do Cartão de TODOS** (58 dos 81
+orçamentos), lembrando o benefício que a pessoa já paga e não usa. O Danilo não
+respondeu; seguimos com **conjunto único** por ora.
+
+- **Banco:** nenhuma migração.
+- **Próximo:** cadastrar os 3 na Meta (idioma pt_BR, variável `{{1}}` = primeiro
+  nome, **tipo "Número"** — o tipo "Nome" exigiria `{{nome}}`).
+
+### 2026-09-07 · Claude Code (subagente) · Identidade AmorSaúde — etapas 1 e 2
+
+**Pedido.** Trocar o tema escuro (dourado `#D4A574`, herdado do template do
+curso) pela identidade clara da AmorSaúde, na direção aprovada em
+`design/Claro.dc.html`. Etapa 1 = sistema de cores. Etapa 2 = as duas telas da
+recepção (**Conversas** e **Orçamentos/Funil**), com o vocabulário novo e o
+relógio de estagnação no painel lateral da conversa. Sem tocar em banco, em
+`supabase/`, em `odontoImport.ts` / `webdental.ts` / `ImportOrcamentosDialog.tsx`
+(território do outro chat), sem `git push` e sem deploy.
+
+---
+
+#### 1. A PALETA QUE FICOU — e os dois hex que tive de mudar
+
+As **duas** cores do logotipo (`#61C1D0` turquesa, `#D53E36` vermelho) são a
+única fonte; todo o resto é tom derivado. O que mudou em relação ao ponto de
+partida do briefing, e por quê:
+
+| Papel | Briefing | Ficou | Motivo |
+|---|---|---|---|
+| Marca (texto/botão) | `#0E8DA0` | **`#0A7787`** | `#0E8DA0` mede **3,94:1** sobre branco — **reprova** em WCAG AA (mínimo 4,5). `#0A7787` dá 5,25:1 sobre branco, 4,68:1 sobre `#E4F5F8`, e branco sobre ele também 5,25:1. |
+| Texto apagado | `#7C9498` | **`#5C7378`** | `#7C9498` mede **3,21:1** — reprova. O desenho usava esse tom em rótulo de 10–12px, que é justamente onde AA é obrigatório. |
+| Texto secundário | `#5C7378` | **`#4E666B`** (6,11:1) | Ao promover `#5C7378` para "apagado", o secundário precisou escurecer para a hierarquia de 3 níveis continuar existindo. |
+| Vermelho (texto) | `#D53E36` | **`#B02D26`** | `#D53E36` passa raspando (4,59:1) e some sobre o fundo `#FDEBEA`. `#B02D26` dá 6,46:1 no branco e 5,62:1 no fundo vermelho. `#D53E36` **continua** sendo o vermelho de preenchimento (branco sobre ele = 4,59:1 ✅). |
+| Sucesso | `#0F7A55` | **`#0C6B4A`** para texto, `#0F7A55` para preenchimento | 4,82:1 sobre `#E7F7F0` era limítrofe; `#0C6B4A` sobe para 5,89:1. |
+| Alerta | — | **`#9A4A07`** / fundo `#FDF1E3` | O âmbar do tema escuro (`#FBBF24`) é ilegível no claro. |
+
+> **A regra que fica escrita no topo de `globals.css`:** `#61C1D0` **não serve
+> para texto** (2,09:1 sobre branco). Ele é preenchimento, ícone grande e borda.
+> Texto, link e botão usam `#0A7787` / `#0B6E7D`.
+
+Todos os pares foram medidos por script sobre as 4 superfícies do app
+(`#FFFFFF`, `#F4FAFB`, `#EEF6F7`, `#E4F5F8`); o menor valor de qualquer par de
+texto ficou em **4,48:1**. A matriz completa está comentada no arquivo.
+
+**Tokens.** Mantive os nomes que já existiam (`--color-bg-primary`,
+`--color-accent-primary`, `--color-text-*`, `--color-border-*`) para não quebrar
+quem já usa `var(...)`, e acrescentei os que faltavam: `--color-bg-surface`,
+`--color-bg-subtle`, `--color-bg-highlight`, `--color-border-strong`,
+`--color-brand-fill`, `--color-brand-red*`, `--color-success-bg`,
+`--color-warning*`, `--color-error-bg`, `--color-text-label`.
+
+**`.glass-card` foi redesenhada, com o nome preservado.** É a base visual de
+todas as telas do template — renomear quebraria o app inteiro. No claro, "vidro
+escuro" não faz sentido: virou superfície branca, borda `#DDEBEE`, sombra de
+1–3px, **sem `backdrop-filter`** (no claro ele só borra texto e custa GPU).
+Entraram duas variantes: `.glass-card-static` (contêiner de layout que não deve
+reagir ao mouse — as 3 colunas da inbox piscavam a cada passagem) e
+`.surface-float` (dropdown/popover/drawer).
+
+**Tipografia.** `Figtree` (Google Fonts) no lugar da `Arboria` da marca, que é
+paga (Adobe Fonts) e não temos licença. Carregada no `index.html`, com `Inter`
+de reserva. `index.html` perdeu `class="dark"` e `color-scheme: dark`.
+
+---
+
+#### 2. A VARREDURA MECÂNICA — 67 arquivos
+
+O CRM não tinha sistema de cores: **420 ocorrências do dourado** escritas dentro
+de cada tela. Rodei uma substituição mecânica (só cor, nenhuma lógica) em todo o
+`src/`, **exceto** os 3 arquivos do outro chat:
+
+- `rgba(212,165,116,α)` → turquesa em 8 faixas de alfa (borda/divisor/fundo)
+- `#D4A574`/`#E8C89A`/`#182940` → `#0A7787`/`#0B6E7D`
+- superfícies escuras `#0A0A0F` `#0F1223` `#0d101f` → `#FFFFFF` (eram fundo de
+  dropdown, drawer e diálogo — no claro ficariam pretos com texto preto)
+- texto `#F8FAFC`→`#17282B`, `#94A3B8`→`#4E666B`, `#CBD5E1`/`#64748B`→`#5C7378`
+- estados `#FBBF24`/`#F59E0B`→`#9A4A07`, `#10B981`→`#0C6B4A`, `#EF4444`→`#B02D26`
+- canais `#25D366`→`#0B7A43`, `#E1306C`→`#C82461`, `#0866FF`→`#0757D9`
+  (os originais reprovam em contraste como texto)
+- `bg-white/[0.02…0.06]`, `bg-white/5`, `bg-white/10` (véus claros sobre fundo
+  escuro — **invisíveis** sobre branco) → superfícies sólidas da paleta
+- `shadow-[…rgba(212,165,116…)]` (glow dourado) → sombra neutra de elevação
+
+> **Armadilha que quase passou:** `dialog.tsx` e `ContactFormDialog.tsx` estão em
+> CRLF. O script normalizou para LF e o `git diff` virou "arquivo inteiro
+> reescrito". Restaurei o CRLF; o diff voltou a 2 linhas em cada.
+
+---
+
+#### 3. VOCABULÁRIO — só o que o usuário lê
+
+`src/config/vocab.ts`: `funnel: 'Oportunidades'` → **'Orçamentos'**,
+`contacts: 'Pessoas'` → **'Pacientes'** (isso já troca menu, título de página e
+tudo que consome `VOCAB`). `VOCAB_UNIT` ganhou `orçamento`/`paciente` com o
+**artigo masculino** — o antigo era feminino, e sem isso as frases sairiam
+"abrir a orçamento".
+
+Nas duas telas do escopo troquei as ~35 frases soltas com concordância feita à
+mão ("Oportunidade fechada" → "Orçamento **fechado**", "Nenhuma oportunidade
+aberta" → "**Nenhum** orçamento **aberto**", "Nome da pessoa" → "Nome do
+paciente"). **Rota, tabela, tipo e variável não foram renomeados** — continuam
+`/funil`, `deals`, `Deal`, `contact_id`.
+
+---
+
+#### 4. AS DUAS TELAS
+
+**Conversas** (`InboxPage`, `ConversationList`, `MessageThread`, `MessageInput`,
+`ContactPanel`, `InboxFilters`, `ContactTagsEditor`, `CustomFieldsEditor`,
+`TemplateRestartDialog`):
+- Lista com a densidade do desenho: `px-4 py-3.5`, faixa de seleção de 3px,
+  nome 13.5px, prévia 12.5px, chips `rounded-[5px]` bold de 9px.
+- Cabeçalho da conversa ganhou **rosto do paciente** e o selo **"Janela 24h
+  aberta / fechada"** — é a primeira coisa que a recepção precisa saber antes de
+  digitar, e antes só aparecia enterrado no painel da direita.
+- Balões: recebida = **branca com borda** (no claro, cinza sobre cinza sumia);
+  enviada = preenchimento da marca com texto branco (5,25:1).
+- O aviso de falha de envio ficava num `bg-black/25` **dentro** do balão da
+  marca: vermelho escuro sobre preto translúcido, ilegível. Virou fundo
+  `--color-error-bg`.
+- Contador de não lidas passou a usar o **vermelho da marca**, como no desenho.
+- `⏸` (emoji) virou ícone SVG `Pause`; o `🎉` dos toasts saiu.
+- Removi `opacity-60/70` de textos secundários: opacidade derruba o contraste
+  justamente onde o token já estava calibrado para passar.
+
+**Orçamentos/Funil** (`FunilPage`, `DealDrawer`, `FunilFilters`,
+`FunilManager`, `AddToPipelineModal`):
+- Coluna da etapa: fundo `--color-bg-subtle`, cabeçalho com contador em pílula
+  turquesa, total em 11px semibold.
+- Card: branco, borda `#DDEBEE`, sombra de 1px, hover só na borda + sombra.
+- **Chip "Parado N dias"** no card e na ficha (ver §5).
+- Scrims de modal passaram de `bg-black/60` para `rgba(23,40,43,0.38)`, e as
+  sombras "glow" turquesa dos popovers viraram sombra neutra.
+
+---
+
+#### 5. O RELÓGIO DE ESTAGNAÇÃO NO PAINEL DA CONVERSA — e o que NÃO deu
+
+Arquivo novo `src/lib/diasParado.ts`: converte `deals.stage_entered_at` em
+"Parado há N dias" + tom do chip. **Só apresentação** — não consulta banco, não
+conhece a régua (`check-follow-ups` continua intocada). Faixas: 0–1 neutro ·
+2 âmbar · 3+ vermelho, alinhadas ao ciclo de 7 dias do orçamento.
+
+Onde aparece: card do funil, ficha do orçamento (`DealDrawer`) e o bloco novo
+**"Orçamento"** no topo do `ContactPanel` da conversa.
+
+**O que o painel da conversa mostra hoje:**
+
+| Dado pedido | Situação |
+|---|---|
+| **Há quantos dias está parado** | ✅ número grande + chip |
+| **Valor** | ✅ |
+| **Tratamento** | 🟡 mostra o **título do orçamento** (que contém o tratamento e a data, ex.: *"Maria Julia — Clínica Geral · 01/09/2026"*), não o campo `tratamento` isolado |
+| **Tabela de preço** | ❌ **não deu** |
+| **Dentista** | ❌ **não deu** |
+
+**Por que não deu, e não é preguiça.** `tabela_preco` e `dentista` são
+`custom_field_values` (chaves estáveis criadas em 06/09) — **outra tabela**. A
+consulta que o `ContactPanel` já faz é em `deals`; buscar os campos exigiria uma
+**consulta nova** a `custom_field_values` + `custom_fields`, e a instrução desta
+tarefa é explícita em não inventar consulta (o acesso a dado é território do
+outro chat). Acrescentei **uma coluna** (`stage_entered_at`) à consulta que já
+existia — mesma ida ao servidor, risco zero — e parei aí. O ponto de extensão
+está marcado com comentário no arquivo. **Pendência registrada abaixo.**
+
+---
+
+- **Banco:** **nenhuma migração, nenhum `SELECT`, nenhuma Edge Function.**
+  Nenhum arquivo em `supabase/` foi aberto para escrita.
+
+- **Arquivos:** 71 (fora `MEMORIA.md`).
+  - Sistema: `src/styles/globals.css` · `index.html` · `src/config/vocab.ts` ·
+    **novo** `src/lib/diasParado.ts`
+  - Conversas: `src/app/routes/inbox/InboxPage.tsx` ·
+    `src/components/inbox/{ConversationList,MessageThread,MessageInput,ContactPanel,InboxFilters,ContactTagsEditor,CustomFieldsEditor,TemplateRestartDialog}.tsx`
+  - Funil: `src/app/routes/funil/FunilPage.tsx` ·
+    `src/components/funil/{DealDrawer,FunilFilters,FunilManager,AddToPipelineModal}.tsx`
+  - Compartilhado (**mexi, e aviso**): `src/components/ui/{button,input,dialog,sonner}.tsx`
+    (o `Toaster` estava com `theme="dark"`), `src/types/crm.ts`,
+    `src/lib/dealOrigin.ts`, `src/hooks/useDealDetail.ts`
+  - Varredura mecânica de cor: as outras ~50 telas (Painel, Pacientes, Disparos,
+    Ajustes, Fluxos, Atendente IA, Clientes, Contas, Login, Setup)
+
+- **Validação:** `npx vite build` ✅. `npx tsc -b` **não passa**, mas os **14
+  erros são todos de `ImportOrcamentosDialog.tsx` e `odontoImport.ts`**, que
+  estão com trabalho em andamento do outro chat (`ParseWebdentalResult` × 
+  `LeituraCombinada`, `PlanoImportacao.aprovados`). **São anteriores a mim e não
+  toquei nesses arquivos.** Nenhum erro nos 71 arquivos que alterei.
+
+- **Não feito:**
+  - **Etapa 3 (não autorizada).** Ficaram para depois, com a cor trocada mas sem
+    acabamento: **Painel** (`/dashboard` + `components/dashboard/widgets.tsx`,
+    onde os gráficos Recharts ainda têm cor de série do tema escuro),
+    **Pacientes** (`/contacts` + `ContactDetailPage` + `ContactFormDialog`),
+    **Disparos** (`/campaigns` + `CampaignWizard` + `TemplatesList`),
+    **Ajustes** (`/settings`, 9 seções — a maior superfície que sobrou),
+    **Fluxos** (`/automations`), **Atendente IA** (`/ai-agent`), **Clientes**
+    (`/vendas`), **Contas** (`/admin`), **Login/Cadastro** e o **wizard
+    `/setup`**. Também ficaram a **Sidebar**, o **Header** e o **MobileNav**:
+    funcionam e estão legíveis, mas não receberam a densidade do desenho.
+  - `ImportOrcamentosDialog.tsx` **não foi tocado** (território do outro chat) —
+    continua com `bg-[#0d101f]` no cabeçalho fixo da tabela e bordas douradas.
+    Vai destoar dentro do funil claro.
+  - Nenhum `git commit`, nenhum `git push`, nenhum deploy.
+  - Nenhuma pendência anterior fechada.
+
+- **Pendências abertas por esta entrega:**
+  1. **Tabela de preço e dentista no painel da conversa.** Precisa carregar
+     `custom_field_values` (chaves `tabela_preco`, `dentista`) para o deal ativo
+     do `ContactPanel`. O ponto de inserção já está comentado no arquivo.
+  2. **`CLAUDE.md` ainda diz "dark mode only, não criar light mode".** A regra
+     foi revogada pelo dono em 07/09 mas **continua escrita**. Enquanto estiver
+     lá, o próximo agente pode desfazer este trabalho achando que corrige. Não
+     editei porque o `CLAUDE.md` é documento comum aos dois chats.
+  3. **Erros de TypeScript do outro chat** (14, em `odontoImport.ts` e
+     `ImportOrcamentosDialog.tsx`) travam `npm run build`, que roda `tsc -b`
+     antes do `vite build`. **Bloqueia deploy** enquanto não forem resolvidos.
+  4. **"Parado N dias" na lista de conversas.** O desenho aprovado mostra o chip
+     na lista; `ConversationWithContact` não traz dado de orçamento, então lá
+     ainda não aparece.
+  5. Rótulo do campo no banco continua "Tratamento(s)" (pendência #50, herdada).
+
+- **Próximo:** (1) corrigir o `CLAUDE.md` (pendência 2 — é a que protege o
+  trabalho); (2) o outro chat fechar os 14 erros de tipo para o build voltar a
+  passar inteiro; (3) o dono olhar Conversas e Funil no navegador e aprovar
+  antes de liberar a Etapa 3, que é onde está o volume (Ajustes sozinho tem 9
+  seções).

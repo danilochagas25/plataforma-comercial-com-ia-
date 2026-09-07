@@ -58,8 +58,8 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const inputCls =
-  'w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]';
-const selectCls = `${inputCls} [&>option]:bg-[#0A0A0F]`;
+  'w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]';
+const selectCls = `${inputCls} [&>option]:bg-[#FFFFFF]`;
 
 export default function VendasPage() {
   const { role } = useAppUser();
@@ -297,7 +297,7 @@ export default function VendasPage() {
             <button
               onClick={() => fileRef.current?.click()}
               disabled={busy}
-              className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-[#182940] to-[#D4A574] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-br from-[#0B6E7D] to-[#0A7787] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
               Subir Excel/CSV
@@ -318,12 +318,12 @@ export default function VendasPage() {
         <div className="glass-card p-4">
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
             <span className="text-[var(--color-text-primary)]"><b>{result.total}</b> linhas lidas</span>
-            <span className="text-[#10B981]"><b>{result.inserted}</b> novas</span>
+            <span className="text-[#0C6B4A]"><b>{result.inserted}</b> novas</span>
             <span className="text-[var(--color-text-secondary)]"><b>{result.duplicates}</b> já existentes (dedupe)</span>
-            {result.errors.length > 0 && <span className="text-[#EF4444]"><b>{result.errors.length}</b> com erro</span>}
+            {result.errors.length > 0 && <span className="text-[#B02D26]"><b>{result.errors.length}</b> com erro</span>}
           </div>
           {result.errors.length > 0 && (
-            <ul className="mt-2 max-h-40 overflow-y-auto text-xs text-[#EF4444]">
+            <ul className="mt-2 max-h-40 overflow-y-auto text-xs text-[#B02D26]">
               {result.errors.slice(0, 50).map((e, i) => (
                 <li key={i}>Linha {e.line}: {e.message}</li>
               ))}
@@ -348,14 +348,14 @@ export default function VendasPage() {
               <button
                 onClick={runPrediction}
                 disabled={computing}
-                className="inline-flex items-center gap-2 rounded-lg border border-[rgba(212,165,116,0.25)] px-3 py-1.5 text-xs font-medium text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)] disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-lg border border-[rgba(97,193,208,0.55)] px-3 py-1.5 text-xs font-medium text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)] disabled:opacity-60"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${computing ? 'animate-spin' : ''}`} /> Rodar agora
               </button>
             )}
             {isAdmin && (
               <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-[var(--color-text-primary)]">
-                <input type="checkbox" checked={autoSend === true} onChange={toggleAutoSend} className="h-4 w-4 accent-[#D4A574]" />
+                <input type="checkbox" checked={autoSend === true} onChange={toggleAutoSend} className="h-4 w-4 accent-[#0A7787]" />
                 Disparo automático (WABA)
               </label>
             )}
@@ -374,12 +374,12 @@ export default function VendasPage() {
               value={templateName}
               onChange={(e) => setTemplateName(e.target.value)}
               placeholder="ex: reposicao_estoque"
-              className="flex-1 rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-1.5 text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]"
+              className="flex-1 rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-3 py-1.5 text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]"
             />
             <button
               onClick={saveTemplateName}
               disabled={savingTemplate}
-              className="rounded-lg border border-[rgba(212,165,116,0.25)] px-3 py-1.5 text-xs font-medium text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)] disabled:opacity-60"
+              className="rounded-lg border border-[rgba(97,193,208,0.55)] px-3 py-1.5 text-xs font-medium text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)] disabled:opacity-60"
             >
               {savingTemplate ? 'Salvando…' : 'Salvar'}
             </button>
@@ -406,11 +406,11 @@ export default function VendasPage() {
                 groups.map((g) => {
                   const p = g.primary;
                   return (
-                  <tr key={g.key} className="border-t border-[rgba(212,165,116,0.08)]">
+                  <tr key={g.key} className="border-t border-[rgba(97,193,208,0.16)]">
                     <td className="py-2">
                       <button
                         onClick={() => void openContact(p)}
-                        className="text-left text-[var(--color-text-primary)] underline decoration-[rgba(212,165,116,0.4)] underline-offset-2 transition hover:text-[var(--accent-secondary)]"
+                        className="text-left text-[var(--color-text-primary)] underline decoration-[rgba(11,110,125,0.40)] underline-offset-2 transition hover:text-[var(--accent-secondary)]"
                         title="Abrir ficha do contato"
                       >
                         {p.customer_name ?? p.customer_doc}
@@ -420,7 +420,7 @@ export default function VendasPage() {
                       {g.products.length > 1 ? (
                         <button
                           onClick={() => setProductsFor(g)}
-                          className="text-left underline decoration-[rgba(212,165,116,0.4)] underline-offset-2 transition hover:text-[var(--accent-secondary)]"
+                          className="text-left underline decoration-[rgba(11,110,125,0.40)] underline-offset-2 transition hover:text-[var(--accent-secondary)]"
                           title="Ver todos os produtos comprados"
                         >
                           {g.products[0].name} e outros
@@ -432,7 +432,7 @@ export default function VendasPage() {
                     <td className="py-2 text-[var(--color-text-secondary)]">{p.avg_interval_days}d</td>
                     <td className="py-2 text-[var(--color-text-secondary)]">{g.lastPurchase}</td>
                     <td className="py-2 text-[var(--color-text-primary)]">{p.predicted_next}</td>
-                    <td className="py-2"><span className="rounded-full bg-[rgba(212,165,116,0.12)] px-2 py-0.5 text-xs text-[var(--accent-secondary)]">{STATUS_LABEL[p.status] ?? p.status}</span></td>
+                    <td className="py-2"><span className="rounded-full bg-[rgba(97,193,208,0.30)] px-2 py-0.5 text-xs text-[var(--accent-secondary)]">{STATUS_LABEL[p.status] ?? p.status}</span></td>
                     <td className="py-2 text-right">
                       <div className="relative inline-block">
                         <button
@@ -443,7 +443,7 @@ export default function VendasPage() {
                             setMenuFor({ id: p.id, top: r.bottom + 4, left: Math.max(8, r.right - 208) });
                           }}
                           aria-label="Ações"
-                          className="rounded-md p-1 text-[var(--color-text-secondary)] transition hover:bg-white/5 hover:text-[var(--color-text-primary)]"
+                          className="rounded-md p-1 text-[var(--color-text-secondary)] transition hover:bg-[#EEF6F7] hover:text-[var(--color-text-primary)]"
                         >
                           {dispatching === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreVertical className="h-4 w-4" />}
                         </button>
@@ -452,15 +452,15 @@ export default function VendasPage() {
                             <div className="fixed inset-0 z-10" onClick={() => setMenuFor(null)} />
                             <div
                               style={{ position: 'fixed', top: menuFor.top, left: menuFor.left }}
-                              className="z-20 w-52 rounded-lg border border-[rgba(212,165,116,0.25)] bg-[#0A0A0F] p-1 text-left shadow-[0_0_30px_rgba(212,165,116,0.15)]"
+                              className="z-20 w-52 rounded-lg border border-[rgba(97,193,208,0.55)] bg-[#FFFFFF] p-1 text-left shadow-[0_4px_14px_rgba(23,40,43,0.08)]"
                             >
-                              <button onClick={() => void dispatchNow(p)} className="block w-full rounded-md px-3 py-2 text-left text-xs text-[var(--color-text-primary)] transition hover:bg-white/5">
+                              <button onClick={() => void dispatchNow(p)} className="block w-full rounded-md px-3 py-2 text-left text-xs text-[var(--color-text-primary)] transition hover:bg-[#EEF6F7]">
                                 Disparar mensagem agora
                               </button>
-                              <button onClick={() => { setMenuFor(null); setEditing({ ...p }); }} className="block w-full rounded-md px-3 py-2 text-left text-xs text-[var(--color-text-primary)] transition hover:bg-white/5">
+                              <button onClick={() => { setMenuFor(null); setEditing({ ...p }); }} className="block w-full rounded-md px-3 py-2 text-left text-xs text-[var(--color-text-primary)] transition hover:bg-[#EEF6F7]">
                                 Editar informações
                               </button>
-                              <button onClick={() => void removePrediction(p)} className="block w-full rounded-md px-3 py-2 text-left text-xs text-[var(--color-error)] transition hover:bg-white/5">
+                              <button onClick={() => void removePrediction(p)} className="block w-full rounded-md px-3 py-2 text-left text-xs text-[var(--color-error)] transition hover:bg-[#EEF6F7]">
                                 Remover da lista
                               </button>
                             </div>
@@ -526,7 +526,7 @@ export default function VendasPage() {
               ))}
             </div>
             {/* Amostra das 3 primeiras linhas para conferência */}
-            <div className="max-h-32 overflow-auto rounded-lg border border-[rgba(212,165,116,0.12)] bg-white/[0.02] p-2 text-[11px] text-[var(--color-text-secondary)]">
+            <div className="max-h-32 overflow-auto rounded-lg border border-[rgba(97,193,208,0.30)] bg-[#FAFDFD] p-2 text-[11px] text-[var(--color-text-secondary)]">
               {sheet.rows.slice(0, 3).map((r, i) => (
                 <div key={i} className="truncate">{(r as unknown[]).map((c) => String(c ?? '')).join(' · ')}</div>
               ))}
@@ -553,9 +553,9 @@ export default function VendasPage() {
             <p className="text-sm text-[var(--color-text-secondary)]">
               {productsFor.products.length} produto(s) comprado(s) por este cliente.
             </p>
-            <div className="overflow-hidden rounded-lg border border-[rgba(212,165,116,0.12)]">
+            <div className="overflow-hidden rounded-lg border border-[rgba(97,193,208,0.30)]">
               <table className="w-full text-sm">
-                <thead className="bg-white/[0.03] text-left text-[var(--color-text-secondary)]">
+                <thead className="bg-[#F7FBFC] text-left text-[var(--color-text-secondary)]">
                   <tr>
                     <th className="px-3 py-2 font-medium">Produto</th>
                     <th className="px-3 py-2 font-medium text-right">Quantidade</th>
@@ -563,7 +563,7 @@ export default function VendasPage() {
                 </thead>
                 <tbody>
                   {productsFor.products.map((pr, i) => (
-                    <tr key={i} className="border-t border-[rgba(212,165,116,0.08)]">
+                    <tr key={i} className="border-t border-[rgba(97,193,208,0.16)]">
                       <td className="px-3 py-2 text-[var(--color-text-primary)]">{pr.name}</td>
                       <td className="px-3 py-2 text-right text-[var(--color-text-secondary)]">{pr.quantity}</td>
                     </tr>
@@ -617,7 +617,7 @@ function Metric({ label, value, accent }: { label: string; value: string; accent
   return (
     <div className="glass-card p-5">
       <div className="text-label">{label}</div>
-      <div className={`mt-2 text-2xl font-bold ${accent ? 'text-[#F59E0B]' : 'text-display'}`}>{value}</div>
+      <div className={`mt-2 text-2xl font-bold ${accent ? 'text-[#9A4A07]' : 'text-display'}`}>{value}</div>
     </div>
   );
 }

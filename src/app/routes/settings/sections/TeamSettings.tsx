@@ -256,7 +256,7 @@ export function TeamSettings() {
                 value={role}
                 onChange={(e) => setRole(e.target.value as Role)}
                 disabled={inviting}
-                className="h-11 w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-4 text-sm text-[var(--color-text-primary)]"
+                className="h-11 w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-4 text-sm text-[var(--color-text-primary)]"
               >
                 <option value="admin">Admin</option>
                 <option value="operator">Operador</option>
@@ -279,7 +279,7 @@ export function TeamSettings() {
         )}
 
         {isOwner && inviteLink && (
-          <div className="space-y-2 rounded-lg border border-[rgba(212,165,116,0.25)] bg-[rgba(212,165,116,0.06)] p-3">
+          <div className="space-y-2 rounded-lg border border-[rgba(97,193,208,0.55)] bg-[rgba(97,193,208,0.16)] p-3">
             <div className="text-label">Link de convite de {inviteLink.email}</div>
             <p className="text-xs text-[var(--color-text-secondary)]">
               Uso único e com validade curta. Se a pessoa demorar, gere outro pelo botão de
@@ -322,7 +322,7 @@ export function TeamSettings() {
               Nenhum membro ainda.
             </div>
           ) : (
-            <ul className="divide-y divide-[rgba(212,165,116,0.08)] rounded-lg border border-[rgba(212,165,116,0.1)] bg-white/[0.02]">
+            <ul className="divide-y divide-[rgba(97,193,208,0.16)] rounded-lg border border-[rgba(97,193,208,0.30)] bg-[#FAFDFD]">
               {members.map((m) => (
                 <li
                   key={m.id}
@@ -353,7 +353,7 @@ export function TeamSettings() {
                         disabled={linkingId === m.user_id}
                         aria-label={`Copiar link de convite de ${m.email}`}
                         title="Copiar link do convite"
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition hover:bg-[rgba(212,165,116,0.12)] hover:text-[var(--accent-primary)] disabled:opacity-50"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition hover:bg-[rgba(97,193,208,0.30)] hover:text-[var(--accent-primary)] disabled:opacity-50"
                       >
                         {linkingId === m.user_id ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -369,7 +369,7 @@ export function TeamSettings() {
                         disabled={removingId === m.user_id}
                         aria-label={`Remover ${m.email ?? m.user_id}`}
                         title="Remover membro"
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition hover:bg-[rgba(239,68,68,0.12)] hover:text-[#EF4444] disabled:opacity-50"
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition hover:bg-[rgba(239,68,68,0.12)] hover:text-[#B02D26] disabled:opacity-50"
                       >
                         {removingId === m.user_id ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -471,7 +471,7 @@ function LeadQueueManager() {
               </p>
             </div>
           </div>
-          <label className="flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-lg border border-[rgba(212,165,116,0.25)] px-3 py-2 text-sm text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)]">
+          <label className="flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-lg border border-[rgba(97,193,208,0.55)] px-3 py-2 text-sm text-[var(--color-text-primary)] transition hover:border-[var(--accent-primary)]">
             <input
               type="checkbox"
               checked={enabled}
@@ -499,7 +499,7 @@ function LeadQueueManager() {
                   onDragStart={() => { dragIdx.current = i; }}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => onDrop(i)}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-[rgba(212,165,116,0.15)] bg-white/[0.02] px-3 py-2"
+                  className="flex items-center justify-between gap-3 rounded-lg border border-[rgba(97,193,208,0.38)] bg-[#FAFDFD] px-3 py-2"
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-[var(--color-text-secondary)]" />
@@ -507,7 +507,7 @@ function LeadQueueManager() {
                     <span className="truncate text-sm text-[var(--color-text-primary)]">{m.email}</span>
                   </div>
                   <span
-                    className="ml-auto shrink-0 rounded-full bg-[rgba(212,165,116,0.1)] px-2.5 py-0.5 text-[11px] font-semibold text-[var(--accent-secondary)]"
+                    className="ml-auto shrink-0 rounded-full bg-[rgba(97,193,208,0.30)] px-2.5 py-0.5 text-[11px] font-semibold text-[var(--accent-secondary)]"
                     title="Total geral de conversas atribuídas a este membro (rodízio, número vinculado ou manual)"
                   >
                     {convCounts[m.user_id] ?? '…'} conversas
@@ -516,7 +516,7 @@ function LeadQueueManager() {
                     type="button"
                     onClick={wrap(() => remove(m.user_id))}
                     aria-label={`Remover ${m.email} da fila`}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition hover:bg-[rgba(239,68,68,0.12)] hover:text-[#EF4444]"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition hover:bg-[rgba(239,68,68,0.12)] hover:text-[#B02D26]"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -534,7 +534,7 @@ function LeadQueueManager() {
                 id="queue_add"
                 value={addChoice}
                 onChange={(e) => setAddChoice(e.target.value)}
-                className="h-11 w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-4 text-sm text-[var(--color-text-primary)]"
+                className="h-11 w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-4 text-sm text-[var(--color-text-primary)]"
               >
                 <option value="">Selecione um membro…</option>
                 {available.map((o) => (

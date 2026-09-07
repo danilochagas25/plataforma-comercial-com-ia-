@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { X, Phone, Mail, Building2, ChevronDown, MessageSquare, Plus, Check } from 'lucide-react';
+import { X, Phone, Mail, Building2, ChevronDown, Clock, MessageSquare, Plus, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { getSupabase } from '@/lib/supabase';
 import { useDealDetail } from '@/hooks/useDealDetail';
 import { operatorLabel, useOperators } from '@/hooks/useOperators';
 import { VOCAB } from '@/config/vocab';
 import { ProximaAcao } from '@/components/crm/ProximaAcao';
+import { diasParado, PARADO_CHIP_CLASS, rotuloParado, tomParado } from '@/lib/diasParado';
 import {
   CONTACT_SOURCE_LABEL,
   CUSTOM_FIELD_TYPE_LABEL,
@@ -40,7 +41,7 @@ interface DealDrawerProps {
 }
 
 const inputCls =
-  'w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]';
+  'w-full rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]';
 
 export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageChange, onChanged }: DealDrawerProps) {
   const detail = useDealDetail(deal);
@@ -91,7 +92,7 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
         setStageId(wonStage.id);
       }
     }
-    void saveDealField(patch, 'Oportunidade fechada. 🎉');
+    void saveDealField(patch, 'Orçamento fechado.');
   };
   const markLost = () => {
     void saveDealField({ status: 'lost', lead_type: 'Lead', lost_reason: lostReason.trim() || null }, 'Marcada como não fechou.');
@@ -99,7 +100,7 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
   };
   const reopen = () => {
     setLostReason('');
-    void saveDealField({ status: 'open' }, 'Oportunidade reaberta.');
+    void saveDealField({ status: 'open' }, 'Orçamento reaberto.');
   };
 
   const changePipeline = async (pipelineId: string) => {
@@ -108,7 +109,7 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
     const firstStage = (st?.[0] as { id: string } | undefined)?.id ?? null;
     const err = await detail.saveDeal({ pipeline_id: pipelineId, stage_id: firstStage });
     if (err) { toast.error(err); return; }
-    toast.success('Oportunidade movida de funil.');
+    toast.success('Orçamento movido de funil.');
     await onChanged();
     onClose();
   };
@@ -125,20 +126,22 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
     else { toast.success('Salvo.'); void onChanged(); }
   };
 
+  const paradoDias = diasParado(deal.stage_entered_at);
+
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-label="Detalhe da oportunidade">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-label="Detalhe do orçamento">
+      <div className="absolute inset-0 bg-[rgba(23,40,43,0.38)] backdrop-blur-sm" onClick={onClose} />
       <aside
-        className="relative z-10 flex h-full w-full max-w-full flex-col overflow-y-auto border-l border-[rgba(212,165,116,0.25)] bg-[#0A0A0F] shadow-[0_0_60px_rgba(212,165,116,0.12)] transition-transform duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)] sm:w-[460px]"
+        className="relative z-10 flex h-full w-full max-w-full flex-col overflow-y-auto border-l border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] shadow-[-8px_0_32px_rgba(23,40,43,0.10)] transition-transform duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)] sm:w-[460px]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-[rgba(212,165,116,0.12)] bg-[#0A0A0F]/95 px-5 py-4 backdrop-blur">
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-[var(--color-border-card)] bg-[var(--color-bg-surface)]/95 px-5 py-4 backdrop-blur">
           <div className="min-w-0 flex-1">
-            <div className="text-label">Pessoa</div>
+            <div className="text-label">Paciente</div>
             {/* Título = nome do lead (contato), editável */}
             <InlineText
               value={contact?.name ?? ''}
-              placeholder="Nome da pessoa"
+              placeholder="Nome do paciente"
               onSave={(v) => saveContactField({ name: v || null })}
               className="text-lg font-bold text-display"
             />
@@ -150,19 +153,29 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
               onRemove={async (id) => { await detail.removeProduct(id); void onChanged(); }}
             />
           </div>
-          <button onClick={onClose} aria-label="Fechar" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition hover:bg-white/5 hover:text-[var(--color-text-primary)]">
+          <button onClick={onClose} aria-label="Fechar" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-secondary)] transition hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text-primary)]">
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {error && (
-          <div className="mx-5 mt-4 rounded-lg border border-[rgba(239,68,68,0.3)] bg-[rgba(239,68,68,0.08)] px-3 py-2 text-sm text-[#EF4444]">{error}</div>
+          <div className="mx-5 mt-4 rounded-lg border border-[rgba(176,45,38,0.35)] bg-[var(--color-error-bg)] px-3 py-2 text-sm text-[var(--color-error)]">{error}</div>
         )}
 
         {loading && !contact ? (
-          <div className="p-6 text-label opacity-60">Carregando ficha...</div>
+          <div className="p-6 text-label">Carregando ficha...</div>
         ) : (
           <div className="space-y-6 p-5">
+            {/* Relógio de estagnação — há quantos dias este orçamento está
+                parado na etapa atual (deals.stage_entered_at). */}
+            {paradoDias !== null && (
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-bold ${PARADO_CHIP_CLASS[tomParado(paradoDias)]}`}>
+                  <Clock className="h-3 w-3" />
+                  Parado {rotuloParado(paradoDias)}
+                </span>
+              </div>
+            )}
             {/* Valor + temperatura + tipo */}
             <section className="grid grid-cols-2 gap-3">
               <Field label="Valor">
@@ -208,19 +221,19 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
                   <div className="flex gap-2">
                     <button
                       onClick={markWon}
-                      className="flex-1 rounded-lg border border-[rgba(16,185,129,0.35)] bg-[rgba(16,185,129,0.1)] py-2 text-sm font-semibold text-[#10B981] transition hover:bg-[rgba(16,185,129,0.18)]"
+                      className="flex-1 rounded-lg border border-[rgba(15,122,85,0.35)] bg-[var(--color-success-bg)] py-2 text-sm font-semibold text-[var(--color-success)] transition hover:bg-[var(--color-success-bg)]"
                     >
                       Marcar como ganho
                     </button>
                     <button
                       onClick={() => setLostReasonOpen((v) => !v)}
-                      className="flex-1 rounded-lg border border-[rgba(239,68,68,0.35)] bg-[rgba(239,68,68,0.08)] py-2 text-sm font-semibold text-[#EF4444] transition hover:bg-[rgba(239,68,68,0.16)]"
+                      className="flex-1 rounded-lg border border-[rgba(176,45,38,0.35)] bg-[var(--color-error-bg)] py-2 text-sm font-semibold text-[var(--color-error)] transition hover:bg-[var(--color-error-bg)]"
                     >
                       Marcar como perdido
                     </button>
                   </div>
                   {lostReasonOpen && (
-                    <div className="space-y-2 rounded-lg border border-[rgba(239,68,68,0.2)] bg-[rgba(239,68,68,0.05)] p-3">
+                    <div className="space-y-2 rounded-lg border border-[rgba(176,45,38,0.28)] bg-[var(--color-error-bg)] p-3">
                       <input
                         value={lostReason}
                         onChange={(e) => setLostReason(e.target.value)}
@@ -231,7 +244,7 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
                       />
                       <button
                         onClick={markLost}
-                        className="w-full rounded-lg bg-[#EF4444] py-2 text-sm font-semibold text-white transition hover:opacity-90"
+                        className="w-full rounded-lg bg-[var(--color-error)] py-2 text-sm font-semibold text-white transition hover:opacity-90"
                       >
                         Confirmar perda
                       </button>
@@ -239,14 +252,14 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
                   )}
                 </div>
               ) : (
-                <div className="space-y-2 rounded-lg border border-[rgba(212,165,116,0.12)] bg-white/[0.02] p-3">
+                <div className="space-y-2 rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] p-3">
                   <div className="flex items-center justify-between gap-2">
                     <span
                       className={
                         'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ' +
                         (deal.status === 'won'
-                          ? 'bg-[rgba(16,185,129,0.14)] text-[#10B981]'
-                          : 'bg-[rgba(239,68,68,0.14)] text-[#EF4444]')
+                          ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
+                          : 'bg-[var(--color-error-bg)] text-[var(--color-error)]')
                       }
                     >
                       {deal.status === 'won' ? 'Ganho' : 'Perdido'} ·{' '}
@@ -320,7 +333,7 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
             <section className="space-y-2">
               <div className="text-label">De onde veio (UTM)</div>
               {origin ? (
-                <div className="space-y-3 rounded-lg border border-[rgba(212,165,116,0.12)] bg-white/[0.02] p-3">
+                <div className="space-y-3 rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] p-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${TRAFFIC_TYPE_STYLE[origin.traffic ?? ''] ?? ''}`}>
                       {origin.highlight}
@@ -338,13 +351,13 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
                   </dl>
                 </div>
               ) : (
-                <p className="text-sm text-[var(--color-text-secondary)] opacity-70">
+                <p className="text-sm text-[var(--color-text-label)]">
                   Sem parâmetros de origem (UTM). Cadastro manual ou entrada direta.
                 </p>
               )}
             </section>
 
-            <Link to={`/inbox?contact=${deal.contact_id}`} className="flex items-center justify-center gap-2 rounded-lg border border-[rgba(212,165,116,0.2)] py-2.5 text-sm font-medium text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)] hover:bg-white/5">
+            <Link to={`/inbox?contact=${deal.contact_id}`} className="flex items-center justify-center gap-2 rounded-lg border border-[var(--color-border-card)] py-2.5 text-sm font-medium text-[var(--accent-secondary)] transition hover:border-[var(--accent-primary)] hover:bg-[var(--color-bg-subtle)]">
               <MessageSquare className="h-4 w-4" /> Abrir em {VOCAB.inbox}
             </Link>
 
@@ -369,7 +382,7 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
                 )}
               </div>
               {fields.length === 0 ? (
-                <p className="text-sm text-[var(--color-text-secondary)] opacity-70">Nenhum campo personalizado ainda.{isAdmin && ' Crie o primeiro em "Novo campo".'}</p>
+                <p className="text-sm text-[var(--color-text-label)]">Nenhum campo personalizado ainda.{isAdmin && ' Crie o primeiro em "Novo campo".'}</p>
               ) : (
                 <div className="space-y-3">
                   {fields.map((f) => (
@@ -386,14 +399,14 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
             <section className="space-y-3">
               <div className="text-label">Notas internas</div>
               <div className="flex gap-2">
-                <input value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void submitNote()} placeholder="Anotar algo sobre esta pessoa…" className={inputCls} />
-                <button onClick={submitNote} disabled={savingNote || !note.trim()} className="rounded-lg bg-gradient-to-br from-[#182940] to-[#D4A574] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60">
+                <input value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void submitNote()} placeholder="Anotar algo sobre este paciente…" className={inputCls} />
+                <button onClick={submitNote} disabled={savingNote || !note.trim()} className="rounded-lg bg-gradient-to-br from-[var(--accent-secondary)] to-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60">
                   {savingNote ? '…' : 'Anotar'}
                 </button>
               </div>
               <ol className="space-y-2">
                 {notes.length === 0 ? (
-                  <li className="text-sm text-[var(--color-text-secondary)] opacity-70">Sem notas ainda.</li>
+                  <li className="text-sm text-[var(--color-text-label)]">Sem notas ainda.</li>
                 ) : (
                   notes.map((n) => (
                     <li key={n.id} className="glass-card p-3">
@@ -444,7 +457,7 @@ function ProductMultiSelect({
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-[rgba(212,165,116,0.25)] bg-[#0A0A0F] p-1 shadow-[0_0_30px_rgba(212,165,116,0.15)]">
+          <div className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] p-1 shadow-[0_6px_20px_rgba(23,40,43,0.10)]">
             {catalog.length === 0 ? (
               <div className="px-3 py-2 text-xs text-[var(--color-text-secondary)]">
                 Nenhum produto no catálogo. Cadastre em {VOCAB.settings} → Produtos.
@@ -457,13 +470,13 @@ function ProductMultiSelect({
                     key={p.id}
                     type="button"
                     onClick={() => void (active ? onRemove(p.id) : onAdd(p.name))}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm text-[var(--color-text-primary)] hover:bg-white/5"
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-bg-subtle)]"
                   >
                     <span
                       className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
                         active
                           ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)]'
-                          : 'border-[rgba(212,165,116,0.35)]'
+                          : 'border-[var(--color-border-strong)]'
                       }`}
                     >
                       {active && <Check className="h-3 w-3 text-white" />}
@@ -485,7 +498,7 @@ function OriginRow({ label, value }: { label: string; value: string | null }) {
   return (
     <div className="min-w-0">
       <dt className="text-[0.6rem] uppercase tracking-[0.1em] text-[var(--color-text-secondary)]">{label}</dt>
-      <dd className={`truncate text-sm ${value ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)] opacity-60'}`}>
+      <dd className={`truncate text-sm ${value ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-label)]'}`}>
         {value || '-'}
       </dd>
     </div>
@@ -535,7 +548,7 @@ function InlineText({
       <button
         type="button"
         onClick={() => setEditing(true)}
-        className={`block w-full truncate text-left hover:opacity-80 ${value ? '' : 'text-[var(--color-text-secondary)] opacity-70'} ${className ?? ''}`}
+        className={`block w-full truncate text-left hover:opacity-80 ${value ? '' : 'text-[var(--color-text-label)]'} ${className ?? ''}`}
         title="Clique para editar"
       >
         {shown}
@@ -553,9 +566,9 @@ function InlineText({
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setLocal(value); setErr(null); setEditing(false); } }}
         placeholder={placeholder}
-        className="w-full rounded border border-[rgba(212,165,116,0.3)] bg-white/[0.05] px-2 py-1 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]"
+        className="w-full rounded border border-[var(--color-border-strong)] bg-[var(--color-bg-subtle)] px-2 py-1 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]"
       />
-      {err && <div className="mt-1 text-xs text-[#EF4444]">{err}</div>}
+      {err && <div className="mt-1 text-xs text-[var(--color-error)]">{err}</div>}
     </div>
   );
 }
@@ -619,14 +632,14 @@ function ChipEditor({
         {open && (q.trim() || suggestions.length > 0) && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-            <div className="absolute z-20 mt-1 w-full rounded-lg border border-[rgba(212,165,116,0.25)] bg-[#0A0A0F] p-1 shadow-[0_0_30px_rgba(212,165,116,0.15)]">
+            <div className="absolute z-20 mt-1 w-full rounded-lg border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] p-1 shadow-[0_6px_20px_rgba(23,40,43,0.10)]">
               {suggestions.map((s) => (
-                <button key={s.id} onClick={() => void add(s.name)} className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm text-[var(--color-text-primary)] hover:bg-white/5">
+                <button key={s.id} onClick={() => void add(s.name)} className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-bg-subtle)]">
                   {s.name}
                 </button>
               ))}
               {q.trim() && !exact && (
-                <button onClick={() => void add(q.trim())} className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm text-[var(--accent-secondary)] hover:bg-white/5">
+                <button onClick={() => void add(q.trim())} className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-sm text-[var(--accent-secondary)] hover:bg-[var(--color-bg-subtle)]">
                   <Plus className="h-3 w-3" /> Criar “{q.trim()}”
                 </button>
               )}
@@ -652,11 +665,11 @@ function CustomFieldInput({ field, value, onSave }: { field: CustomField; value:
   return (
     <div>
       <div className="mb-1 flex items-center gap-1 text-[0.65rem] uppercase tracking-[0.1em] text-[var(--color-text-secondary)]">
-        {field.label}{field.required && <span className="text-[#EF4444]">*</span>}
+        {field.label}{field.required && <span className="text-[var(--color-error)]">*</span>}
       </div>
       {field.field_type === 'boolean' ? (
         <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-[var(--color-text-primary)]">
-          <input type="checkbox" checked={local === 'true'} onChange={(e) => { const v = e.target.checked ? 'true' : 'false'; setLocal(v); commit(v); }} className="h-4 w-4 accent-[#D4A574]" />
+          <input type="checkbox" checked={local === 'true'} onChange={(e) => { const v = e.target.checked ? 'true' : 'false'; setLocal(v); commit(v); }} className="h-4 w-4 accent-[#0A7787]" />
           {local === 'true' ? 'Sim' : 'Não'}
         </label>
       ) : field.field_type === 'select' ? (
@@ -673,7 +686,7 @@ function CustomFieldInput({ field, value, onSave }: { field: CustomField; value:
           className={inputCls}
         />
       )}
-      {err && <div className="mt-1 text-xs text-[#EF4444]">{err}</div>}
+      {err && <div className="mt-1 text-xs text-[var(--color-error)]">{err}</div>}
     </div>
   );
 }
@@ -700,7 +713,7 @@ function CustomFieldModal({ onClose, onCreate }: {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl border border-[rgba(212,165,116,0.25)] bg-[#0A0A0F] p-5 shadow-[0_0_40px_rgba(212,165,116,0.15)]">
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl border border-[var(--color-border-strong)] bg-[var(--color-bg-surface)] p-5 shadow-[0_8px_28px_rgba(23,40,43,0.12)]">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-bold text-display">Novo campo personalizado</h3>
           <button onClick={onClose} aria-label="Fechar" className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"><X className="h-5 w-5" /></button>
@@ -723,15 +736,15 @@ function CustomFieldModal({ onClose, onCreate }: {
             </div>
           )}
           <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--color-text-primary)]">
-            <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} className="h-4 w-4 accent-[#D4A574]" /> Obrigatório
+            <input type="checkbox" checked={required} onChange={(e) => setRequired(e.target.checked)} className="h-4 w-4 accent-[#0A7787]" /> Obrigatório
           </label>
-          {err && <div className="text-xs text-[#EF4444]">{err}</div>}
+          {err && <div className="text-xs text-[var(--color-error)]">{err}</div>}
         </div>
         <div className="mt-5 flex gap-2">
-          <button onClick={submit} disabled={busy} className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg bg-gradient-to-br from-[#182940] to-[#D4A574] px-3 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60">
+          <button onClick={submit} disabled={busy} className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg bg-gradient-to-br from-[var(--accent-secondary)] to-[var(--accent-primary)] px-3 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60">
             <Check className="h-4 w-4" /> {busy ? 'Criando…' : 'Criar campo'}
           </button>
-          <button onClick={onClose} className="rounded-lg border border-[rgba(212,165,116,0.2)] px-3 py-2 text-sm text-[var(--color-text-secondary)]">Cancelar</button>
+          <button onClick={onClose} className="rounded-lg border border-[var(--color-border-card)] px-3 py-2 text-sm text-[var(--color-text-secondary)]">Cancelar</button>
         </div>
       </div>
     </div>

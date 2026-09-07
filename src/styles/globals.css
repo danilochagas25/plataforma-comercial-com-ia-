@@ -1,52 +1,126 @@
 @import "tailwindcss";
 
 /* =============================================================================
-   WhatsApp Hub · Design System (Dark Mode Glassmorphism, per CLAUDE.md)
-   DARK MODE ONLY. No light mode. No theme toggle.
+   CRM Odonto · Amor Saúde Itabuna — Sistema de cores (TEMA CLARO)
+   -----------------------------------------------------------------------------
+   IDENTIDADE. O logotipo vetorial da rede AmorSaúde tem EXATAMENTE duas cores:
+
+       Turquesa  #61C1D0        Vermelho  #D53E36
+
+   Todo o resto desta paleta é derivado dessas duas (tons mais escuros para
+   texto, tons mais claros para fundo). Não introduza uma terceira cor de marca.
+
+   ⚠️ #61C1D0 NÃO SERVE PARA TEXTO. Sobre branco ele mede 2,09:1 — reprova em
+   WCAG AA (mínimo 4,5:1 para texto normal, 3:1 para texto grande). Use #61C1D0
+   apenas como PREENCHIMENTO, ícone grande e borda. Para texto, link, botão e
+   ícone pequeno use --color-accent-primary (#0A7787) ou
+   --color-accent-secondary (#0B6E7D).
+
+   ⚠️ O briefing sugeria #0E8DA0 como "marca (texto/botão)". Medido: 3,94:1
+   sobre branco — REPROVA em AA. Foi escurecido para #0A7787 (5,25:1 sobre
+   branco, 4,68:1 sobre o fundo de destaque #E4F5F8; branco sobre ele = 5,25:1).
+   Mesma família, mesma leitura, agora acessível.
+
+   CONTRASTE MEDIDO (relação sobre #FFFFFF / #F4FAFB / #EEF6F7 / #E4F5F8):
+     #17282B texto principal ... 15,3 / 14,5 / 13,9 / 13,6
+     #4E666B texto secundário .. 6,11 / 5,79 / 5,58 / 5,45
+     #5C7378 rótulo / apagado .. 5,03 / 4,77 / 4,59 / 4,48
+     #0A7787 marca (texto) ..... 5,25 / 4,98 / 4,79 / 4,68
+     #0B6E7D marca escura ...... 5,93 / 5,62 / 5,41 / 5,29
+     #B02D26 erro (texto) ...... 6,46 / 6,13 / 5,90 / 5,76
+     #0C6B4A sucesso (texto) ... 6,53 / 6,19 / 5,96 / 5,82
+     #9A4A07 alerta (texto) .... 6,26 / 5,93 / 5,71 / 5,58
+   Branco sobre preenchimento: #0A7787 5,25 · #0B6E7D 5,93 · #D53E36 4,59 ·
+   #0F7A55 5,34. Branco sobre #61C1D0 = 2,09 → NUNCA texto branco sobre a
+   turquesa clara.
+
+   ⚠️ A regra "dark mode only" do CLAUDE.md foi REVOGADA pelo dono em
+   07/09/2026. O app é claro. Não existe toggle de tema.
    ============================================================================= */
 
 @theme {
-  /* Base surface */
-  --color-bg-primary: #0A0A0F;
-  --color-bg-card: rgba(15, 18, 35, 0.6);
+  /* Superfícies ------------------------------------------------------------ */
+  --color-bg-primary: #F4FAFB;    /* fundo da aplicação */
+  --color-bg-surface: #FFFFFF;    /* cartão / painel / barra */
+  --color-bg-card: #FFFFFF;       /* alias histórico de --color-bg-surface */
+  --color-bg-subtle: #EEF6F7;     /* fundo sutil: hover de linha, chip neutro */
+  --color-bg-highlight: #E4F5F8;  /* fundo de destaque: item de menu ativo */
 
-  /* Accents — troque estas variaveis para aplicar a identidade do seu negocio. */
-  --color-accent-primary: #D4A574;
-  --color-accent-secondary: #E8C89A;
+  /* Marca ------------------------------------------------------------------ */
+  --color-brand-fill: #61C1D0;    /* SÓ preenchimento/ícone grande/borda */
+  --color-accent-primary: #0A7787;   /* texto, link, botão — AA em tudo */
+  --color-accent-secondary: #0B6E7D; /* hover / ênfase do acento */
+  --color-brand-red: #D53E36;        /* vermelho do logotipo (preenchimento) */
+  --color-brand-red-dark: #B02D26;   /* vermelho para texto */
+  --color-brand-red-bg: #FDEBEA;     /* fundo do vermelho */
 
-  /* Text */
-  --color-text-primary: #F8FAFC;
-  --color-text-secondary: #94A3B8;
-  --color-text-label: #CBD5E1;
+  /* Texto ------------------------------------------------------------------ */
+  --color-text-primary: #17282B;
+  --color-text-secondary: #4E666B;
+  --color-text-label: #5C7378;
+  --color-text-muted: #5C7378;
+  --color-text-on-accent: #FFFFFF;
 
-  /* Status */
-  --color-success: #10B981;
-  --color-error: #EF4444;
+  /* Estados ---------------------------------------------------------------- */
+  --color-success: #0C6B4A;
+  --color-success-fill: #0F7A55;
+  --color-success-bg: #E7F7F0;
+  --color-warning: #9A4A07;
+  --color-warning-bg: #FDF1E3;
+  --color-error: #B02D26;
+  --color-error-bg: #FDEBEA;
 
-  /* Borders */
-  --color-border-card: rgba(212, 165, 116, 0.15);
-  --color-border-soft: rgba(212, 165, 116, 0.12);
-  --color-border-divider: rgba(212, 165, 116, 0.08);
+  /* Bordas dos blocos de estado — pareadas com os fundos tingidos acima.
+     Usadas por avisos, resumos e caixas de confirmação. */
+  --color-success-border: #C4EADB;
+  --color-warning-border: #F5DCBE;
+  --color-warning-text: #9A4A07;   /* AA sobre --color-warning-bg */
+  --color-danger-bg: #FDEBEA;      /* alias de --color-error-bg */
+  --color-danger-border: #F7CBC8;
 
-  /* Typography */
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Acento em superfície tingida — o turquesa da marca como fundo/borda.
+     Nunca usar #61C1D0 em texto: 2,09:1 sobre branco. */
+  --color-accent-bg: #E4F5F8;
+  --color-accent-border: #BEE6ED;
 
-  /* Radii */
-  --radius-card: 16px;
+  /* Bordas ----------------------------------------------------------------- */
+  --color-border-card: #DDEBEE;    /* borda de cartão / campo */
+  --color-border-soft: #E8F2F4;    /* borda discreta */
+  --color-border-divider: #E8F2F4; /* separador interno */
+  --color-border-strong: #C7E1E6;  /* borda em foco / seleção */
+
+  /* Tipografia — Figtree (Google Fonts) no lugar da Arboria da marca, que é
+     paga (Adobe Fonts) e não temos licença. Desenho geométrico próximo. */
+  --font-sans: "Figtree", "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* Raios ------------------------------------------------------------------ */
+  --radius-card: 14px;
 }
 
 /* -----------------------------------------------------------------------------
-   Static accent tokens.
-   Components reference var(--accent-primary) / var(--accent-secondary) instead
-   of hard-coding #D4A574 so any future palette swap is one-file.
+   Tokens estáticos de acento.
+   Componentes referenciam var(--accent-primary) em vez de escrever o hex, para
+   que a troca de paleta continue sendo um arquivo só.
    ----------------------------------------------------------------------------- */
 :root {
-  --accent-primary: #D4A574;
-  --accent-secondary: #E8C89A;
+  color-scheme: light;
+
+  --accent-primary: #0A7787;
+  --accent-secondary: #0B6E7D;
+  --brand-fill: #61C1D0;
+  --brand-red: #D53E36;
+
+  --surface: #FFFFFF;
+  --surface-subtle: #EEF6F7;
+  --surface-highlight: #E4F5F8;
+  --border-card: #DDEBEE;
+  --border-soft: #E8F2F4;
+  --border-strong: #C7E1E6;
 }
 
 /* -----------------------------------------------------------------------------
-   Base body: pure dark with soft radial glows
+   Base: fundo claro, com um véu turquesa quase imperceptível nos cantos
+   (mesmo gesto do tema antigo, invertido para o claro).
    ----------------------------------------------------------------------------- */
 html, body, #root {
   min-height: 100vh;
@@ -55,8 +129,8 @@ html, body, #root {
 body {
   background-color: var(--color-bg-primary);
   background-image:
-    radial-gradient(ellipse at 20% 0%, rgba(212, 165, 116, 0.06), transparent 50%),
-    radial-gradient(ellipse at 80% 100%, rgba(37, 99, 235, 0.04), transparent 50%);
+    radial-gradient(ellipse at 20% 0%, rgba(97, 193, 208, 0.10), transparent 55%),
+    radial-gradient(ellipse at 80% 100%, rgba(97, 193, 208, 0.07), transparent 55%);
   background-attachment: fixed;
   color: var(--color-text-primary);
   font-family: var(--font-sans);
@@ -68,7 +142,7 @@ body {
   font-family: var(--font-sans);
 }
 
-/* Scrollbar — dark, subtle */
+/* Scrollbar — clara, discreta */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -77,51 +151,65 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(212, 165, 116, 0.18);
+  background: rgba(97, 193, 208, 0.38);
   border-radius: 8px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(212, 165, 116, 0.32);
+  background: rgba(11, 110, 125, 0.45);
 }
 
 /* -----------------------------------------------------------------------------
-   Glassmorphism utilities
+   Superfícies
+   -----------------------------------------------------------------------------
+   `.glass-card` mantém o NOME (é a base visual de todas as telas do template),
+   mas no tema claro "vidro escuro" não faz sentido: virou superfície branca com
+   borda suave e sombra discreta. Sem backdrop-filter — no claro ele só borra o
+   texto e custa GPU.
    ----------------------------------------------------------------------------- */
 @layer components {
   .glass-card {
-    background: linear-gradient(
-      135deg,
-      rgba(212, 165, 116, 0.08),
-      rgba(212, 165, 116, 0.02)
-    );
-    backdrop-filter: blur(40px);
-    -webkit-backdrop-filter: blur(40px);
-    border: 1px solid rgba(212, 165, 116, 0.25);
+    background: var(--surface);
+    border: 1px solid var(--border-card);
     border-radius: var(--radius-card);
     box-shadow:
-      0 0 20px rgba(212, 165, 116, 0.06),
-      inset 0 1px 0 rgba(212, 165, 116, 0.1);
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      0 1px 2px rgba(23, 40, 43, 0.04),
+      0 1px 3px rgba(23, 40, 43, 0.03);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
 
   .glass-card-hover:hover,
   .glass-card:hover {
-    border-color: rgba(212, 165, 116, 0.45);
+    border-color: var(--border-strong);
     box-shadow:
-      0 0 30px rgba(212, 165, 116, 0.12),
-      0 0 60px rgba(212, 165, 116, 0.04),
-      inset 0 1px 0 rgba(212, 165, 116, 0.2);
+      0 2px 6px rgba(23, 40, 43, 0.06),
+      0 6px 18px rgba(23, 40, 43, 0.05);
+  }
+
+  /* Cartão que NÃO deve reagir ao mouse (containers de layout). */
+  .glass-card-static:hover {
+    border-color: var(--border-card);
+    box-shadow:
+      0 1px 2px rgba(23, 40, 43, 0.04),
+      0 1px 3px rgba(23, 40, 43, 0.03);
   }
 
   .glass-surface {
-    background: rgba(15, 18, 35, 0.6);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgba(212, 165, 116, 0.12);
+    background: var(--surface);
+    border: 1px solid var(--border-card);
+  }
+
+  /* Superfície flutuante: dropdown, popover, drawer. */
+  .surface-float {
+    background: var(--surface);
+    border: 1px solid var(--border-card);
+    box-shadow:
+      0 4px 12px rgba(23, 40, 43, 0.08),
+      0 12px 32px rgba(23, 40, 43, 0.07);
   }
 
   .text-display {
     font-weight: 700;
+    letter-spacing: -0.015em;
   }
 
   .text-stat {
@@ -131,11 +219,11 @@ body {
   }
 
   .text-label {
-    font-weight: 600;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: 0.7rem;
-    color: var(--color-text-secondary);
+    letter-spacing: 0.12em;
+    font-size: 0.66rem;
+    color: var(--color-text-label);
   }
 
   .text-body {
@@ -150,7 +238,7 @@ body {
 }
 
 /* -----------------------------------------------------------------------------
-   Focus ring — accent-aware, accessible
+   Foco visível — acento da marca, 3:1 contra branco garantido
    ----------------------------------------------------------------------------- */
 :where(button, a, input, select, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--accent-primary);
@@ -158,8 +246,14 @@ body {
   border-radius: 6px;
 }
 
+/* Placeholder: precisa passar AA como qualquer texto. */
+::placeholder {
+  color: var(--color-text-label);
+  opacity: 1;
+}
+
 /* -----------------------------------------------------------------------------
-   Message entrance — aplicada só a mensagens novas (ver MessageThread). Roda
+   Entrada de mensagem — aplicada só a mensagens novas (ver MessageThread). Roda
    uma única vez na montagem do nó; como a key é estável, a troca balão
    otimista→linha real NÃO re-dispara a animação.
    ----------------------------------------------------------------------------- */

@@ -12,11 +12,12 @@ export type EnrollmentStatus = 'active' | 'completed' | 'dropped' | 'paused';
 export type LeadType = 'Lead' | 'Cliente';
 export type Temperature = 'Frio' | 'Morno' | 'Quente';
 
-// Cores dos badges de temperatura (frio = azul/cinza, morno = amarelo, quente = laranja/vermelho).
+// Cores dos badges de temperatura, na paleta AmorSaúde (tema claro):
+// frio = turquesa da marca, morno = âmbar, quente = vermelho da marca.
 export const TEMPERATURE_STYLE: Record<Temperature, { label: string; className: string; dot: string }> = {
-  Frio: { label: 'Frio', className: 'bg-[rgba(232,200,154,0.14)] text-[#E8C89A]', dot: 'bg-[#E8C89A]' },
-  Morno: { label: 'Morno', className: 'bg-[rgba(245,158,11,0.14)] text-[#FBBF24]', dot: 'bg-[#FBBF24]' },
-  Quente: { label: 'Quente', className: 'bg-[rgba(239,68,68,0.14)] text-[#F87171]', dot: 'bg-[#F87171]' },
+  Frio: { label: 'Frio', className: 'bg-[var(--color-bg-highlight)] text-[var(--accent-secondary)]', dot: 'bg-[var(--accent-secondary)]' },
+  Morno: { label: 'Morno', className: 'bg-[var(--color-warning-bg)] text-[var(--color-warning)]', dot: 'bg-[var(--color-warning)]' },
+  Quente: { label: 'Quente', className: 'bg-[var(--color-error-bg)] text-[var(--color-error)]', dot: 'bg-[var(--color-error)]' },
 };
 
 export interface Pipeline {
@@ -136,9 +137,9 @@ export const TRAFFIC_TYPE_LABEL: Record<string, string> = {
 };
 
 export const TRAFFIC_TYPE_STYLE: Record<string, string> = {
-  organico: 'bg-[rgba(16,185,129,0.14)] text-[#10B981]',
-  pago: 'bg-[rgba(232,200,154,0.14)] text-[#E8C89A]',
-  manual: 'bg-white/5 text-[var(--color-text-secondary)]',
+  organico: 'bg-[var(--color-success-bg)] text-[var(--color-success)]',
+  pago: 'bg-[var(--color-bg-highlight)] text-[var(--accent-secondary)]',
+  manual: 'bg-[var(--color-bg-subtle)] text-[var(--color-text-secondary)]',
 };
 
 export const ORIGIN_CHANNEL_LABEL: Record<string, string> = {
@@ -280,9 +281,9 @@ export function dueTone(dueAt: string | null): DueTone {
 
 // Classes Tailwind (badge/pílula) por tom de prazo.
 export const DUE_TONE_STYLE: Record<DueTone, string> = {
-  overdue: 'bg-[rgba(239,68,68,0.14)] text-[var(--color-error)]',
-  today: 'bg-[rgba(245,158,11,0.14)] text-[#FBBF24]',
-  future: 'bg-[rgba(212,165,116,0.14)] text-[var(--accent-secondary)]',
+  overdue: 'bg-[var(--color-error-bg)] text-[var(--color-error)]',
+  today: 'bg-[var(--color-warning-bg)] text-[var(--color-warning)]',
+  future: 'bg-[var(--color-bg-highlight)] text-[var(--accent-secondary)]',
 };
 
 // ---- Campos customizáveis (definições + valores por deal) ----

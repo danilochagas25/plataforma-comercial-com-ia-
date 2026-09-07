@@ -7,16 +7,16 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // Gradiente 135° #182940→#D4A574 (botão primário do design system) com
+        // Gradiente 135° #0B6E7D→#0A7787 (botão primário do design system) com
         // glow azul no hover (30→48px). Antes era cor chapada, fora do DS.
         default:
-          'bg-[linear-gradient(135deg,#182940,#D4A574)] text-white shadow-[0_0_30px_rgba(212,165,116,0.25)] hover:shadow-[0_0_48px_rgba(212,165,116,0.5)] hover:brightness-110',
+          'bg-[linear-gradient(135deg,#0B6E7D,#0A7787)] text-white shadow-[0_4px_14px_rgba(23,40,43,0.08)] hover:shadow-[0_6px_18px_rgba(11,110,125,0.22)] hover:brightness-110',
         secondary:
-          'bg-white/5 text-[var(--color-text-primary)] border border-[rgba(212,165,116,0.2)] hover:bg-white/10 hover:border-[rgba(212,165,116,0.4)]',
+          'bg-[#EEF6F7] text-[var(--color-text-primary)] border border-[rgba(97,193,208,0.45)] hover:bg-[#E4F5F8] hover:border-[rgba(11,110,125,0.40)]',
         ghost:
-          'text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text-primary)]',
+          'text-[var(--color-text-secondary)] hover:bg-[#EEF6F7] hover:text-[var(--color-text-primary)]',
         outline:
-          'border border-[rgba(212,165,116,0.25)] bg-transparent text-[var(--color-text-primary)] hover:bg-white/5 hover:border-[rgba(212,165,116,0.5)]',
+          'border border-[rgba(97,193,208,0.55)] bg-transparent text-[var(--color-text-primary)] hover:bg-[#EEF6F7] hover:border-[rgba(11,110,125,0.40)]',
         destructive:
           'bg-[var(--color-error)] text-white hover:bg-[var(--color-error)]/90',
         link:

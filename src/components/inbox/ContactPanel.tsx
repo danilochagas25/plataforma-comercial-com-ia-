@@ -10,6 +10,7 @@ import { ContactTagsEditor } from './ContactTagsEditor';
 import { CustomFieldsEditor } from './CustomFieldsEditor';
 import { AddToPipelineModal } from '@/components/funil/AddToPipelineModal';
 import { ProximaAcao } from '@/components/crm/ProximaAcao';
+import { diasParado, PARADO_CHIP_CLASS, rotuloParado, tomParado } from '@/lib/diasParado';
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -20,6 +21,9 @@ interface OpenDeal {
   status: 'open' | 'won' | 'lost';
   pipeline_id: string | null;
   stage_id: string | null;
+  // Relógio de estagnação. É uma COLUNA a mais na consulta que já existia —
+  // não uma consulta nova. Sustenta o "Parado há N dias" do painel.
+  stage_entered_at: string | null;
 }
 
 interface ContactPanelProps {
@@ -46,10 +50,10 @@ interface ContactPanelProps {
 function Badge({ tone, children }: { tone: 'green' | 'amber' | 'gray'; children: React.ReactNode }) {
   const cls =
     tone === 'green'
-      ? 'bg-[rgba(16,185,129,0.12)] text-[var(--color-success)]'
+      ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
       : tone === 'amber'
-        ? 'bg-[rgba(245,158,11,0.12)] text-[#FBBF24]'
-        : 'bg-white/5 text-[var(--color-text-secondary)]';
+        ? 'bg-[var(--color-warning-bg)] text-[var(--color-warning)]'
+        : 'bg-[var(--color-bg-subtle)] text-[var(--color-text-secondary)]';
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${cls}`}>
       {children}
@@ -84,7 +88,7 @@ export function ContactPanel({
     let alive = true;
     void getSupabase()
       .from('deals')
-      .select('id, title, value, status, pipeline_id, stage_id')
+      .select('id, title, value, status, pipeline_id, stage_id, stage_entered_at')
       .eq('contact_id', contact.id)
       .in('status', ['open', 'won'])
       .is('archived_at', null)
@@ -181,6 +185,14 @@ export function ContactPanel({
 
   const isClosed = conversation.status === 'closed';
 
+  // Orçamento que o painel descreve: o ativo da conversa, senão o aberto mais
+  // recente do paciente. Mesma regra do alvo dos botões Ganho/Perdido.
+  const painelDeal =
+    openDeals.find((d) => d.id === conversation.active_deal_id) ??
+    openDeals.find((d) => d.status === 'open') ??
+    null;
+  const paradoDias = painelDeal ? diasParado(painelDeal.stage_entered_at) : null;
+
   // Deal alvo dos botões Ganho/Perdido: o negócio ativo da conversa (se ainda
   // aberto), senão o negócio aberto mais recente do contato.
   const activeDeal = openDeals.find((d) => d.id === conversation.active_deal_id);
@@ -233,7 +245,7 @@ export function ContactPanel({
       setLostReason('');
       setDealsVersion((v) => v + 1);
       onContactRefresh?.();
-      toast.success(outcome === 'won' ? 'Oportunidade fechada. 🎉' : 'Oportunidade marcada como não fechou.');
+      toast.success(outcome === 'won' ? 'Orçamento fechado.' : 'Orçamento marcado como não fechou.');
     } catch (err) {
       toast.error('Falha', { description: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -260,7 +272,7 @@ export function ContactPanel({
           src={contact?.profile_pic_url}
           name={displayName}
           size="lg"
-          className="mx-auto shadow-[0_0_30px_rgba(212,165,116,0.25)]"
+          className="mx-auto shadow-[0_4px_14px_rgba(23,40,43,0.08)]"
         />
         <div className="mt-3 text-lg font-bold text-display text-[var(--color-text-primary)]">
           {displayName}
@@ -302,6 +314,60 @@ export function ContactPanel({
         </div>
       </div>
 
+      {/* ORÇAMENTO — o que a recepção precisa saber ANTES de responder.
+          Sem este bloco a operadora teria que abrir a aba do funil para saber
+          de que tratamento o paciente está falando e há quanto tempo ele está
+          sem resposta.
+
+          ⚠️ LIMITE CONHECIDO (pendência registrada em MEMORIA.md): **tabela de
+          preço** e **dentista** vivem em `custom_field_values` (chaves
+          `tabela_preco` e `dentista`), que NÃO chega neste componente. Buscá-los
+          exigiria uma consulta nova a outra tabela — território do trabalho de
+          dados, não deste. Mostramos aqui só o que a consulta existente entrega. */}
+      {painelDeal && (
+        <div className="rounded-xl border border-[var(--color-border-card)] bg-[var(--color-bg-subtle)] p-3.5 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-label flex items-center gap-1.5">
+              <Briefcase className="h-3 w-3" /> Orçamento
+            </div>
+            {paradoDias !== null && (
+              <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold ${PARADO_CHIP_CLASS[tomParado(paradoDias)]}`}>
+                <Clock className="h-2.5 w-2.5" />
+                Parado {rotuloParado(paradoDias)}
+              </span>
+            )}
+          </div>
+
+          {paradoDias !== null && (
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--color-text-label)]">
+                Parado há
+              </div>
+              <div className="text-[26px] font-extrabold leading-tight text-[var(--color-text-primary)]">
+                {rotuloParado(paradoDias)}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-xs text-[var(--color-text-label)]">Tratamento</span>
+              <span className="min-w-0 truncate text-right text-[12.5px] font-medium text-[var(--color-text-primary)]">
+                {painelDeal.title}
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-xs text-[var(--color-text-label)]">Valor</span>
+              <span className="text-[12.5px] font-bold text-[var(--accent-secondary)]">
+                {brl(Number(painelDeal.value) || 0)}
+              </span>
+            </div>
+            {/* Tabela de preço e dentista entram aqui quando os campos
+                personalizados do orçamento chegarem ao componente. */}
+          </div>
+        </div>
+      )}
+
       {/* Nota fixa da conversa */}
       <div className="space-y-2">
         <div className="text-label flex items-center gap-1.5"><Pin className="h-3 w-3" /> Nota fixa</div>
@@ -310,7 +376,7 @@ export function ContactPanel({
           onChange={(e) => setNoteDraft(e.target.value)}
           rows={2}
           placeholder="Nota visível no topo da conversa…"
-          className="w-full rounded-lg border border-[rgba(245,158,11,0.25)] bg-[rgba(245,158,11,0.04)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[#FBBF24] resize-none"
+          className="w-full rounded-lg border border-[rgba(154,74,7,0.28)] bg-[var(--color-warning-bg)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[#9A4A07] resize-none"
         />
         {noteDraft !== (conversation.pinned_note ?? '') && (
           <Button size="sm" variant="outline" onClick={handleSaveNote} disabled={savingNote}>
@@ -332,7 +398,7 @@ export function ContactPanel({
               toast.error('Falha', { description: err instanceof Error ? err.message : String(err) });
             }
           }}
-          className="h-11 w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 text-sm text-[var(--color-text-primary)]"
+          className="h-11 w-full rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-primary)] px-3 text-sm text-[var(--color-text-primary)]"
         >
           <option value="">Ninguém</option>
           {operators.map((op) => (
@@ -345,19 +411,19 @@ export function ContactPanel({
 
       {/* Negócio ativo da conversa (independente do responsável) */}
       <div className="space-y-2">
-        <div className="text-label flex items-center gap-1.5"><Briefcase className="h-3 w-3" /> Oportunidade ativa</div>
+        <div className="text-label flex items-center gap-1.5"><Briefcase className="h-3 w-3" /> Orçamento ativo</div>
         {openDeals.length > 0 ? (
           <select
             value={conversation.active_deal_id ?? ''}
             onChange={async (e) => {
               try {
                 await onSetActiveDeal(e.target.value || null);
-                toast.success('Oportunidade ativa atualizada.');
+                toast.success('Orçamento ativo atualizado.');
               } catch (err) {
                 toast.error('Falha', { description: err instanceof Error ? err.message : String(err) });
               }
             }}
-            className="h-11 w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 text-sm text-[var(--color-text-primary)]"
+            className="h-11 w-full rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-primary)] px-3 text-sm text-[var(--color-text-primary)]"
           >
             <option value="">Nenhum</option>
             {openDeals.map((d) => (
@@ -367,8 +433,8 @@ export function ContactPanel({
             ))}
           </select>
         ) : (
-          <p className="text-sm text-[var(--color-text-secondary)] opacity-70">
-            Nenhuma oportunidade aberta. Use "Abrir oportunidade" abaixo para criar uma.
+          <p className="text-sm text-[var(--color-text-label)]">
+            Nenhum orçamento aberto. Use "Abrir orçamento" abaixo para criar um.
           </p>
         )}
       </div>
@@ -378,7 +444,7 @@ export function ContactPanel({
         <div className="space-y-2">
           <div className="text-label">Situação</div>
           {openDeals.filter((d) => d.status === 'open').length > 1 && (
-            <p className="text-[11px] text-[var(--color-text-secondary)] opacity-70 truncate">
+            <p className="text-[11px] text-[var(--color-text-label)] truncate">
               Aplica-se a: {targetDeal.title}
             </p>
           )}
@@ -386,32 +452,32 @@ export function ContactPanel({
             <button
               onClick={() => void markOutcome('won')}
               disabled={savingOutcome}
-              className="flex-1 rounded-lg border border-[rgba(16,185,129,0.35)] bg-[rgba(16,185,129,0.1)] py-2 text-sm font-semibold text-[#10B981] transition hover:bg-[rgba(16,185,129,0.18)] disabled:opacity-50"
+              className="flex-1 rounded-lg border border-[rgba(15,122,85,0.35)] bg-[var(--color-success-bg)] py-2 text-sm font-semibold text-[var(--color-success)] transition hover:bg-[var(--color-success-bg)] disabled:opacity-50"
             >
               Ganho
             </button>
             <button
               onClick={() => setLostReasonOpen((v) => !v)}
               disabled={savingOutcome}
-              className="flex-1 rounded-lg border border-[rgba(239,68,68,0.35)] bg-[rgba(239,68,68,0.08)] py-2 text-sm font-semibold text-[#EF4444] transition hover:bg-[rgba(239,68,68,0.16)] disabled:opacity-50"
+              className="flex-1 rounded-lg border border-[rgba(176,45,38,0.35)] bg-[var(--color-error-bg)] py-2 text-sm font-semibold text-[var(--color-error)] transition hover:bg-[var(--color-error-bg)] disabled:opacity-50"
             >
               Perdido
             </button>
           </div>
           {lostReasonOpen && (
-            <div className="space-y-2 rounded-lg border border-[rgba(239,68,68,0.2)] bg-[rgba(239,68,68,0.05)] p-3">
+            <div className="space-y-2 rounded-lg border border-[rgba(176,45,38,0.28)] bg-[var(--color-error-bg)] p-3">
               <input
                 value={lostReason}
                 onChange={(e) => setLostReason(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && void markOutcome('lost')}
                 placeholder="Motivo da perda (opcional)"
-                className="h-11 w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
+                className="h-11 w-full rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-primary)] px-3 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
                 autoFocus
               />
               <button
                 onClick={() => void markOutcome('lost')}
                 disabled={savingOutcome}
-                className="w-full rounded-lg bg-[#EF4444] py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                className="w-full rounded-lg bg-[var(--color-error)] py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
               >
                 Confirmar perda
               </button>
@@ -428,7 +494,7 @@ export function ContactPanel({
             {produtos.map((p) => (
               <span
                 key={p.id}
-                className="rounded-full bg-[rgba(16,185,129,0.12)] px-2.5 py-1 text-[11px] font-semibold text-[var(--color-success)]"
+                className="rounded-full bg-[var(--color-success-bg)] px-2.5 py-1 text-[11px] font-semibold text-[var(--color-success)]"
               >
                 {p.name}
               </span>
@@ -447,8 +513,8 @@ export function ContactPanel({
       ) : (
         <div className="space-y-2">
           <div className="text-label flex items-center gap-1.5"><Clock className="h-3 w-3" /> Próxima ação</div>
-          <p className="text-sm text-[var(--color-text-secondary)] opacity-70">
-            Abra uma oportunidade para a pessoa (botão "Abrir oportunidade") para agendar a próxima ação.
+          <p className="text-sm text-[var(--color-text-label)]">
+            Abra um orçamento para o paciente (botão "Abrir orçamento") para agendar a próxima ação.
           </p>
         </div>
       )}
@@ -486,7 +552,7 @@ export function ContactPanel({
         {contact?.id && (
           <Button variant="outline" className="w-full justify-start" onClick={() => setShowPipelineModal(true)}>
             <Filter className="h-4 w-4" />
-            Abrir oportunidade
+            Abrir orçamento
           </Button>
         )}
         {isClosed ? (
@@ -528,7 +594,7 @@ export function ContactPanel({
         </Button>
       </div>
 
-      <div className="pt-3 border-t border-[rgba(212,165,116,0.08)] text-[10px] text-[var(--color-text-secondary)] opacity-70 space-y-0.5">
+      <div className="pt-3 border-t border-[var(--color-border-soft)] text-[10px] text-[var(--color-text-label)] space-y-0.5">
         <div>Status: {conversation.status}</div>
         <div>IA: {conversation.ai_paused ? 'pausada' : 'ativa'}</div>
         <div>Criada: {new Date(conversation.created_at).toLocaleString('pt-BR')}</div>
@@ -540,7 +606,7 @@ export function ContactPanel({
           contactName={contact.name}
           onClose={() => setShowPipelineModal(false)}
           onCreated={async (dealId) => {
-            // Recarrega o seletor e já deixa a nova oportunidade como a ativa
+            // Recarrega o seletor e já deixa o novo orçamento como o ativo
             // da conversa (antes o painel seguia dizendo "nenhuma aberta").
             setDealsVersion((v) => v + 1);
             if (dealId) {

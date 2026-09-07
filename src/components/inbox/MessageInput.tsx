@@ -170,7 +170,7 @@ export function MessageInput({ conversationId, disabled, withinWindow = true, on
   return (
     <form
       onSubmit={handleSubmit}
-      className="border-t border-[rgba(212,165,116,0.08)] p-4 space-y-3 glass-surface"
+      className="space-y-3 border-t border-[var(--color-border-card)] bg-[var(--color-bg-surface)] p-4"
     >
       <div className="flex items-center gap-2">
         <button
@@ -178,8 +178,8 @@ export function MessageInput({ conversationId, disabled, withinWindow = true, on
           onClick={() => setIsPrivate((v) => !v)}
           className={
             isPrivate
-              ? 'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold bg-[rgba(245,158,11,0.12)] text-[#FBBF24]'
-              : 'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-white/5'
+              ? 'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold bg-[var(--color-warning-bg)] text-[var(--color-warning)]'
+              : 'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-subtle)]'
           }
           disabled={disabled || sending || Boolean(file)}
         >
@@ -187,15 +187,15 @@ export function MessageInput({ conversationId, disabled, withinWindow = true, on
           {isPrivate ? 'Nota privada' : 'Mensagem pública'}
         </button>
         {isPrivate && (
-          <span className="text-[10px] text-[var(--color-text-secondary)] opacity-70">
+          <span className="text-[10px] text-[var(--color-text-label)]">
             Visível só para operadores, não vai pro contato
           </span>
         )}
       </div>
 
       {!withinWindow && !isPrivate ? (
-        <div className="flex flex-col gap-2 rounded-lg border border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.05)] p-3">
-          <div className="flex items-center gap-2 text-sm text-[#FBBF24]">
+        <div className="flex flex-col gap-2 rounded-lg border border-[rgba(154,74,7,0.35)] bg-[var(--color-warning-bg)] p-3">
+          <div className="flex items-center gap-2 text-sm text-[var(--color-warning)]">
             <Clock className="h-4 w-4" />
             Fora da janela de 24h. Só é possível reiniciar com um template aprovado.
           </div>
@@ -209,7 +209,7 @@ export function MessageInput({ conversationId, disabled, withinWindow = true, on
               <FileText className="h-4 w-4" />
               Reiniciar com template
             </Button>
-            <span className="text-[11px] text-[var(--color-text-secondary)] opacity-70">
+            <span className="text-[11px] text-[var(--color-text-label)]">
               Ou use “Nota privada” para um registro interno.
             </span>
           </div>
@@ -217,7 +217,7 @@ export function MessageInput({ conversationId, disabled, withinWindow = true, on
       ) : null}
 
       {(withinWindow || isPrivate) && file && (
-        <div className="flex items-center gap-2 rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-2 text-xs">
+        <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-primary)] px-3 py-2 text-xs">
           <Paperclip className="h-3.5 w-3.5 text-[var(--accent-primary)]" />
           <span className="truncate text-[var(--color-text-primary)]">{file.name}</span>
           <span className="text-[var(--color-text-secondary)]">
@@ -273,7 +273,7 @@ export function MessageInput({ conversationId, disabled, withinWindow = true, on
           </>
         )}
         {recording && (
-          <div className="flex flex-1 items-center gap-3 rounded-lg border border-[rgba(239,68,68,0.35)] bg-[rgba(239,68,68,0.06)] px-3 py-2">
+          <div className="flex flex-1 items-center gap-3 rounded-lg border border-[rgba(176,45,38,0.35)] bg-[var(--color-error-bg)] px-3 py-2">
             <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--color-error)]" />
             <span className="text-sm font-mono text-[var(--color-text-primary)]">
               {String(Math.floor(recordSecs / 60)).padStart(2, '0')}:{String(recordSecs % 60).padStart(2, '0')}
@@ -305,8 +305,8 @@ export function MessageInput({ conversationId, disabled, withinWindow = true, on
           }
           className={
             isPrivate
-              ? 'flex-1 rounded-lg border border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.04)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[#FBBF24] resize-none'
-              : 'flex-1 rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--accent-primary)] resize-none'
+              ? 'flex-1 rounded-lg border border-[rgba(154,74,7,0.35)] bg-[var(--color-warning-bg)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-warning)] resize-none'
+              : 'flex-1 rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--accent-primary)] resize-none'
           }
         />
         )}

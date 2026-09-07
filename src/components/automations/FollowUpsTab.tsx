@@ -31,7 +31,7 @@ const TRIGGER_LABEL: Record<FollowUpTrigger, string> = {
 const GATILHOS_SEM_MOTOR: ReadonlySet<string> = new Set(['stage_stalled']);
 
 const inputCls =
-  'w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]';
+  'w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)]';
 const labelCls = 'mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]';
 
 export function FollowUpsTab() {
@@ -86,7 +86,7 @@ export function FollowUpsTab() {
         </p>
         <button
           onClick={() => setCreating(true)}
-          className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-gradient-to-br from-[#182940] to-[#D4A574] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+          className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-gradient-to-br from-[#0B6E7D] to-[#0A7787] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
         >
           <Plus className="h-4 w-4" /> Nova regra
         </button>
@@ -126,10 +126,10 @@ export function FollowUpsTab() {
                     <span className="font-semibold text-[var(--color-text-primary)]">
                       {TRIGGER_LABEL[r.trigger_condition] ?? r.trigger_condition}
                     </span>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${r.provider === 'uazapi' ? 'bg-[rgba(45,212,191,0.14)] text-[#2DD4BF]' : 'bg-[rgba(37,211,102,0.14)] text-[#25D366]'}`}>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${r.provider === 'uazapi' ? 'bg-[rgba(45,212,191,0.14)] text-[#0B6E7D]' : 'bg-[rgba(37,211,102,0.14)] text-[#0B7A43]'}`}>
                       {r.provider === 'uazapi' ? 'UAZAPI (não oficial)' : 'API Oficial'}
                     </span>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${r.is_active ? 'bg-[rgba(16,185,129,0.12)] text-[#10B981]' : 'bg-white/5 text-[var(--color-text-secondary)]'}`}>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${r.is_active ? 'bg-[rgba(16,185,129,0.12)] text-[#0C6B4A]' : 'bg-[#EEF6F7] text-[var(--color-text-secondary)]'}`}>
                       {r.is_active ? 'Ativa' : 'Inativa'}
                     </span>
                   </div>
@@ -161,13 +161,13 @@ export function FollowUpsTab() {
                         ? 'Estrutura pronta, motor pendente — ver MEMORIA.md'
                         : undefined
                     }
-                    className={`relative h-6 w-11 rounded-full transition-colors ${r.is_active ? 'bg-[var(--accent-primary)]' : 'bg-white/10'} ${GATILHOS_SEM_MOTOR.has(r.trigger_condition) && !r.is_active ? 'cursor-not-allowed opacity-50' : ''}`}
+                    className={`relative h-6 w-11 rounded-full transition-colors ${r.is_active ? 'bg-[var(--accent-primary)]' : 'bg-[#E4F5F8]'} ${GATILHOS_SEM_MOTOR.has(r.trigger_condition) && !r.is_active ? 'cursor-not-allowed opacity-50' : ''}`}
                   >
                     <span className={`absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${r.is_active ? 'translate-x-5' : 'translate-x-0.5'}`} />
                   </button>
                   <button
                     onClick={() => { if (confirm('Excluir esta regra?')) void remove(r.id).catch((e) => toast.error(e.message)); }}
-                    className="rounded-md p-1.5 text-[var(--color-error)] transition hover:bg-white/5"
+                    className="rounded-md p-1.5 text-[var(--color-error)] transition hover:bg-[#EEF6F7]"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -282,12 +282,12 @@ function RuleForm({
       <div>
         <span className={labelCls}>Canal de envio</span>
         <div className="flex flex-wrap gap-2">
-          <label className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${effectiveProvider === 'zernio' ? 'border-[#D4A574] bg-[rgba(212,165,116,0.08)]' : 'border-[rgba(212,165,116,0.2)]'}`}>
+          <label className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${effectiveProvider === 'zernio' ? 'border-[#0A7787] bg-[rgba(97,193,208,0.16)]' : 'border-[rgba(97,193,208,0.45)]'}`}>
             <input type="radio" checked={effectiveProvider === 'zernio'} onChange={() => setProvider('zernio')} className="accent-[var(--accent-primary)]" />
             API Oficial (Meta): template aprovado
           </label>
           <label
-            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${!uazapiOk || trigger === 'no_reply' ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'} ${effectiveProvider === 'uazapi' ? 'border-[#2DD4BF] bg-[rgba(45,212,191,0.08)]' : 'border-[rgba(212,165,116,0.2)]'}`}
+            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${!uazapiOk || trigger === 'no_reply' ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'} ${effectiveProvider === 'uazapi' ? 'border-[#0B6E7D] bg-[rgba(45,212,191,0.08)]' : 'border-[rgba(97,193,208,0.45)]'}`}
             title={!uazapiOk ? `Conecte a UAZAPI em ${VOCAB.settings} → Canais` : trigger === 'no_reply' ? 'Reengajamento de campanha usa a API oficial' : undefined}
           >
             <input
@@ -295,13 +295,13 @@ function RuleForm({
               disabled={!uazapiOk || trigger === 'no_reply'}
               checked={effectiveProvider === 'uazapi'}
               onChange={() => setProvider('uazapi')}
-              className="accent-[#2DD4BF]"
+              className="accent-[#0B6E7D]"
             />
             API Não Oficial (UAZAPI): texto livre
           </label>
         </div>
         {effectiveProvider === 'uazapi' && (
-          <div className="mt-2 flex items-start gap-2 rounded-lg border border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.08)] px-3 py-2 text-sm text-[#FBBF24]">
+          <div className="mt-2 flex items-start gap-2 rounded-lg border border-[rgba(245,158,11,0.3)] bg-[rgba(245,158,11,0.08)] px-3 py-2 text-sm text-[#9A4A07]">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             Ao ativar follow-ups com a UAZAPI (API Não Oficial) o risco de banimento do número é maior.
           </div>
@@ -346,10 +346,10 @@ function RuleForm({
       </div>
 
       <div className="flex justify-end gap-2">
-        <button onClick={onCancel} className="rounded-lg border border-[rgba(212,165,116,0.2)] px-4 py-2 text-sm text-[var(--color-text-secondary)]">
+        <button onClick={onCancel} className="rounded-lg border border-[rgba(97,193,208,0.45)] px-4 py-2 text-sm text-[var(--color-text-secondary)]">
           Cancelar
         </button>
-        <button onClick={() => void save()} disabled={saving} className="rounded-lg bg-gradient-to-br from-[#182940] to-[#D4A574] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+        <button onClick={() => void save()} disabled={saving} className="rounded-lg bg-gradient-to-br from-[#0B6E7D] to-[#0A7787] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
           {saving ? 'Salvando…' : 'Criar regra'}
         </button>
       </div>

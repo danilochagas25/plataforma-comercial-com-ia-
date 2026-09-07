@@ -121,7 +121,7 @@ export default function DashboardPage() {
             type="button"
             onClick={() => void refreshAll()}
             disabled={refreshing}
-            className="flex items-center gap-1.5 rounded-lg border border-[rgba(212,165,116,0.2)] px-3 py-2 text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-60"
+            className="flex items-center gap-1.5 rounded-lg border border-[rgba(97,193,208,0.45)] px-3 py-2 text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] disabled:opacity-60"
           >
             <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
             Atualizar
@@ -129,7 +129,7 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => setCustomizeOpen((v) => !v)}
-            className="flex items-center gap-1.5 rounded-lg border border-[rgba(212,165,116,0.2)] px-3 py-2 text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+            className="flex items-center gap-1.5 rounded-lg border border-[rgba(97,193,208,0.45)] px-3 py-2 text-xs font-semibold text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
           >
             <SlidersHorizontal className="h-3.5 w-3.5" />
             Escolher o que ver
@@ -139,7 +139,7 @@ export default function DashboardPage() {
 
       {/* Filtro de período (global) */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1 rounded-lg border border-[rgba(212,165,116,0.12)] p-1 bg-white/[0.02]">
+        <div className="flex items-center gap-1 rounded-lg border border-[rgba(97,193,208,0.30)] p-1 bg-[#FAFDFD]">
           {PERIOD_PRESETS.map((p) => (
             <button
               key={p.key}
@@ -172,14 +172,14 @@ export default function DashboardPage() {
               type="date"
               value={customFrom}
               onChange={(e) => setCustom('from', e.target.value)}
-              className="rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-2 py-1 text-xs text-[var(--color-text-primary)]"
+              className="rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-2 py-1 text-xs text-[var(--color-text-primary)]"
             />
             <span className="text-xs text-[var(--color-text-secondary)]">até</span>
             <input
               type="date"
               value={customTo}
               onChange={(e) => setCustom('to', e.target.value)}
-              className="rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-2 py-1 text-xs text-[var(--color-text-primary)]"
+              className="rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-2 py-1 text-xs text-[var(--color-text-primary)]"
             />
           </div>
         )}
@@ -198,7 +198,7 @@ export default function DashboardPage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
             {WIDGETS.map((w) => (
-              <label key={w.key} className="flex items-center gap-2 rounded-lg border border-[rgba(212,165,116,0.12)] bg-white/[0.02] px-3 py-2 cursor-pointer">
+              <label key={w.key} className="flex items-center gap-2 rounded-lg border border-[rgba(97,193,208,0.30)] bg-[#FAFDFD] px-3 py-2 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={show(w.key)}
@@ -222,10 +222,10 @@ export default function DashboardPage() {
         {/* Fileira 1 — KPIs de vendas */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {show('vendas_ganhas') && (
-            <SalesKpiWidget title="Fechamentos" count={metrics.won.count} value={metrics.won.value} series={metrics.won.series} color="#10B981" netValue={wonNet} />
+            <SalesKpiWidget title="Fechamentos" count={metrics.won.count} value={metrics.won.value} series={metrics.won.series} color="#0C6B4A" netValue={wonNet} />
           )}
           {show('oportunidades_perdidas') && (
-            <SalesKpiWidget title="Não fecharam" count={metrics.lost.count} value={metrics.lost.value} series={metrics.lost.series} color="#EF4444" />
+            <SalesKpiWidget title="Não fecharam" count={metrics.lost.count} value={metrics.lost.value} series={metrics.lost.series} color="#B02D26" />
           )}
           {show('forecast') && <ForecastWidget value={metrics.forecast.value} openCount={metrics.forecast.openCount} />}
         </div>
@@ -272,13 +272,13 @@ export default function DashboardPage() {
           )}
           {/* Conversão: mesmas dimensões, mas contando só os deals GANHOS no período */}
           {show('conversao_campanhas') && (
-            <OriginBarsWidget title="Campanhas de maior conversão" data={metrics.conversion.campaigns} emptyText={NO_WON_UTM} unit="vendas" color="#10B981" />
+            <OriginBarsWidget title="Campanhas de maior conversão" data={metrics.conversion.campaigns} emptyText={NO_WON_UTM} unit="vendas" color="#0C6B4A" />
           )}
           {show('conversao_anuncios') && (
-            <OriginBarsWidget title="Anúncios de maior conversão" data={metrics.conversion.ads} emptyText={NO_WON_UTM} unit="vendas" color="#10B981" />
+            <OriginBarsWidget title="Anúncios de maior conversão" data={metrics.conversion.ads} emptyText={NO_WON_UTM} unit="vendas" color="#0C6B4A" />
           )}
           {show('conversao_posts') && (
-            <OriginBarsWidget title="Posts de maior conversão" data={metrics.conversion.organicPosts} emptyText={NO_WON_UTM} unit="vendas" color="#10B981" />
+            <OriginBarsWidget title="Posts de maior conversão" data={metrics.conversion.organicPosts} emptyText={NO_WON_UTM} unit="vendas" color="#0C6B4A" />
           )}
         </div>
         </>
@@ -313,7 +313,7 @@ function SalesCostsForm({
   }, [costs]);
 
   const inputCls =
-    'w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-2 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)] disabled:opacity-50';
+    'w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-2 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)] disabled:opacity-50';
   const labelCls = 'mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]';
 
   const handleSave = async () => {
@@ -331,7 +331,7 @@ function SalesCostsForm({
   };
 
   return (
-    <div className="mt-4 border-t border-[rgba(212,165,116,0.08)] pt-4">
+    <div className="mt-4 border-t border-[rgba(97,193,208,0.16)] pt-4">
       <div className="text-label mb-1">Valor líquido (Fechamentos)</div>
       <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
         Custos abatidos do valor bruto das vendas ganhas. Deixe em 0 para exibir só o bruto.
@@ -354,7 +354,7 @@ function SalesCostsForm({
               value={otherKind}
               onChange={(e) => setOtherKind(e.target.value as SalesCosts['other_kind'])}
               disabled={!canEdit}
-              className="rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-2 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)] disabled:opacity-50 [&>option]:bg-[#0A0A0F]"
+              className="rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-2 py-1.5 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)] disabled:opacity-50 [&>option]:bg-[#FFFFFF]"
             >
               <option value="fixed">R$</option>
               <option value="pct">%</option>

@@ -18,7 +18,7 @@ interface AddToPipelineDialogProps {
 }
 
 const selectCls =
-  'w-full rounded-lg border border-[rgba(212,165,116,0.2)] bg-white/[0.03] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)] [&>option]:bg-[#0A0A0F]';
+  'w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--accent-primary)] [&>option]:bg-[#FFFFFF]';
 
 export function AddToPipelineDialog({
   open,

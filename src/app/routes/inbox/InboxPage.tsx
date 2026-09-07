@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Inbox as InboxIcon, Info, PanelRightClose, PanelRightOpen, Pin, X } from 'lucide-react';
+import { Avatar } from '@/components/ui/Avatar';
 import { useAppUser } from '@/app/providers/AppUserProvider';
 import { useAiChannels } from '@/hooks/useAiChannels';
 import { useWhatsappProvider } from '@/hooks/useWhatsappProvider';
@@ -210,11 +211,11 @@ export default function InboxPage() {
       >
         {/* Left: conversation list — no mobile some quando há conversa aberta */}
         <div
-          className={`glass-card p-0 flex-col overflow-hidden h-full ${
+          className={`glass-card glass-card-static p-0 flex-col overflow-hidden h-full ${
             selectedId ? 'hidden lg:flex' : 'flex'
           }`}
         >
-          <div className="p-3 border-b border-[rgba(212,165,116,0.08)] space-y-2">
+          <div className="p-3 border-b border-[var(--color-border-soft)] space-y-2">
             {/* Filtros + ordenação (os campos de nome/telefone/email vivem dentro
                 do popover de Filtros — por isso não há mais busca solta aqui). */}
             <InboxFilters
@@ -247,38 +248,59 @@ export default function InboxPage() {
 
         {/* Center: thread — no mobile ocupa a tela quando há conversa aberta */}
         <div
-          className={`glass-card p-0 flex-col overflow-hidden h-full ${
+          className={`glass-card glass-card-static p-0 flex-col overflow-hidden h-full ${
             selectedId ? 'flex' : 'hidden lg:flex'
           }`}
         >
           {selected ? (
             <>
-              <div className="p-3 border-b border-[rgba(212,165,116,0.08)] flex items-center gap-2">
+              <div className="flex items-center gap-2.5 border-b border-[var(--color-border-soft)] bg-[var(--color-bg-surface)] px-4 py-3">
                 <button
                   onClick={() => setSelectedId(null)}
                   aria-label="Voltar à lista"
-                  className="lg:hidden h-9 w-9 shrink-0 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
+                  className="lg:hidden h-9 w-9 shrink-0 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
                 >
                   <ArrowLeft className="h-4.5 w-4.5" />
                 </button>
+                <Avatar
+                  src={selected.contact?.profile_pic_url}
+                  name={selected.contact?.name?.trim() || selected.contact?.phone || '-'}
+                  size="md"
+                  className="hidden shrink-0 sm:flex"
+                />
                 <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-[var(--color-text-primary)] text-sm truncate">
+                  <div className="truncate text-[15px] font-semibold text-[var(--color-text-primary)]">
                     {selected.contact?.name?.trim() || selected.contact?.phone || '-'}
                   </div>
-                  <div className="text-[10px] font-mono text-[var(--color-text-secondary)] truncate">
+                  <div className="truncate font-mono text-[11px] text-[var(--color-text-secondary)]">
                     {selected.contact?.phone}
                   </div>
                 </div>
+                {/* Janela de 24h: fora dela a Meta só aceita template. É a
+                    primeira coisa que a recepção precisa saber antes de digitar. */}
+                <span
+                  className={`hidden shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold sm:inline-flex ${
+                    effectiveWithinWindow
+                      ? 'border-[rgba(15,122,85,0.35)] bg-[var(--color-success-bg)] text-[var(--color-success)]'
+                      : 'border-[rgba(154,74,7,0.28)] bg-[var(--color-warning-bg)] text-[var(--color-warning)]'
+                  }`}
+                >
+                  {selectedProvider === 'uazapi'
+                    ? 'Sem janela'
+                    : effectiveWithinWindow
+                      ? 'Janela 24h aberta'
+                      : 'Janela 24h fechada'}
+                </span>
                 <button
                   onClick={() => setShowPanelMobile(true)}
                   aria-label="Detalhes da conversa"
-                  className="xl:hidden h-9 w-9 shrink-0 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
+                  className="xl:hidden h-9 w-9 shrink-0 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
                 >
                   <Info className="h-4.5 w-4.5" />
                 </button>
               </div>
               {selected.pinned_note && (
-                <div className="flex items-start gap-2 border-b border-[rgba(245,158,11,0.2)] bg-[rgba(245,158,11,0.06)] px-4 py-2 text-sm text-[#FBBF24]">
+                <div className="flex items-start gap-2 border-b border-[rgba(154,74,7,0.28)] bg-[var(--color-warning-bg)] px-4 py-2 text-sm text-[var(--color-warning)]">
                   <Pin className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                   <span className="text-[var(--color-text-primary)] whitespace-pre-wrap break-words">{selected.pinned_note}</span>
                 </div>
@@ -299,8 +321,8 @@ export default function InboxPage() {
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center">
-              <div className="text-label opacity-60">
-                Selecione uma conversa para ver a thread
+              <div className="text-label">
+                Selecione uma conversa
               </div>
             </div>
           )}
@@ -308,25 +330,25 @@ export default function InboxPage() {
 
         {/* Right: contact panel — coluna fixa só em xl; abaixo disso é overlay.
             Recolhível: vira uma régua estreita com botão de expandir. */}
-        <div className="hidden xl:flex glass-card p-0 overflow-hidden h-full flex-col">
+        <div className="hidden xl:flex glass-card glass-card-static p-0 overflow-hidden h-full flex-col">
           {panelCollapsed ? (
             <button
               onClick={togglePanel}
               aria-label="Expandir painel de detalhes"
               title="Expandir painel"
-              className="h-full w-full flex items-start justify-center pt-3 text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
+              className="h-full w-full flex items-start justify-center pt-3 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
             >
               <PanelRightOpen className="h-4.5 w-4.5" />
             </button>
           ) : selected ? (
             <>
-              <div className="flex items-center justify-between px-4 py-2 border-b border-[rgba(212,165,116,0.08)]">
+              <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--color-border-soft)]">
                 <span className="text-label">Detalhes</span>
                 <button
                   onClick={togglePanel}
                   aria-label="Recolher painel de detalhes"
                   title="Recolher painel"
-                  className="h-8 w-8 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
+                  className="h-8 w-8 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
                 >
                   <PanelRightClose className="h-4 w-4" />
                 </button>
@@ -358,13 +380,13 @@ export default function InboxPage() {
                   onClick={togglePanel}
                   aria-label="Recolher painel de detalhes"
                   title="Recolher painel"
-                  className="h-8 w-8 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
+                  className="h-8 w-8 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
                 >
                   <PanelRightClose className="h-4 w-4" />
                 </button>
               </div>
               <div className="flex-1 flex items-center justify-center p-6">
-                <div className="text-label opacity-60">Sem conversa selecionada</div>
+                <div className="text-label">Sem conversa selecionada</div>
               </div>
             </>
           )}
@@ -375,15 +397,15 @@ export default function InboxPage() {
       {selected && showPanelMobile && (
         <div className="fixed inset-0 z-50 xl:hidden">
           <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            className="absolute inset-0 bg-[rgba(23,40,43,0.38)] backdrop-blur-sm"
             onClick={() => setShowPanelMobile(false)}
           />
-          <div className="absolute right-0 top-0 h-full w-80 max-w-[85vw] glass-surface border-l border-[rgba(212,165,116,0.15)] overflow-y-auto">
+          <div className="absolute right-0 top-0 h-full w-80 max-w-[85vw] glass-surface border-l border-[var(--color-border-card)] overflow-y-auto">
             <div className="flex justify-end p-2">
               <button
                 onClick={() => setShowPanelMobile(false)}
                 aria-label="Fechar detalhes"
-                className="h-11 w-11 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-white/5 hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
+                className="h-11 w-11 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
               >
                 <X className="h-5 w-5" />
               </button>

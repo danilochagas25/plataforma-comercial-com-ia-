@@ -16,8 +16,8 @@ const STATUS_LABEL: Record<TemplateStatus, string> = {
 };
 
 const STATUS_COLORS: Record<TemplateStatus, string> = {
-  draft: 'bg-white/5 text-[var(--color-text-secondary)]',
-  pending: 'bg-[rgba(245,158,11,0.12)] text-[#FBBF24]',
+  draft: 'bg-[#EEF6F7] text-[var(--color-text-secondary)]',
+  pending: 'bg-[rgba(245,158,11,0.12)] text-[#9A4A07]',
   approved: 'bg-[rgba(16,185,129,0.12)] text-[var(--color-success)]',
   rejected: 'bg-[rgba(239,68,68,0.12)] text-[var(--color-error)]',
 };
@@ -106,7 +106,7 @@ export function TemplatesList() {
         </div>
       </div>
 
-      <div className="flex items-start gap-2 rounded-lg border border-[rgba(212,165,116,0.15)] bg-[rgba(212,165,116,0.05)] px-4 py-3 text-sm text-[var(--color-text-secondary)]">
+      <div className="flex items-start gap-2 rounded-lg border border-[rgba(97,193,208,0.38)] bg-[rgba(97,193,208,0.06)] px-4 py-3 text-sm text-[var(--color-text-secondary)]">
         <Info className="h-4 w-4 mt-0.5 shrink-0 text-[var(--accent-primary)]" />
         <span>
           Templates enviados passam por análise da Meta, que costuma levar de
@@ -119,10 +119,10 @@ export function TemplatesList() {
       {error && <LoadErrorBanner message={error} onRetry={() => void reload()} />}
 
       <div className="glass-card p-4">
-        <div className="rounded-lg border border-[rgba(212,165,116,0.08)] overflow-x-auto">
+        <div className="rounded-lg border border-[rgba(97,193,208,0.16)] overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
             <thead>
-              <tr className="bg-white/[0.02] text-left">
+              <tr className="bg-[#FAFDFD] text-left">
                 <th className="p-3 text-label">Nome</th>
                 <th className="p-3 text-label">Categoria</th>
                 <th className="p-3 text-label">Idioma</th>
@@ -150,7 +150,7 @@ export function TemplatesList() {
                   return (
                     <tr
                       key={t.id}
-                      className="border-t border-[rgba(212,165,116,0.06)] hover:bg-white/[0.02]"
+                      className="border-t border-[rgba(97,193,208,0.16)] hover:bg-[#FAFDFD]"
                     >
                       <td className="p-3 font-mono text-[var(--color-text-primary)]">
                         {t.name}

@@ -35,7 +35,7 @@ export default function AutomationsPage() {
         </div>
       </div>
 
-      <div className="flex gap-2 border-b border-[rgba(212,165,116,0.1)]">
+      <div className="flex gap-2 border-b border-[rgba(97,193,208,0.30)]">
         {tabs.map((t) => {
           const Icon = t.icon;
           return (

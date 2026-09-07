@@ -70,7 +70,7 @@ export default function CampaignsPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-[rgba(212,165,116,0.1)]">
+      <div className="flex flex-wrap gap-1 border-b border-[rgba(97,193,208,0.30)]">
         {TABS.map((t) => {
           const Icon = t.icon;
           const isActive = t.id === active;
