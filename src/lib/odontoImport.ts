@@ -10,16 +10,25 @@
 //
 // REGRAS DE NEGÓCIO (decisões do Danilo, 06/09/2026):
 //
+//  · 🔴 UM TRATAMENTO = UM ORÇAMENTO. Uma LINHA do relatório vira UMA
+//    oportunidade. **Por quê:** cada tratamento tem o seu próprio ciclo de
+//    decisão — o paciente aprova a limpeza e recusa a prótese. Agrupado por
+//    paciente, isso ficava invisível. Separado, dá para medir **conversão por
+//    especialidade**, que é o indicador que a franqueadora cobra. O arquivo de
+//    05/09 deixa de gerar 64 oportunidades e passa a gerar 81.
+//
 //  · CONTATO = TELEFONE (é a conversa do WhatsApp). O nome do paciente vive no
 //    ORÇAMENTO, não no contato. Motivo: 4 telefones do arquivo real atendem
 //    mais de um paciente — um deles atende 3 pessoas da mesma família. O índice
 //    `contacts_org_phone_canonical_key` proíbe dois contatos com o mesmo
-//    telefone, e está certo assim.
+//    telefone, e está certo assim. Isso NÃO muda com um orçamento por
+//    tratamento: o mesmo contato passa a ter mais orçamentos pendurados nele.
 //
-//  · SINAL DE APROVAÇÃO POR AUSÊNCIA. O relatório traz APENAS não aprovados.
-//    Logo, o orçamento que SOME do relatório do dia seguinte foi aprovado (ou
-//    cancelado). É assim que a conversão é medida sem ninguém marcar nada na
-//    mão. ⚠️ A inferência só vale para orçamentos DENTRO do período coberto
+//  · SINAL DE APROVAÇÃO POR AUSÊNCIA, AGORA POR TRATAMENTO. O relatório traz
+//    APENAS não aprovados. Logo, a LINHA que some do relatório do dia seguinte
+//    foi aprovada (ou cancelada) — e só ela. O paciente pode ter a limpeza
+//    aprovada e a prótese ainda parada; são dois deals, e só o da limpeza se
+//    move. ⚠️ A inferência só vale para orçamentos DENTRO do período coberto
 //    pelo export — senão um orçamento de agosto, ausente de um relatório de
 //    setembro, seria dado como aprovado sem nenhuma evidência.
 //
@@ -27,13 +36,25 @@
 //    para "Não aprovado". Deal que um humano já moveu (negociação, aguardando
 //    decisão) NÃO é encerrado automaticamente — só é reportado.
 //
-//  · IDEMPOTÊNCIA. `deals.external_ref` (`webdental:<paciente>:<data>`) com
+//  · IDEMPOTÊNCIA. `deals.external_ref` =
+//    `webdental:<paciente>:<data>:<tratamento>:<ocorrência>:<centavos>`, com
 //    índice único por org. Reimportar o mesmo arquivo atualiza, nunca duplica.
+//    Quando só o VALOR muda entre dois exports, o casamento cai para a
+//    `chaveBase` (a mesma chave sem o valor) e o orçamento é ATUALIZADO — sem
+//    isso, uma correção de preço viraria "sumiu do relatório = aprovado" de um
+//    lado e um card novo do outro.
 // ============================================================================
 
 import { getSupabase } from '@/lib/supabase';
 import { canonicalPhone, phoneVariants } from '@/lib/phone';
-import type { Orcamento, ParseWebdentalResult } from '@/lib/webdental';
+import {
+  chaveBaseDoRef,
+  contarPacientes,
+  dataDoRef,
+  refWebdentalEhAntigo,
+  type Orcamento,
+  type ParseWebdentalResult,
+} from '@/lib/webdental';
 
 export const PIPELINE_ODONTO = 'Odonto — Orçamentos';
 export const ETAPA_APRESENTADO = 'Orçamento apresentado';
@@ -54,12 +75,20 @@ export interface AcaoDeal {
   telefone: string;
   dtOrcamento: string;
   valor: number;
+  /** Tratamento do orçamento — agora é 1 por card, então é o que identifica. */
+  tratamento?: string;
   /** Só em "atualizados": o que mudou, em português. */
   mudancas?: string[];
   /** Só em "aprovados"/"não aprovados": id do deal já existente. */
   dealId?: string;
   /** Dias parados na etapa (para as movimentações). */
   diasParado?: number;
+  /**
+   * Chave anterior, quando o orçamento foi reconhecido pela `chaveBase` porque
+   * o VALOR mudou entre um export e outro. A aplicação regrava o
+   * `external_ref` para a chave nova.
+   */
+  refAnterior?: string;
 }
 
 export interface PlanoImportacao {
@@ -87,6 +116,12 @@ export interface PlanoImportacao {
   voltaramAoRelatorio: AcaoDeal[];
   contatosNovos: number;
   contatosExistentes: number;
+  /** Orçamentos no arquivo (= linhas válidas = 1 por tratamento). */
+  orcamentosNoArquivo: number;
+  /** Pacientes distintos por trás desses orçamentos. */
+  pacientesNoArquivo: number;
+  /** Quantos orçamentos por especialidade — a leitura que a franqueadora cobra. */
+  porEspecialidade: Array<{ especialidade: string; quantidade: number; valor: number }>;
   /** Telefones que atendem mais de um paciente. */
   familias: Array<{ telefone: string; pacientes: string[] }>;
   /** Procedimentos que não estão no catálogo e serão criados. */
@@ -129,7 +164,11 @@ interface ContextoBanco {
   etapas: Record<string, string>;
   camposPorChave: Record<string, string>;
   produtosPorNome: Map<string, { id: string; product_type: string }>;
+  /** Todos os deals de importação do funil, sem repetição. */
+  dealsTodos: DealExistente[];
   dealsPorRef: Map<string, DealExistente>;
+  /** Chave sem o valor → deal. Só entra chave que aparece UMA vez (sem ambiguidade). */
+  dealsPorChaveBase: Map<string, DealExistente>;
   valoresPorDeal: Map<string, Record<string, string>>;
   itensPorDeal: Map<string, Array<{ product_id: string; value: number; quantity: number }>>;
   contatoPorTelefone: Map<string, { id: string; phone: string; name: string | null; custom_fields: Record<string, unknown> }>;
@@ -164,10 +203,24 @@ function diasDesde(iso: string, hoje: Date): number {
   return Math.floor((base - ref) / 86_400_000);
 }
 
-/** Título do deal, conforme ODONTO.md §4. */
+/**
+ * Título do card.
+ *
+ * Com 81 cards e UM tratamento em cada, o que precisa ser lido de relance é
+ * **quem** e **o quê** — nessa ordem. A palavra "Orçamento" saiu: todo card do
+ * funil é um orçamento, repeti-la 81 vezes só consome largura. A data fica no
+ * fim porque o card já mostra o relógio da etapa.
+ *
+ * Quando o mesmo paciente tem o MESMO tratamento duas vezes no mesmo dia (dois
+ * dentes), o ordinal entra — sem ele os dois cards ficariam idênticos na tela e
+ * ninguém saberia qual já foi tratado.
+ *
+ *   "Maria Julia Santos — Clínica Geral · 01/09/2026"
+ *   "Givaldo Pereira — Prótese (2º) · 01/09/2026"
+ */
 export function tituloDoOrcamento(orc: Orcamento): string {
-  const trat = orc.tratamentos.length > 60 ? `${orc.tratamentos.slice(0, 57)}…` : orc.tratamentos;
-  return `Orçamento ${orc.pacienteNome} — ${trat} — ${dataBr(orc.dtOrcamento)}`;
+  const ordinal = orc.totalOcorrencias > 1 ? ` (${orc.ocorrencia}º)` : '';
+  return `${orc.pacienteNome} — ${orc.tratamento}${ordinal} · ${dataBr(orc.dtOrcamento)}`;
 }
 
 /** Valores dos campos personalizados que este orçamento produz. */
@@ -175,7 +228,10 @@ function valoresDoOrcamento(orc: Orcamento): Record<string, string> {
   return {
     paciente_nome: orc.pacienteNome,
     dt_orcamento: orc.dtOrcamento,
-    tratamento: orc.tratamentos,
+    // Um tratamento por orçamento: o campo deixa de ser uma lista concatenada e
+    // passa a ser o tratamento DESTE card — é o que torna o filtro por
+    // procedimento e a conversão por especialidade confiáveis.
+    tratamento: orc.totalOcorrencias > 1 ? `${orc.tratamento} (${orc.ocorrencia}º)` : orc.tratamento,
     especialidade: orc.especialidade,
     dentista: orc.dentista,
     tabela_preco: orc.tabelaPreco,
@@ -257,6 +313,19 @@ async function carregarContexto(orcamentos: Orcamento[]): Promise<ContextoBanco>
   const deals = (dealsRes.data ?? []) as DealExistente[];
   const dealsPorRef = new Map(deals.map((d) => [d.external_ref, d]));
 
+  // Índice pela chave SEM o valor. Chave repetida (não deveria acontecer) fica
+  // de fora: casar por ambiguidade é pior do que não casar.
+  const dealsPorChaveBase = new Map<string, DealExistente>();
+  const basesAmbiguas = new Set<string>();
+  for (const d of deals) {
+    if (d.archived_at) continue;
+    const base = chaveBaseDoRef(d.external_ref);
+    if (!base) continue;
+    if (dealsPorChaveBase.has(base)) basesAmbiguas.add(base);
+    dealsPorChaveBase.set(base, d);
+  }
+  for (const base of basesAmbiguas) dealsPorChaveBase.delete(base);
+
   // Valores e itens dos deals já existentes — só para saber o que MUDOU.
   const valoresPorDeal = new Map<string, Record<string, string>>();
   const itensPorDeal = new Map<string, Array<{ product_id: string; value: number; quantity: number }>>();
@@ -306,7 +375,9 @@ async function carregarContexto(orcamentos: Orcamento[]): Promise<ContextoBanco>
     etapas,
     camposPorChave,
     produtosPorNome,
+    dealsTodos: deals,
     dealsPorRef,
+    dealsPorChaveBase,
     valoresPorDeal,
     itensPorDeal,
     contatoPorTelefone,
@@ -347,27 +418,47 @@ export async function planejarImportacao(
   const telefonesNovos = new Set<string>();
   const telefonesExistentes = new Set<string>();
 
+  // Deals já casados com alguma linha do arquivo. É este conjunto — e não uma
+  // lista de chaves — que decide a AUSÊNCIA lá embaixo, porque um orçamento
+  // pode ter sido reconhecido pela chave sem valor, com `external_ref` antigo.
+  const idsNoArquivo = new Set<string>();
+
   for (const orc of leitura.orcamentos) {
     const base: AcaoDeal = {
       externalRef: orc.externalRef,
       paciente: orc.pacienteNome,
       telefone: orc.telefone,
       dtOrcamento: orc.dtOrcamento,
-      valor: orc.valorTotal,
+      valor: orc.valor,
+      tratamento: orc.tratamento,
     };
 
     if (ctx.contatoPorTelefone.has(orc.telefone)) telefonesExistentes.add(orc.telefone);
     else telefonesNovos.add(orc.telefone);
 
-    for (const it of orc.itens) {
-      if (!ctx.produtosPorNome.has(it.tratamento.toLowerCase())) procedimentosNovos.add(it.tratamento);
+    if (!ctx.produtosPorNome.has(orc.tratamento.toLowerCase())) procedimentosNovos.add(orc.tratamento);
+
+    // 1ª tentativa: a chave inteira. 2ª: a chave sem o valor — é o orçamento
+    // cujo preço foi corrigido no WebDental. Sem esta segunda, a correção de
+    // preço criaria um card novo E daria o antigo como aprovado por ausência.
+    let existente = ctx.dealsPorRef.get(orc.externalRef);
+    let refAnterior: string | undefined;
+    if (!existente) {
+      const candidato = ctx.dealsPorChaveBase.get(orc.chaveBase);
+      if (candidato && !idsNoArquivo.has(candidato.id)) {
+        existente = candidato;
+        refAnterior = candidato.external_ref;
+      }
     }
 
-    const existente = ctx.dealsPorRef.get(orc.externalRef);
     if (!existente) {
       novos.push(base);
       continue;
     }
+    idsNoArquivo.add(existente.id);
+    // A gravação encontra o deal pela chave NOVA, mesmo quando ele foi
+    // reconhecido pela chave antiga.
+    ctx.dealsPorRef.set(orc.externalRef, existente);
 
     // Estava encerrado e voltou ao relatório de NÃO aprovados: a inferência
     // anterior não se sustentou. Reabrir é decisão de gente — aqui só reporta.
@@ -376,8 +467,8 @@ export async function planejarImportacao(
     }
 
     const mudancas: string[] = [];
-    if (dinheiro(Number(existente.value ?? 0)) !== orc.valorTotal) {
-      mudancas.push(`valor ${dinheiro(Number(existente.value ?? 0))} → ${orc.valorTotal}`);
+    if (dinheiro(Number(existente.value ?? 0)) !== orc.valor) {
+      mudancas.push(`valor ${dinheiro(Number(existente.value ?? 0))} → ${orc.valor}`);
     }
     const tituloNovo = tituloDoOrcamento(orc);
     if (existente.title !== tituloNovo) mudancas.push('título');
@@ -388,46 +479,46 @@ export async function planejarImportacao(
       if ((atuais[chave] ?? '') !== valor) mudancas.push(chave.replace(/_/g, ' '));
     }
 
-    // Itens: compara pelo par (produto, valor, quantidade).
+    // O item único do orçamento: compara (produto, valor, quantidade).
     const itensAtuais = (ctx.itensPorDeal.get(existente.id) ?? [])
       .map((i) => `${i.product_id}|${dinheiro(i.value)}|${i.quantity}`)
       .sort()
       .join(';');
-    const itensDesejados = orc.itens
-      .map((it) => {
-        const p = ctx.produtosPorNome.get(it.tratamento.toLowerCase());
-        return `${p?.id ?? 'novo:' + it.tratamento}|${dinheiro(it.valor)}|${it.quantidade}`;
-      })
-      .sort()
-      .join(';');
-    if (itensAtuais !== itensDesejados) mudancas.push('procedimentos');
+    const produto = ctx.produtosPorNome.get(orc.tratamento.toLowerCase());
+    const itensDesejados = `${produto?.id ?? 'novo:' + orc.tratamento}|${dinheiro(orc.valor)}|1`;
+    if (itensAtuais !== itensDesejados) mudancas.push('procedimento');
 
     const contatoAtual = ctx.contatoPorTelefone.get(orc.telefone);
     if (contatoAtual && contatoAtual.id !== existente.contact_id) mudancas.push('contato');
 
     if (mudancas.length === 0) inalterados.push(base);
-    else atualizados.push({ ...base, mudancas: [...new Set(mudancas)], dealId: existente.id });
+    else atualizados.push({ ...base, mudancas: [...new Set(mudancas)], dealId: existente.id, refAnterior });
   }
 
   // --- Sumiu do relatório = APROVADO ---------------------------------------
+  // 🔴 AGORA POR TRATAMENTO, não por paciente. O deal representa UMA linha do
+  // relatório; se aquela linha não veio no export de hoje, aquele tratamento
+  // saiu da lista de não aprovados. Os outros tratamentos do mesmo paciente,
+  // que continuam no arquivo, seguem abertos — é exatamente o caso "aprovou a
+  // limpeza, a prótese ficou parada".
   // Só dentro do período coberto pelo export, e só o que estava aberto.
-  const refsNoArquivo = new Set(leitura.orcamentos.map((o) => o.externalRef));
   const etapaApresentado = ctx.etapas[ETAPA_APRESENTADO];
   const aprovados: AcaoDeal[] = [];
   const naoAprovados: AcaoDeal[] = [];
   const paradosEmNegociacao: AcaoDeal[] = [];
+  const formatoAntigo: AcaoDeal[] = [];
 
-  for (const deal of ctx.dealsPorRef.values()) {
+  for (const deal of ctx.dealsTodos) {
     if (deal.archived_at) continue;
     if (deal.status !== 'open') continue;
 
     const valores = ctx.valoresPorDeal.get(deal.id) ?? {};
-    const dt = valores.dt_orcamento || deal.external_ref.split(':').pop() || '';
+    const dt = valores.dt_orcamento || dataDoRef(deal.external_ref) || '';
     const paciente = valores.paciente_nome || deal.title;
     const dentroDoPeriodo =
       !leitura.periodo.de || !leitura.periodo.ate
         ? false
-        : dt >= leitura.periodo.de && dt <= leitura.periodo.ate;
+        : Boolean(dt) && dt >= leitura.periodo.de && dt <= leitura.periodo.ate;
     const dias = dt ? diasDesde(dt, hoje) : 0;
 
     const acao: AcaoDeal = {
@@ -436,11 +527,19 @@ export async function planejarImportacao(
       telefone: '',
       dtOrcamento: dt,
       valor: dinheiro(Number(deal.value ?? 0)),
+      tratamento: valores.tratamento,
       dealId: deal.id,
       diasParado: dias,
     };
 
-    if (!refsNoArquivo.has(deal.external_ref)) {
+    if (!idsNoArquivo.has(deal.id)) {
+      // Deal do modelo ANTIGO (um orçamento por paciente+data). Ele nunca vai
+      // casar com uma linha do arquivo novo — dar isso como "aprovado por
+      // ausência" seria inventar receita. Fica de fora e é reportado.
+      if (refWebdentalEhAntigo(deal.external_ref)) {
+        formatoAntigo.push(acao);
+        continue;
+      }
       if (opcoes.inferirAprovados && dentroDoPeriodo) {
         aprovados.push(acao);
       }
@@ -452,6 +551,15 @@ export async function planejarImportacao(
       if (deal.stage_id === etapaApresentado) naoAprovados.push(acao);
       else paradosEmNegociacao.push(acao);
     }
+  }
+
+  if (formatoAntigo.length > 0) {
+    avisos.push(
+      `${formatoAntigo.length} oportunidade(s) foram importadas no modelo antigo (um orçamento por ` +
+        'paciente e data, com vários tratamentos dentro). Elas NÃO são comparáveis com este arquivo ' +
+        'e ficaram de fora da inferência de aprovação — revise ou arquive na mão antes de confiar ' +
+        'na conversão.',
+    );
   }
 
   if (voltaramAoRelatorio.length > 0) {
@@ -480,6 +588,19 @@ export async function planejarImportacao(
     .filter(([, s]) => s.size > 1)
     .map(([telefone, s]) => ({ telefone, pacientes: [...s] }));
 
+  // Distribuição por especialidade — só faz sentido com 1 tratamento por
+  // orçamento; era isso que o modelo agrupado escondia.
+  const espMap = new Map<string, { quantidade: number; valor: number }>();
+  for (const o of leitura.orcamentos) {
+    const atual = espMap.get(o.especialidade) ?? { quantidade: 0, valor: 0 };
+    atual.quantidade += 1;
+    atual.valor = dinheiro(atual.valor + o.valor);
+    espMap.set(o.especialidade, atual);
+  }
+  const porEspecialidade = [...espMap.entries()]
+    .map(([especialidade, v]) => ({ especialidade, ...v }))
+    .sort((a, b) => b.quantidade - a.quantidade);
+
   const plano: PlanoImportacao = {
     pipelineId: ctx.pipelineId,
     etapas: ctx.etapas,
@@ -493,9 +614,12 @@ export async function planejarImportacao(
     voltaramAoRelatorio,
     contatosNovos: telefonesNovos.size,
     contatosExistentes: telefonesExistentes.size,
+    orcamentosNoArquivo: leitura.orcamentos.length,
+    pacientesNoArquivo: contarPacientes(leitura.orcamentos),
+    porEspecialidade,
     familias,
     procedimentosNovos: [...procedimentosNovos],
-    valorTotalArquivo: dinheiro(leitura.orcamentos.reduce((a, o) => a + o.valorTotal, 0)),
+    valorTotalArquivo: dinheiro(leitura.orcamentos.reduce((a, o) => a + o.valor, 0)),
     valorNovos: dinheiro(novos.reduce((a, n) => a + n.valor, 0)),
     valorAprovados: dinheiro(aprovados.reduce((a, n) => a + n.valor, 0)),
     avisos,
@@ -531,10 +655,8 @@ export async function aplicarImportacao(
   passo(5, 'Catálogo de procedimentos');
   const novosProdutos = new Map<string, string>();
   for (const orc of leitura.orcamentos) {
-    for (const it of orc.itens) {
-      const chave = it.tratamento.toLowerCase();
-      if (!ctx.produtosPorNome.has(chave)) novosProdutos.set(it.tratamento, it.productType);
-    }
+    const chave = orc.tratamento.toLowerCase();
+    if (!ctx.produtosPorNome.has(chave)) novosProdutos.set(orc.tratamento, orc.productType);
   }
   if (novosProdutos.size > 0) {
     const { data, error } = await supabase
@@ -665,7 +787,7 @@ export async function aplicarImportacao(
       pipeline_id: plano.pipelineId,
       stage_id: plano.etapas[ETAPA_APRESENTADO],
       title: tituloDoOrcamento(orc),
-      value: orc.valorTotal,
+      value: orc.valor,
       currency: 'BRL',
       status: 'open',
       lead_type: 'Cliente', // o paciente JÁ é cliente da clínica
@@ -693,6 +815,9 @@ export async function aplicarImportacao(
 
   // --- 4. Deals que mudaram ------------------------------------------------
   passo(55, 'Orçamentos atualizados');
+  const refAnteriorPorRef = new Map(
+    plano.atualizados.filter((a) => a.refAnterior).map((a) => [a.externalRef, a.refAnterior!]),
+  );
   for (const ref of refsAtualizar) {
     const orc = porRef.get(ref);
     const deal = ctx.dealsPorRef.get(ref);
@@ -700,9 +825,11 @@ export async function aplicarImportacao(
     const contato = ctx.contatoPorTelefone.get(orc.telefone);
     const patch: Record<string, unknown> = {
       title: tituloDoOrcamento(orc),
-      value: orc.valorTotal,
+      value: orc.valor,
       expected_close: previsaoFechamento(orc.dtOrcamento),
     };
+    // Só o preço mudou: o orçamento é o mesmo, a chave é que precisa acompanhar.
+    if (refAnteriorPorRef.has(ref)) patch.external_ref = orc.externalRef;
     if (contato && contato.id !== deal.contact_id) patch.contact_id = contato.id;
     const { error } = await supabase.from('deals').update(patch).eq('id', deal.id);
     if (error) res.erros.push(`${orc.pacienteNome}: ${error.message}`);
@@ -731,19 +858,28 @@ export async function aplicarImportacao(
       });
     }
 
+    // UM item por orçamento — o próprio tratamento do card.
+    //
+    // POR QUE MANTER `deal_products` COM UMA LINHA SÓ. Parece redundante agora
+    // que o tratamento também está no campo personalizado, mas o campo é TEXTO
+    // livre (`custom_field_values.value`): não tem chave estrangeira, não
+    // agrupa e não sobrevive a uma renomeação. `deal_products → products` é o
+    // que liga o orçamento à taxonomia odonto (`products.product_type`) e é
+    // dali que sai a **conversão por especialidade** que a franqueadora cobra,
+    // além do subtítulo do card no funil e dos painéis de /vendas, que já leem
+    // essa tabela. Custo: uma linha por orçamento. Tirar exigiria migração e
+    // quebraria relatório — a redundância aqui é barata e a alternativa não é.
     const manter: string[] = [];
-    for (const it of orc.itens) {
-      const produto = ctx.produtosPorNome.get(it.tratamento.toLowerCase());
-      if (!produto) {
-        res.erros.push(`${orc.pacienteNome}: procedimento "${it.tratamento}" não está no catálogo.`);
-        continue;
-      }
+    const produto = ctx.produtosPorNome.get(orc.tratamento.toLowerCase());
+    if (!produto) {
+      res.erros.push(`${orc.pacienteNome}: procedimento "${orc.tratamento}" não está no catálogo.`);
+    } else {
       manter.push(produto.id);
       itensParaGravar.push({
         deal_id: deal.id,
         product_id: produto.id,
-        value: dinheiro(it.valor),
-        quantity: it.quantidade,
+        value: dinheiro(orc.valor),
+        quantity: 1,
       });
     }
     apagarItens.push({ dealId: deal.id, manter });
@@ -790,9 +926,11 @@ export async function aplicarImportacao(
       type: 'note',
       title: 'Aprovado por inferência (ausência no relatório)',
       body:
-        `Este orçamento estava no relatório "Controle de Efetivação — APENAS NÃO APROVADOS" e ` +
-        `DEIXOU de aparecer na importação de ${hojeBr} ` +
-        `(período do relatório: ${plano.periodo.de ?? '?'} a ${plano.periodo.ate ?? '?'}).\n\n` +
+        `O tratamento "${a.tratamento ?? '—'}" de ${a.paciente} estava no relatório ` +
+        `"Controle de Efetivação — APENAS NÃO APROVADOS" e DEIXOU de aparecer na importação de ` +
+        `${hojeBr} (período do relatório: ${plano.periodo.de ?? '?'} a ${plano.periodo.ate ?? '?'}).\n\n` +
+        `A leitura é POR TRATAMENTO: outros orçamentos do mesmo paciente que continuam no ` +
+        `relatório seguem abertos e não foram tocados.\n\n` +
         `⚠️ Isto é INFERÊNCIA, não confirmação humana: sair do relatório significa aprovado OU ` +
         `cancelado no WebDental. Confirme na clínica antes de contar como receita.`,
       done: true,
@@ -825,7 +963,7 @@ export async function aplicarImportacao(
       type: 'note',
       title: 'Encerrado por prazo',
       body:
-        `Orçamento de ${a.dtOrcamento} continuava no relatório de não aprovados após ` +
+        `O tratamento "${a.tratamento ?? '—'}" orçado em ${a.dtOrcamento} continuava no relatório de não aprovados após ` +
         `${a.diasParado} dias e nunca saiu da etapa "${ETAPA_APRESENTADO}". ` +
         `A régua vai até D+${DIAS_ATE_ENCERRAR}; depois disso o CRM encerra como não aprovado.`,
       done: true,

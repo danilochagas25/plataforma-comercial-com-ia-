@@ -28,29 +28,34 @@ import { canonicalPhone } from '@/lib/phone';
 // Tipos
 // ---------------------------------------------------------------------------
 
-/** Um item do orçamento (uma linha do relatório). */
-export interface OrcamentoItem {
-  /** Nome do tratamento como veio do relatório ("Clínica Geral", "Prótese"…). */
-  tratamento: string;
-  /** Especialidade correspondente (rótulo em português). */
-  especialidade: string;
-  /** Código de `products.product_type` ('clinica_geral', 'protese'…). */
-  productType: string;
-  /** Soma dos valores das linhas idênticas. */
-  valor: number;
-  /**
-   * Quantas linhas iguais existiam. No arquivo real de 05/09 há um paciente
-   * com DUAS próteses idênticas no mesmo dia — são dois dentes, dois
-   * tratamentos reais. Como `deal_products` tem PK (deal_id, product_id), o
-   * segundo não cabe numa linha própria: vira quantidade 2.
-   */
-  quantidade: number;
-}
-
-/** Um orçamento = um paciente numa data. Vira UM deal. */
+/**
+ * Um orçamento = UMA LINHA do relatório = UM tratamento. Vira UM deal.
+ *
+ * 🔴 MUDANÇA DE MODELO (decisão do dono, 06/09/2026): *"cada tratamento deve
+ *    ser um orçamento separado"*. Até então a unidade era o par
+ *    (paciente + data), com os tratamentos como itens dentro de uma única
+ *    oportunidade — o arquivo real virava 64 cards.
+ *
+ * **Por que separar (justificativa de negócio).** Cada tratamento tem o seu
+ * próprio ciclo de decisão: o paciente aprova a limpeza e recusa a prótese.
+ * Agrupado, isso fica invisível — o card inteiro parece "não aprovado" mesmo
+ * quando metade do dinheiro já entrou. Separado, dá para medir **conversão por
+ * especialidade**, que é o indicador que a franqueadora cobra (metas próprias
+ * para orto, implante, prótese e clínica geral — ver ODONTO.md §2).
+ */
 export interface Orcamento {
-  /** Chave determinística e estável — trava de idempotência da importação. */
+  /**
+   * Chave determinística e estável — trava de idempotência da importação.
+   * `webdental:<paciente>:<data>:<tratamento>:<ocorrência>:<valor em centavos>`
+   */
   externalRef: string;
+  /**
+   * O mesmo `externalRef` SEM o valor. Serve para reconhecer o orçamento
+   * quando só o preço mudou entre um export e outro: sem isso, uma correção de
+   * valor faria o CRM dar o orçamento antigo como "sumiu do relatório = foi
+   * aprovado" (receita fantasma) e criar um card novo ao lado.
+   */
+  chaveBase: string;
   /** Telefone na forma canônica (+55 DDD 9XXXXXXXX). */
   telefone: string;
   /** Telefone exatamente como veio no arquivo. */
@@ -60,7 +65,8 @@ export interface Orcamento {
   dtOrcamento: string;
   /** AAAA-MM-DD ou null */
   dtAgenda: string | null;
-  valorTotal: number;
+  /** Valor da linha (Valor Total do tratamento). */
+  valor: number;
   participacaoConvenio: number;
   /** Normalizada: "Filiado (Cartão de TODOS)" · "Particular" · "Life Premium". */
   tabelaPreco: string;
@@ -68,13 +74,22 @@ export interface Orcamento {
   tabelaPrecoCrua: string;
   dentista: string;
   endereco: string;
-  /** Especialidade do item de MAIOR valor (a leitura que a franqueadora cobra). */
+  /** Nome do tratamento como veio do relatório ("Clínica Geral", "Prótese"…). */
+  tratamento: string;
+  /** Especialidade correspondente (rótulo em português). */
   especialidade: string;
-  /** Lista legível dos tratamentos ("Clínica Geral · Prótese (2)"). */
-  tratamentos: string;
-  itens: OrcamentoItem[];
-  /** Linhas do arquivo que formaram este orçamento (1-based, com cabeçalho). */
-  linhas: number[];
+  /** Código de `products.product_type` ('clinica_geral', 'protese'…). */
+  productType: string;
+  /**
+   * 1, 2, 3… entre tratamentos IGUAIS do mesmo paciente na mesma data. No
+   * arquivo real há um paciente com DUAS próteses no mesmo dia — são dois
+   * dentes, duas oportunidades legítimas, e é isto que as separa.
+   */
+  ocorrencia: number;
+  /** Quantas linhas iguais existem no grupo (1 = tratamento único no dia). */
+  totalOcorrencias: number;
+  /** Linha do arquivo que gerou este orçamento (1-based, contando o cabeçalho). */
+  linha: number;
 }
 
 export interface LinhaIgnorada {
@@ -382,7 +397,8 @@ function tabelaViaSheetJs(bytes: Uint8Array): Tabela | null {
 // ---------------------------------------------------------------------------
 
 /**
- * Lê o relatório e devolve os orçamentos agrupados (1 orçamento = 1 deal).
+ * Lê o relatório e devolve **um orçamento por linha** — 1 linha = 1 tratamento
+ * = 1 oportunidade no funil. Nada é agrupado por paciente.
  *
  * @param bytes conteúdo bruto do arquivo
  */
@@ -441,12 +457,22 @@ export function parseWebdental(bytes: Uint8Array): ParseWebdentalResult {
     throw new Error('O relatório não tem as colunas Paciente, Tel, Dt Orçamento e Valor Total.');
   }
 
-  // --- Agrupamento: 1 orçamento = paciente + data do orçamento --------------
+  // --- 1 LINHA = 1 ORÇAMENTO ------------------------------------------------
   //
   // A chave NÃO inclui o telefone de propósito. Se a recepção corrigir o número
   // num export seguinte, o orçamento continua sendo o MESMO — o CRM atualiza o
   // contato em vez de criar um deal duplicado.
-  const porChave = new Map<string, Orcamento>();
+  //
+  // A ocorrência é atribuída numa SEGUNDA passada, ordenando o grupo por valor
+  // (e, no empate, pela linha). Se fosse na ordem do arquivo, um relatório com
+  // as duas linhas trocadas de lugar geraria chaves diferentes para os mesmos
+  // dois tratamentos — e a reimportação criaria dois cards novos, dando os dois
+  // antigos por aprovados. Ordenar pelo CONTEÚDO torna a chave independente da
+  // ordem em que o WebDental resolveu exportar.
+  interface Cru extends Omit<Orcamento, 'externalRef' | 'chaveBase' | 'ocorrencia' | 'totalOcorrencias'> {
+    grupo: string;
+  }
+  const crus: Cru[] = [];
   const tratamentosDesconhecidos = new Set<string>();
   const telefonesPorPaciente = new Map<string, Set<string>>();
   let linhasLidas = 0;
@@ -486,72 +512,56 @@ export function parseWebdental(bytes: Uint8Array): ParseWebdentalResult {
     const classe = classificarTratamento(tratamentoBruto);
     if (!classe.conhecido) tratamentosDesconhecidos.add(tratamentoBruto);
 
-    const valor = parseValor(r[idx.valor]);
-    const chave = `${slug(paciente)}|${dt}`;
-    let orc = porChave.get(chave);
+    const tabelaPrecoCrua = idx.tabela >= 0 ? limparTexto(r[idx.tabela]) : '';
 
-    if (!orc) {
-      orc = {
-        externalRef: `webdental:${slug(paciente)}:${dt}`,
-        telefone,
-        telefoneCru: telCru,
-        pacienteNome: paciente,
-        dtOrcamento: dt,
-        dtAgenda: idx.dtAgenda >= 0 ? parseDataRelatorio(r[idx.dtAgenda]) : null,
-        valorTotal: 0,
-        participacaoConvenio: 0,
-        tabelaPreco: '',
-        tabelaPrecoCrua: idx.tabela >= 0 ? limparTexto(r[idx.tabela]) : '',
-        dentista: idx.prestador >= 0 ? limparTexto(r[idx.prestador]) : '',
-        endereco: idx.endereco >= 0 ? limparTexto(r[idx.endereco]) : '',
-        especialidade: classe.especialidade,
-        tratamentos: '',
-        itens: [],
-        linhas: [],
-      };
-      orc.tabelaPreco = normalizarTabelaPreco(orc.tabelaPrecoCrua);
-      porChave.set(chave, orc);
-    }
+    crus.push({
+      grupo: `${slug(paciente)}|${dt}|${slug(tratamentoBruto)}`,
+      telefone,
+      telefoneCru: telCru,
+      pacienteNome: paciente,
+      dtOrcamento: dt,
+      dtAgenda: idx.dtAgenda >= 0 ? parseDataRelatorio(r[idx.dtAgenda]) : null,
+      valor: Math.round(parseValor(r[idx.valor]) * 100) / 100,
+      participacaoConvenio:
+        idx.convenio >= 0 ? Math.round(parseValor(r[idx.convenio]) * 100) / 100 : 0,
+      tabelaPreco: normalizarTabelaPreco(tabelaPrecoCrua),
+      tabelaPrecoCrua,
+      dentista: idx.prestador >= 0 ? limparTexto(r[idx.prestador]) : '',
+      endereco: idx.endereco >= 0 ? limparTexto(r[idx.endereco]) : '',
+      tratamento: tratamentoBruto,
+      especialidade: classe.especialidade,
+      productType: classe.productType,
+      linha: numeroLinha,
+    });
 
-    orc.linhas.push(numeroLinha);
-    orc.valorTotal += valor;
-    if (idx.convenio >= 0) orc.participacaoConvenio += parseValor(r[idx.convenio]);
-    if (!orc.dtAgenda && idx.dtAgenda >= 0) orc.dtAgenda = parseDataRelatorio(r[idx.dtAgenda]);
-
-    // Item repetido no MESMO orçamento (ex.: duas próteses idênticas, dois
-    // dentes) vira quantidade, porque deal_products tem PK (deal_id, product_id).
-    const existente = orc.itens.find((it) => it.tratamento === tratamentoBruto);
-    if (existente) {
-      existente.valor += valor;
-      existente.quantidade += 1;
-    } else {
-      orc.itens.push({
-        tratamento: tratamentoBruto,
-        especialidade: classe.especialidade,
-        productType: classe.productType,
-        valor,
-        quantidade: 1,
-      });
-    }
-
-    const tels = telefonesPorPaciente.get(chave) ?? new Set<string>();
+    const chavePaciente = `${slug(paciente)}|${dt}`;
+    const tels = telefonesPorPaciente.get(chavePaciente) ?? new Set<string>();
     tels.add(telefone);
-    telefonesPorPaciente.set(chave, tels);
+    telefonesPorPaciente.set(chavePaciente, tels);
   }
 
-  // Fecha os campos derivados de cada orçamento.
-  const orcamentos = [...porChave.values()].map((orc) => {
-    const dominante = [...orc.itens].sort((a, b) => b.valor - a.valor)[0];
-    return {
-      ...orc,
-      especialidade: dominante?.especialidade ?? orc.especialidade,
-      tratamentos: orc.itens
-        .map((it) => (it.quantidade > 1 ? `${it.tratamento} (${it.quantidade})` : it.tratamento))
-        .join(' · '),
-      valorTotal: Math.round(orc.valorTotal * 100) / 100,
-      participacaoConvenio: Math.round(orc.participacaoConvenio * 100) / 100,
-    };
-  });
+  // --- 2ª passada: ocorrência e chave de identidade -------------------------
+  const porGrupo = new Map<string, Cru[]>();
+  for (const c of crus) {
+    const lista = porGrupo.get(c.grupo) ?? [];
+    lista.push(c);
+    porGrupo.set(c.grupo, lista);
+  }
+  const orcamentos: Orcamento[] = [];
+  for (const [, lista] of porGrupo) {
+    lista.sort((a, b) => (a.valor === b.valor ? a.linha - b.linha : a.valor - b.valor));
+    lista.forEach((c, i) => {
+      const { grupo, ...resto } = c;
+      const chaveBase = `webdental:${grupo.split('|').join(':')}:${i + 1}`;
+      orcamentos.push({
+        ...resto,
+        chaveBase,
+        externalRef: `${chaveBase}:${Math.round(c.valor * 100)}`,
+        ocorrencia: i + 1,
+        totalOcorrencias: lista.length,
+      });
+    });
+  }
 
   // --- Avisos ---------------------------------------------------------------
   if (tratamentosDesconhecidos.size > 0) {
@@ -562,14 +572,23 @@ export function parseWebdental(bytes: Uint8Array): ParseWebdentalResult {
   }
   for (const [chave, tels] of telefonesPorPaciente) {
     if (tels.size > 1) {
-      const orc = porChave.get(chave);
+      const orc = orcamentos.find((o) => `${slug(o.pacienteNome)}|${o.dtOrcamento}` === chave);
       avisos.push(
-        `${orc?.pacienteNome ?? chave} aparece com ${tels.size} telefones diferentes no mesmo orçamento; ` +
-          `usei ${orc?.telefone}.`,
+        `${orc?.pacienteNome ?? chave} aparece com ${tels.size} telefones diferentes no mesmo dia; ` +
+          `cada orçamento fica com o telefone da própria linha.`,
       );
     }
   }
-  const semValor = orcamentos.filter((o) => o.valorTotal === 0);
+  const repetidos = orcamentos.filter((o) => o.totalOcorrencias > 1);
+  if (repetidos.length > 0) {
+    const grupos = new Set(repetidos.map((o) => `${o.pacienteNome} · ${o.tratamento} · ${o.dtOrcamento}`));
+    avisos.push(
+      `${grupos.size} caso(s) de tratamento REPETIDO no mesmo dia para o mesmo paciente ` +
+        `(${[...grupos].slice(0, 3).join(' | ')}${grupos.size > 3 ? '…' : ''}). ` +
+        'São dentes diferentes: cada um vira uma oportunidade própria, numerada (1º, 2º…).',
+    );
+  }
+  const semValor = orcamentos.filter((o) => o.valor === 0);
   if (semValor.length > 0) {
     avisos.push(
       `${semValor.length} orçamento(s) com valor zero (${semValor
@@ -588,7 +607,7 @@ export function parseWebdental(bytes: Uint8Array): ParseWebdentalResult {
   if (familias.length > 0) {
     avisos.push(
       `${familias.length} telefone(s) atendem mais de um paciente (família). ` +
-        'Um contato só, com um orçamento por paciente — é o modelo combinado.',
+        'Um contato só, com os orçamentos de todos pendurados nele — é o modelo combinado.',
     );
   }
 
@@ -606,16 +625,51 @@ export function parseWebdental(bytes: Uint8Array): ParseWebdentalResult {
     }
   }
 
-  orcamentos.sort((a, b) =>
-    a.dtOrcamento === b.dtOrcamento
-      ? a.pacienteNome.localeCompare(b.pacienteNome, 'pt-BR')
-      : a.dtOrcamento.localeCompare(b.dtOrcamento),
-  );
+  orcamentos.sort((a, b) => {
+    if (a.dtOrcamento !== b.dtOrcamento) return a.dtOrcamento.localeCompare(b.dtOrcamento);
+    const nome = a.pacienteNome.localeCompare(b.pacienteNome, 'pt-BR');
+    if (nome !== 0) return nome;
+    const trat = a.tratamento.localeCompare(b.tratamento, 'pt-BR');
+    return trat !== 0 ? trat : a.ocorrencia - b.ocorrencia;
+  });
 
   return { orcamentos, linhasLidas, ignoradas, periodo, formato, avisos };
 }
 
 /** Soma dos valores — usada no resumo antes de aplicar. */
 export function somarOrcamentos(orcamentos: Orcamento[]): number {
-  return Math.round(orcamentos.reduce((acc, o) => acc + o.valorTotal, 0) * 100) / 100;
+  return Math.round(orcamentos.reduce((acc, o) => acc + o.valor, 0) * 100) / 100;
+}
+
+/** Pacientes distintos no arquivo (o nº que o dono conhece do cabeçalho). */
+export function contarPacientes(orcamentos: Orcamento[]): number {
+  return new Set(orcamentos.map((o) => slug(o.pacienteNome))).size;
+}
+
+// ---------------------------------------------------------------------------
+// Leitura da chave de identidade já gravada em `deals.external_ref`
+// ---------------------------------------------------------------------------
+
+/**
+ * Formato atual: `webdental:<paciente>:<data>:<tratamento>:<ocorrência>:<centavos>`
+ * (6 partes). O formato ANTERIOR — de quando um orçamento era paciente + data —
+ * tinha 3 partes. Distinguir os dois importa: um deal no formato antigo nunca
+ * vai casar com uma linha do arquivo novo, e sem esta checagem ele seria dado
+ * como "sumiu do relatório = aprovado", virando receita que ninguém aprovou.
+ */
+export function refWebdentalEhAntigo(ref: string): boolean {
+  return ref.startsWith('webdental:') && ref.split(':').length < 6;
+}
+
+/** A chave sem o valor — usada para reconhecer o orçamento cujo preço mudou. */
+export function chaveBaseDoRef(ref: string): string | null {
+  const p = ref.split(':');
+  return p.length === 6 ? p.slice(0, 5).join(':') : null;
+}
+
+/** Data do orçamento embutida na chave (plano B quando o campo não foi lido). */
+export function dataDoRef(ref: string): string | null {
+  const p = ref.split(':');
+  const bruto = p.length === 6 || p.length === 5 ? p[2] : p.length === 3 ? p[2] : '';
+  return /^\d{4}-\d{2}-\d{2}$/.test(bruto) ? bruto : null;
 }

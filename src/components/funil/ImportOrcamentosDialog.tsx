@@ -5,9 +5,14 @@
 // NADA é gravado antes de o dono confirmar o resumo. É a regra do projeto.
 //
 // Por que uma tela própria e não a "Importar contatos": aquela cria contato a
-// partir de colunas mapeadas à mão. Esta cria CONTATO + ORÇAMENTO + ITENS +
-// CAMPOS, com a data do orçamento no relógio da etapa, e ainda concilia o que
+// partir de colunas mapeadas à mão. Esta cria CONTATO + ORÇAMENTO + PROCEDIMENTO
+// + CAMPOS, com a data do orçamento no relógio da etapa, e ainda concilia o que
 // sumiu do relatório (= aprovado) e o que venceu os 7 dias.
+//
+// 🔴 UM TRATAMENTO = UMA OPORTUNIDADE (decisão do dono, 06/09/2026). Cada LINHA
+//    do relatório vira um card. O arquivo de 05/09 tem 81 linhas de 64
+//    pacientes: são 81 oportunidades, não 64. O resumo mostra as duas contas
+//    lado a lado para o dono reconhecer o número do cabeçalho do relatório.
 // ============================================================================
 
 import { useCallback, useState, type ChangeEvent, type ReactNode } from 'react';
@@ -206,8 +211,11 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
           <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-[var(--color-text-secondary)]">
             <span>
               <span className="font-mono text-[var(--color-text-primary)]">{nomeArquivo}</span> ·{' '}
-              {leitura.linhasLidas} linhas · {leitura.orcamentos.length} orçamentos ·{' '}
-              período {dataBr(plano.periodo.de)} a {dataBr(plano.periodo.ate)}
+              {leitura.linhasLidas} linhas · <strong className="text-[var(--color-text-primary)]">
+                {plano.orcamentosNoArquivo} orçamentos
+              </strong>{' '}
+              (1 por tratamento) de {plano.pacientesNoArquivo} pacientes · período{' '}
+              {dataBr(plano.periodo.de)} a {dataBr(plano.periodo.ate)}
             </span>
             <span className="text-xs uppercase tracking-wider text-[var(--accent-primary)]">
               simulação — nada gravado
@@ -221,9 +229,30 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
             <Cartao
               rotulo="Valor total do arquivo"
               valor={brl(plano.valorTotalArquivo)}
-              detalhe={`${leitura.orcamentos.length} orçamentos`}
+              detalhe={`${plano.orcamentosNoArquivo} orçamentos · ${plano.pacientesNoArquivo} pacientes`}
             />
           </div>
+
+          {plano.porEspecialidade.length > 0 && (
+            <div className="glass-card p-4">
+              <div className="text-label mb-2">Por especialidade</div>
+              <div className="flex flex-wrap gap-2">
+                {plano.porEspecialidade.map((e) => (
+                  <span
+                    key={e.especialidade}
+                    className="rounded-full border border-[rgba(59,130,246,0.25)] bg-[rgba(59,130,246,0.06)] px-3 py-1 text-xs text-[var(--color-text-secondary)]"
+                  >
+                    <strong className="text-[var(--color-text-primary)]">{e.especialidade}</strong>{' '}
+                    {e.quantidade} · {brl(e.valor)}
+                  </span>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-[var(--color-text-secondary)]">
+                Um tratamento por oportunidade — é o que torna a conversão por especialidade
+                mensurável.
+              </p>
+            </div>
+          )}
 
           <div className="grid gap-3 md:grid-cols-2">
             <div className="glass-card p-4">
@@ -238,7 +267,7 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
                     <span className="text-[var(--color-text-primary)]">
                       {plano.familias.length} telefone(s) atendem mais de um paciente
                     </span>{' '}
-                    — um contato só, um orçamento por paciente.
+                    — um contato só, com os orçamentos de todos pendurados nele.
                   </>
                 )}
               </p>
@@ -269,11 +298,13 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
                   className="mt-1 accent-[var(--accent-primary)]"
                 />
                 <span>
-                  Marcar como <strong className="text-[var(--color-success)]">Aprovado</strong> quem sumiu do
-                  relatório — {plano.aprovados.length} orçamento(s), {brl(plano.valorAprovados)}.
+                  Marcar como <strong className="text-[var(--color-success)]">Aprovado</strong> o tratamento que
+                  sumiu do relatório — {plano.aprovados.length} orçamento(s), {brl(plano.valorAprovados)}.
                   <span className="block text-xs opacity-70">
-                    O relatório só traz não aprovados: sumir significa aprovado ou cancelado. É inferência,
-                    e fica registrado como tal na oportunidade.
+                    A leitura é por TRATAMENTO: o paciente pode ter a limpeza aprovada e a prótese ainda
+                    parada — só o card da limpeza se move. O relatório só traz não aprovados, então sumir
+                    significa aprovado ou cancelado. É inferência, e fica registrado como tal na
+                    oportunidade.
                   </span>
                 </span>
               </label>
@@ -343,6 +374,7 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
                   <thead className="sticky top-0 bg-[#0d101f]">
                     <tr className="text-left text-[var(--color-text-secondary)]">
                       <th className="p-1.5">Paciente</th>
+                      <th className="p-1.5">Tratamento</th>
                       <th className="p-1.5">Telefone</th>
                       <th className="p-1.5">Data</th>
                       <th className="p-1.5 text-right">Valor</th>
@@ -352,6 +384,7 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
                     {plano.novos.map((n) => (
                       <tr key={n.externalRef} className="border-t border-[rgba(212,165,116,0.06)]">
                         <td className="p-1.5 text-[var(--color-text-primary)]">{n.paciente}</td>
+                        <td className="p-1.5 text-[var(--color-text-secondary)]">{n.tratamento ?? '—'}</td>
                         <td className="p-1.5 font-mono text-[var(--color-text-secondary)]">{n.telefone}</td>
                         <td className="p-1.5 text-[var(--color-text-secondary)]">{dataBr(n.dtOrcamento)}</td>
                         <td className="p-1.5 text-right text-[var(--color-text-primary)]">{brl(n.valor)}</td>
@@ -371,7 +404,8 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
               <ul className="mt-2 max-h-48 space-y-1 overflow-auto text-xs text-[var(--color-text-secondary)]">
                 {plano.aprovados.map((a) => (
                   <li key={a.externalRef}>
-                    {a.paciente} · {dataBr(a.dtOrcamento)} · {brl(a.valor)}
+                    {a.paciente} · <strong className="text-[var(--color-text-primary)]">{a.tratamento ?? '—'}</strong>{' '}
+                    · {dataBr(a.dtOrcamento)} · {brl(a.valor)}
                   </li>
                 ))}
               </ul>

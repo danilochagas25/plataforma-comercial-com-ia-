@@ -170,6 +170,8 @@ Nenhuma até agora.
 | 46 | **Frontend do CRM odonto não publicado.** A tela de importação (`ImportOrcamentosDialog`), o parser (`webdental.ts`), o motor (`odontoImport.ts`), o botão no funil, o ativar/desativar de funil e o filtro `is_active` nos seletores existem **só no disco**. Sem deploy na Vercel **não há como importar orçamento pela interface**. Publicar é decisão do Danilo — reforça a #30 | Toda a importação | 06/09/2026 |
 | 47 | **A inferência "sumiu do relatório = aprovado" é INFERÊNCIA, não confirmação.** Sair do relatório de não aprovados significa aprovado **ou cancelado** no WebDental. O importador grava uma nota em `crm_activities` dizendo isso em cada oportunidade movida, e a tela deixa desmarcar a opção. **Antes de contar como receita, alguém precisa conferir na clínica.** Decisão de processo: quem confere e quando | Confiar no número de conversão | 06/09/2026 |
 | 48 | **Quem opera a importação diária e em que horário** (a #4 continua aberta). O relatório precisa ser exportado do WebDental todo dia e subido no CRM; sem isso a régua e a inferência de aprovação param | Rotina | 06/09/2026 |
+| 49 | 🔴 **AGRUPAR O ENVIO POR CONTATO** — consequência direta de "um orçamento por tratamento" (06/09). Com 81 oportunidades em vez de 64, **a régua passaria a mandar uma mensagem por TRATAMENTO**: o paciente com 3 tratamentos parados receberia 3 mensagens no mesmo dia. Isso irrita, gera bloqueio e queima o número — o precedente do CDT (número restringido pela Meta em 07/05/2026 após volume alto) já custou caro uma vez. **A solução, quando o disparo entrar em escopo:** o motor de envio agrupa os orçamentos parados **por contato** e manda **UMA mensagem por pessoa**, citando os tratamentos, com o registro de envio marcado em todos os deals daquele contato. O funil continua separado por tratamento — só o ENVIO respeita a pessoa. Vale para `check-follow-ups` (ramo `stage_stalled`, pendência #44) e para qualquer campanha construída sobre o funil odonto | Qualquer disparo da régua | 06/09/2026 |
+| 50 | Rótulo do campo `tratamento` no banco ainda é **"Tratamento(s)"**, do tempo em que um orçamento tinha vários. Hoje é sempre um. Cosmético, aparece na ficha de toda oportunidade. Não mexi: é escrita em dado de configuração e não estava no pedido | Nada | 06/09/2026 |
 
 ---
 
@@ -3021,3 +3023,248 @@ então não há risco hoje, e republicá-la traria o `_shared` novo sem necessid
   quem exporta o relatório todo dia (#48); (4) escrever os 3 textos da régua
   (#45); (5) implementar o ramo `stage_stalled` em `check-follow-ups` (#44),
   que depende do ramo `meta` de envio (#22).
+
+### 2026-09-06 · Claude Code · CRM ODONTO ESTRUTURADO E IMPORTAÇÃO PRONTA (`9a6cd2d`)
+
+**Publicado** commit `9a6cd2d`. Vercel republicando. 4 migrações aplicadas,
+cada uma com reversão registrada.
+
+**SIMULAÇÃO COM O ARQUIVO REAL — bateu R$ 68.436,03 exato:**
+64 orçamentos · 58 contatos novos + **1 reaproveitado** · 576 valores de campo
+(64×9) · 76 itens · **64 de 64 com `stage_entered_at` = Dt Orçamento** · 0 erros.
+
+Cenários testados além do primeiro import:
+- Reimportar o mesmo arquivo → **0 novos, 0 gravações** (idempotente ✅)
+- Dia seguinte com 10 ausentes → 10 marcados aprovados + mudança de valor detectada
+- 20 dias depois → 54 encerrados
+- Relatório de outubro → **0 aprovados** (a inferência não toca orçamento fora
+  do período do export — guarda importante)
+
+O contato reaproveitado **não foi sorte**: "Sérgio O Fernandes", já no banco, é
+o paciente "Sergio De Oliveira Fernandes" do arquivo. A busca por variantes de
+telefone (feita ontem) reconheceu e **não duplicou**.
+
+**🔴 DOIS DEFEITOS QUE SÓ A SIMULAÇÃO REVELOU — teriam quebrado a régua:**
+1. **SheetJS errava a data.** Convertia `"2026-09-01"` em `Date` e formatava no
+   fuso local: em Itabuna virava **31/08**. **Todo orçamento perderia um dia** e
+   a régua dispararia no momento errado. Corrigido: o parser passou a ler o
+   **texto cru** da tabela HTML.
+2. **O relatório exporta telefone SEM o "55".** `canonicalPhone` devolvia
+   `+73988827126`, que não é telefone válido. Entrou `telefoneDoRelatorio()`,
+   que repõe o 55 **antes** de aplicar a regra do nono dígito.
+
+**Terceiro achado — não era encoding:** "ConceiÇÃo", "JoÃo", "VictÓria" têm
+bytes **UTF-8 válidos**. É `strtolower()` byte a byte na origem (WebDental).
+Corrigido com regra conservadora — "SÃO BOAVENTURA" passa intacto.
+
+**O QUE FOI CRIADO:**
+- Funil **"Odonto — Orçamentos"** (`kind='comercial'`, `is_default`) com as 5
+  etapas exatas (20/45/70/100-won/0-lost)
+- **"Vendas" e "Pós-venda" DESATIVADOS, não excluídos.** `pipelines` não tinha
+  como desativar — só renomear ou excluir. Foi criado `pipelines.is_active`,
+  os 4 seletores da UI filtrados, e há "Desativados / Reativar" em Gerenciar
+  funis. Os 10 stages continuam no banco.
+- **9 campos** do orçamento com **`key` estável** — foi criado
+  `custom_fields.key` porque a tabela só tinha `label`, texto livre que o
+  usuário pode renomear; a importação não podia depender disso.
+- **4 procedimentos** (Clínica Geral, Prótese, Ortodontia, Implantodontia).
+  `products_type_chk` virou taxonomia odonto e **`products_quantity_chk` foi
+  reescrito junto** — sem isso nenhum procedimento aceitaria quantidade
+  (a armadilha já estava prevista no `ODONTO.md`).
+
+**🔴 RELÓGIO DE ESTAGNAÇÃO — o motor da régua, finalmente existe.**
+`deals.stage_entered_at` + trigger BEFORE UPDATE + gravação de
+`crm_activities(type='stage_change')`. **Quatro asserções, todas passaram:**
+INSERT com data informada respeita · UPDATE de valor **não** move o relógio ·
+troca de etapa zera · **troca de etapa informando a data respeita a informada**.
+Essa última é o que faz a importação preservar a Dt Orçamento. Base ficou
+limpa (0 deals) após o teste. **Fecha as pendências #2 e #5.**
+
+**RÉGUA:** 3 regras `stage_stalled` (24h/72h/168h) criadas **`is_active=false`,
+`template_id=NULL`**, coerente com o escopo (disparo fora por ora). A tela mostra
+o gatilho e **bloqueia ligar**, explicando o que falta. `check-follow-ups` **não
+foi tocada** — só lê regras ativas, então não há risco.
+
+**DECISÃO TOMADA PELO SUBAGENTE (reversível em uma linha, se o Danilo discordar):**
+o encerramento em D+7 só pega orçamento que **nunca saiu** de "Orçamento
+apresentado". Se alguém já moveu, o CRM **apenas reporta** — não desfaz trabalho
+humano por prazo.
+
+**PENDÊNCIAS / DECISÕES DO DANILO:**
+- **A inferência de aprovação é inferência.** Sumir do relatório significa
+  aprovado **ou cancelado**. Cada oportunidade movida ganha nota dizendo isso e
+  a tela permite desmarcar. **Falta definir quem confere antes de contar como
+  receita** — número que vira relatório para franqueadora/contador precisa disso.
+- Faltam os **3 textos vinculados às regras** (os 6 templates já estão aprovados
+  e registrados; falta submeter e vincular) e **quem exporta o relatório todo
+  dia** — sem isso a régua e a medição de conversão param.
+
+- **Banco:** 4 migrações — `20260907120000_odonto_crm_estrutura`,
+  `20260907120100_followup_trigger_stage_stalled`, `20260907120200_odonto_crm_seed`,
+  `20260907120300_deals_external_ref_index_full`.
+- **Próximo:** Danilo testa a importação pela tela com o arquivo real.
+
+### 2026-09-06 · Claude Code (subagente) · Um orçamento por tratamento
+
+- **Pedido:** o dono determinou que **"cada tratamento deve ser um orçamento
+  separado"**. A importação agrupava por paciente + data e gerava **64**
+  oportunidades com os tratamentos como itens dentro. Passa a gerar **81** —
+  uma por LINHA do relatório. Sem `git push`, sem deploy na Vercel, sem tocar em
+  segredo; migração só se fosse indispensável. Régua e disparo continuam fora de
+  escopo, com as regras `stage_stalled` desativadas.
+
+**JUSTIFICATIVA DE NEGÓCIO (registrada também no código).** Cada tratamento tem
+o seu próprio ciclo de decisão: o paciente aprova a limpeza e recusa a prótese.
+Agrupado por paciente, isso ficava invisível — o card inteiro parecia "não
+aprovado" mesmo com metade do dinheiro já dentro. Separado, dá para medir
+**conversão por especialidade**, que é o indicador que a franqueadora cobra
+(ela publica meta própria para orto, implante, prótese e clínica geral —
+ODONTO.md §2).
+
+**1. A UNIDADE MUDOU: 1 LINHA = 1 ORÇAMENTO.** `parseWebdental` deixou de
+agrupar. A interface `Orcamento` perdeu `itens[]`, `tratamentos` (lista
+concatenada) e `valorTotal`, e ganhou `tratamento`, `especialidade`,
+`productType`, `valor`, `ocorrencia`, `totalOcorrencias` e `linha`.
+`OrcamentoItem` deixou de existir.
+
+**2. A CHAVE DE IDENTIDADE — e a armadilha que ela criava.**
+`deals.external_ref` passou de `webdental:<paciente>:<data>` (3 partes) para
+`webdental:<paciente>:<data>:<tratamento>:<ocorrência>:<centavos>` (6 partes).
+
+> **A ocorrência NÃO é a ordem do arquivo.** Se fosse, um relatório que
+> exportasse as duas linhas do mesmo tratamento em ordem trocada geraria chaves
+> diferentes para os mesmos dois orçamentos: dois cards novos de um lado e dois
+> "aprovados por ausência" do outro — receita inventada. Por isso a ocorrência é
+> atribuída numa segunda passada, ordenando o grupo **pelo valor** (e, no
+> empate, pela linha). A chave passa a depender só do conteúdo.
+
+> **A segunda armadilha: só o VALOR mudar.** Com o valor dentro da chave, uma
+> correção de preço no WebDental faria o orçamento antigo "sumir do relatório"
+> (= aprovado) e nascer um card novo ao lado. O casamento agora tem **duas
+> tentativas**: primeiro a chave inteira; se falhar, a `chaveBase` (a mesma
+> chave **sem** o valor). Casou pela base = é o mesmo orçamento com preço novo:
+> vira ATUALIZAÇÃO e o `external_ref` é regravado. Testado (cenário 4).
+
+**3. `deal_products` — DECIDI MANTER, com um item por oportunidade.**
+Parece redundante agora que o tratamento também está no campo personalizado,
+mas o campo é **texto livre** (`custom_field_values.value`): não tem chave
+estrangeira, não agrupa e não sobrevive a uma renomeação de rótulo.
+`deal_products → products` é o que liga o orçamento à **taxonomia odonto**
+(`products.product_type`, criada na migração de 06/09) — é dali que sai a
+conversão por especialidade, o subtítulo do card no funil
+(`FunilPage.tsx` usa `products[0].name`, não o título) e os painéis de
+`/vendas`, que já leem essa tabela. Custo: uma linha por orçamento. Tirar
+exigiria migração e quebraria relatório. **Redundância barata, alternativa cara.**
+A gambiarra de "duas próteses iguais viram quantidade 2" morreu junto: agora
+são dois cards, `quantity = 1` em todos os 81.
+
+**4. TÍTULO DO CARD.** De `"Orçamento Maria Julia — Clínica Geral — 01/09/2026"`
+para `"Maria Julia — Clínica Geral · 01/09/2026"`. A palavra "Orçamento" saiu:
+todo card do funil é um orçamento, repeti-la 81 vezes só consumia largura.
+Quando o mesmo paciente tem o mesmo tratamento duas vezes no mesmo dia entra o
+ordinal — `"Givaldo De Jesus Santos — Prótese (2º) · 05/09/2026"` — senão os
+dois cards ficariam idênticos na tela e ninguém saberia qual já foi tratado.
+
+**5. CAMPOS.** `tratamento` deixou de ser lista concatenada e passou a ser o
+tratamento **deste** card (com o ordinal quando repetido); `especialidade` é a
+dele, não mais a "do item de maior valor". Os 9 campos continuam os mesmos —
+**nenhuma mudança de banco**.
+
+**6. 🔴 A INFERÊNCIA DE APROVAÇÃO PASSOU A SER POR TRATAMENTO** — o ponto mais
+delicado, e o que exigiu mais cuidado. A ausência deixou de ser decidida por
+comparação de chaves e passou a ser decidida por **conjunto de deals casados**
+(`idsNoArquivo`), porque um orçamento pode ter sido reconhecido pela chave sem
+valor e ainda estar gravado com a chave antiga. Duas guardas novas:
+- **Deal do modelo ANTIGO (3 partes) nunca é dado como aprovado.** Ele jamais
+  casaria com uma linha do arquivo novo; sem esta checagem, virar "aprovado por
+  ausência" seria inventar receita. Fica de fora e é reportado no resumo.
+  (Hoje é teórico — a base tem 0 deals — mas é o tipo de bomba que só explode
+  depois.)
+- A data do orçamento deixou de ser lida com `external_ref.split(':').pop()`
+  (que na chave nova devolveria o **valor em centavos**) e passou a sair do
+  campo `dt_orcamento`, com `dataDoRef()` como plano B.
+
+**7. TELA DE IMPORTAÇÃO.** O resumo agora diz **"81 orçamentos (1 por
+tratamento) de 64 pacientes"** — as duas contas lado a lado, porque 64 é o
+número que o dono conhece do cabeçalho do relatório. Entrou um bloco
+**"Por especialidade"** (quantidade e valor por procedimento), a tabela de novos
+ganhou coluna **Tratamento**, e o texto da caixa de aprovação explica que a
+leitura é por tratamento: *"o paciente pode ter a limpeza aprovada e a prótese
+ainda parada — só o card da limpeza se move"*.
+
+**8. SIMULAÇÃO COM O ARQUIVO REAL — 6 cenários, 27 conferências, todas passaram.**
+Rodada fora do navegador, com cliente Supabase de mentira alimentado com o
+**estado real** do banco (lido por SELECT; nada foi escrito lá).
+
+| Conferência | Resultado |
+|---|---|
+| Oportunidades | **81** (era 64) |
+| **Valor total** | **R$ 68.436,03 exato** — bate com o cabeçalho do relatório |
+| Telefones distintos | **59** (58 contatos novos + 1 reaproveitado) |
+| `stage_entered_at` = Dt Orçamento | **81 de 81** |
+| `deal_products` | 81 linhas, `quantity = 1` em todas, soma R$ 68.436,03 |
+| Campos personalizados | 729 (81 × 9) |
+| Chaves de identidade | 81 únicas · 0 erros |
+| Reimportar o mesmo arquivo | **0 novos · 0 atualizados · 81 sem mudança · 0 gravações** |
+| Ausência por tratamento | 1 tratamento de 4 do Givaldo sumiu → **só ele virou aprovado**, os outros 3 seguiram abertos; 1 `won` no banco inteiro |
+| Só o valor mudou | **0 aprovados · 0 novos · 1 atualizado** ("valor 170.8 → 270.8") |
+| 20 dias depois | 81 encerrados (todos parados na 1ª etapa) |
+| Relatório de outro mês | **0 aprovados** (fora do período do export) |
+
+Distribuição por especialidade nas 81 linhas: **Clínica Geral 65 (R$ 45.898,48)
+· Prótese 13 (R$ 18.489,14) · Ortodontia 2 (R$ 585,00) · Implantodontia 1
+(R$ 3.463,41)**. É esta leitura que o modelo agrupado escondia.
+
+**ACHADO NOVO — o modelo antigo somava dinheiro que não devia.** Não era só o
+Givaldo com duas próteses idênticas: o arquivo tem **5 grupos (10 linhas)** de
+tratamento repetido no mesmo dia, e em **4 deles os valores são diferentes**
+(ex.: Adilson Assunção Sales, Clínica Geral de R$ 32,00 **e** de R$ 332,14 no
+mesmo 02/09). O modelo antigo fundia os dois numa linha só de `deal_products`
+com quantidade 2 e valor somado — o total do deal fechava, mas o **valor por
+procedimento ficava errado**, e qualquer leitura de ticket médio por
+especialidade sairia distorcida. Com um orçamento por tratamento isso deixa de
+existir.
+
+- **Banco:** **nenhuma migração.** Nada foi necessário: `deals.external_ref` já
+  é TEXT com índice único cheio (a correção `...120300` de hoje), `deal_products`
+  e `custom_fields` não mudaram de forma. **Nenhuma escrita** no Supabase — só
+  SELECTs para montar a simulação. Conferido ao fim: **0 deals, 0 deal_products,
+  0 custom_field_values, 0 crm_activities, 3 contatos (os originais), 4
+  procedimentos, 0 regras de follow-up ativas.**
+
+- **Arquivos:** `src/lib/webdental.ts` · `src/lib/odontoImport.ts` ·
+  `src/components/funil/ImportOrcamentosDialog.tsx` · `MEMORIA.md`.
+
+- **Validação:** `npx tsc -b`, `npx tsc -p tsconfig.api.json --noEmit`,
+  `npx vite build` e `node validate-sql.mjs` (100 arquivos, 1126 statements)
+  passam sem erro.
+
+- **Não feito / limites desta entrega:**
+  - **Nenhum `git push`, nenhum deploy na Vercel** — a pendência **#46**
+    continua valendo e agora cobre também esta mudança.
+  - **Nenhuma Edge Function tocada ou publicada.** `check-follow-ups` segue
+    intacta (pendência #44).
+  - **Régua e disparo continuam fora de escopo.** As 3 regras `stage_stalled`
+    seguem `is_active = false` — conferido no banco.
+  - **Nenhum segredo lido, pedido ou gravado.**
+  - **Nenhuma pendência fechada por mim** (regra 4).
+  - O rótulo do campo no banco ainda é "Tratamento(s)" — pendência **#50**,
+    cosmética, não mexi por ser escrita em dado de configuração fora do pedido.
+
+- **⚠️ REGISTRO PARA O FUTURO — pendência #49, a conta que esta mudança abre.**
+  Com um orçamento por tratamento, **a régua passaria a mandar uma mensagem por
+  tratamento**: o paciente com 3 tratamentos parados receberia 3 mensagens no
+  mesmo dia. Isso irrita, gera bloqueio e queima o número — e o precedente já
+  existe (o número do CDT foi restringido pela Meta em 07/05/2026 por volume).
+  **A solução, quando o disparo entrar em escopo:** agrupar o envio **por
+  contato** — uma mensagem por pessoa, citando os tratamentos, marcando o envio
+  em todos os deals daquele contato. O funil continua separado; só o envio
+  respeita a pessoa. **Não implementei nada disso** — disparo está fora de
+  escopo por decisão do dono em 06/09.
+
+- **Próximo:** (1) Danilo autoriza o deploy na Vercel (#46) e importa o
+  relatório pela tela, conferindo **81** cards e R$ 68.436,03 no funil;
+  (2) decidir quem exporta o relatório todo dia (#48); (3) quando o disparo
+  voltar ao escopo, começar pela **#49** (agrupamento por contato) — antes do
+  ramo `stage_stalled` do `check-follow-ups` (#44), porque a #49 é o que impede
+  a régua de queimar o número.
