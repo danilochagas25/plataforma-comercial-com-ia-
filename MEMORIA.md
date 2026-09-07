@@ -3634,3 +3634,107 @@ está marcado com comentário no arquivo. **Pendência registrada abaixo.**
   passar inteiro; (3) o dono olhar Conversas e Funil no navegador e aprovar
   antes de liberar a Etapa 3, que é onde está o volume (Ajustes sozinho tem 9
   seções).
+
+### 2026-09-07 · Claude Code · Template D+1 submetido à Meta
+
+**SUBMETIDO E EM ANÁLISE:**
+- `odonto_orcamento_d1` · **Portuguese (BR)** · **Marketing → Padrão**
+- ID do modelo na Meta: `1417008766950524`
+- Corpo com 346 caracteres, variável `{{1}}` (tipo **Número**), amostra "Maria"
+- **3 botões de resposta rápida** confirmados no modelo publicado:
+  `Quero saber as condições` · `Tenho uma dúvida` · `Quero remarcar`
+- Verificado por leitura da página de detalhes: texto contém "12x" e "24x"
+
+**NÃO SUBMETIDOS — `odonto_orcamento_d3` e `odonto_orcamento_d7`.**
+Entregues ao Danilo como material pronto para copiar e colar. Motivo: o
+**seletor de idioma** do Gerenciador do WhatsApp não respondeu à automação —
+sete abordagens tentadas (clique por ref, clique por coordenada calculada via
+`getBoundingClientRect`, digitação com filtro, teclado Down+Enter, `form_input`,
+JS com `_valueTracker` e clique programático na opção). O dropdown não abre de
+forma consistente ou fecha antes do clique. Ficou um **rascunho pela metade**
+na tela (`odonto_orcamento_d3` com idioma ainda em inglês).
+
+**ARMADILHAS DO PAINEL DA META (registrar — custaram tempo real):**
+1. **`Page.captureScreenshot` trava** ("renderer may be frozen") nas telas de
+   criação de modelo. Contornar com `find`, `read_page` e `get_page_text` —
+   confirma o que o `CLAUDE.md` pessoal do Danilo já registrava sobre as
+   páginas do Meta for Developers.
+2. **Campos React ignoram `type` e `form_input` simples.** O que funciona é o
+   setter nativo + invalidar o `_valueTracker`:
+   `Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set` e
+   `el._valueTracker.setValue('')` antes de disparar `input`/`change`.
+3. **A amostra da variável é o campo que trava o envio** e o formulário **não
+   avisa com clareza** que ela falta. Se "Enviar para análise" não reage, é
+   quase sempre isso.
+4. **Botão de resposta rápida = tipo "Personalizado"** no menu de tipos (não há
+   opção chamada "resposta rápida").
+5. O seletor de idioma é um DIV customizado — `form_input` recusa
+   ("Element type DIV is not a supported form input").
+
+- **Banco:** nenhuma migração.
+- **Próximo:** Danilo submete D+3 e D+7; depois vincular os 3 às regras
+  `stage_stalled` (que seguem **desativadas**, conforme o escopo vigente).
+
+### 2026-09-07 · Claude Code · IDENTIDADE AMORSAÚDE PUBLICADA (`d940f21`) — etapas 1 e 2
+
+**Publicado** commit `d940f21`, 79 arquivos. Vercel republicando.
+**Frente: DESIGN.** Nenhuma migração, nenhuma Edge Function, nenhum `SELECT`.
+
+**PALETA FINAL — 5 valores fechados por CONTRASTE**, medidos por script sobre as
+4 superfícies do app. O subagente corrigiu o que este agente havia passado:
+
+| Papel | Proposto | Ficou | Motivo |
+|---|---|---|---|
+| Marca em texto/botão | `#0E8DA0` | **`#0A7787`** | era **3,94:1** no branco → reprova AA; agora 5,25 |
+| Texto apagado | `#7C9498` | **`#5C7378`** | era **3,21:1** em rótulo de 10–12px |
+| Texto secundário | `#5C7378` | **`#4E666B`** | manter 3 níveis de hierarquia |
+| Vermelho em texto | `#D53E36` | **`#B02D26`** | some sobre `#FDEBEA`; segue como vermelho de **preenchimento** |
+| Sucesso / alerta | — | `#0C6B4A` / `#9A4A07` | AA sobre os fundos tingidos |
+
+**Menor par de texto do sistema: 4,48:1.** Regra escrita no topo de
+`globals.css`: **`#61C1D0` (2,09:1) é preenchimento, ícone e borda — NUNCA
+texto.** `.glass-card` manteve o nome e virou superfície branca com borda e
+sombra (sem `backdrop-filter`); entraram `.glass-card-static` e `.surface-float`.
+Tipografia **Figtree** (Arboria é paga).
+
+**Tokens acrescentados por este agente** (a tela de importação precisava deles):
+`--color-danger-bg/-border`, `--color-accent-bg/-border`,
+`--color-success-border`, `--color-warning-border/-text`.
+
+**ETAPA 2 — Conversas e Funil** na densidade do desenho aprovado. Conversas
+ganhou selo "Janela 24h" e balão recebido branco; funil ganhou contador em
+pílula e chip **"Parado N dias"**. Painel lateral mostra **dias parado, valor e
+o orçamento**.
+
+**Vocabulário:** "Oportunidades" → **Orçamentos**, "Pessoas" → **Pacientes** —
+só rótulo visível; rota, tabela, tipo e variável **intactos**.
+
+**TELA DE IMPORTAÇÃO (frente de Configuração):** o Danilo autorizou
+explicitamente trocar **só a cor**, sem tocar em funcionalidade. Feito:
+**9 linhas, nenhuma de lógica**, todas de cor cravada → token.
+
+**INCIDENTE EVITADO — vale registrar:** este agente ia corrigir 14 erros de tipo
+em `ImportOrcamentosDialog.tsx` e `odontoImport.ts` a pedido do Danilo. Antes de
+editar, checou o `stat` dos arquivos: **modificados 39 segundos antes**. Era a
+outra frente terminando a obra dos dois relatórios (aprovados × não aprovados).
+Os erros sumiram sozinhos. **Editar teria sobrescrito o trabalho dela no exato
+momento em que salvava.** Lição: antes de tocar em arquivo de outra frente,
+olhar a hora de modificação.
+
+**`design/crm-odonto-identidade.html` NÃO é versionado** (alguns MB, fontes
+embutidas em base64) — entrou no `.gitignore` como `design/*-*.html`. As fontes
+do canvas ficam: `design/*.dc.html` e `design/canvas.json`.
+Canvas publicado: artifact `f75f9006-7e91-4dc3-bf10-c6654b8c3784`.
+
+**PENDÊNCIAS:**
+1. **ETAPA 3** (não autorizada): Painel (gráficos Recharts ainda com série do
+   tema escuro), Pacientes, Disparos, **Ajustes (9 seções — maior volume)**,
+   Fluxos, Atendente IA, Clientes, Contas, Login, `/setup`, Sidebar, Header,
+   MobileNav. **Cor trocada, acabamento não.**
+2. **`CLAUDE.md` ainda diz "dark mode only"** — enquanto estiver escrito, outro
+   agente pode desfazer isto achando que corrige. Não editado por ser documento
+   comum às três frentes: **decisão do Danilo quem corrige.**
+3. Tabela de preço e dentista no painel da conversa — vivem em
+   `custom_field_values`; exigiria consulta nova (território de Configuração).
+4. Chip "Parado N dias" na **lista** de conversas — o tipo
+   `ConversationWithContact` não traz dado de orçamento.

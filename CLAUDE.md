@@ -477,94 +477,81 @@ supabase/functions/
 
 ---
 
-## Design System: Dark Mode Glassmorphism (OBRIGATÓRIO)
+## Design System: Tema Claro — Identidade AmorSaúde (OBRIGATÓRIO)
 
-A plataforma é **dark mode only**. Não implementar light mode. Não criar
+> **Esta seção substitui o "Dark Mode Glassmorphism" do template do curso.**
+> A regra antiga dizia *"a plataforma é dark mode only, não implementar light
+> mode, não criar toggle de tema"*. Isso **não vale mais**: o dono decidiu em
+> **07/09/2026** que o CRM adota o tema **claro**, com a identidade da rede
+> AmorSaúde. Aplicado no commit `d940f21`.
+> **Não reverta para o tema escuro achando que corrige um erro.**
+
+A plataforma é **tema claro apenas**. Não implementar dark mode. Não criar
 toggle de tema.
 
-### Tokens de cor
+### As cores da marca
 
-| Token                  | Valor                                        |
-|------------------------|----------------------------------------------|
-| `--bg-primary`         | `#0A0A0F`                                    |
-| `--bg-card`            | `rgba(15, 18, 35, 0.6)`                      |
-| `--border-card`        | `rgba(59, 130, 246, 0.15)`                   |
-| `--accent-primary`     | `#3B82F6`                                    |
-| `--accent-secondary`   | `#60A5FA`                                    |
-| `--gradient-primary`   | `linear-gradient(135deg, #1E3A8A, #3B82F6)`  |
-| `--text-primary`       | `#F8FAFC`                                    |
-| `--text-secondary`     | `#94A3B8`                                    |
-| `--text-label`         | `#CBD5E1`                                    |
-| `--color-success`      | `#10B981`                                    |
-| `--color-error`        | `#EF4444`                                    |
+Extraídas do logotipo vetorial oficial da rede
+(`https://www.amorsaude.com/images/logo_as.svg`). O logo contém **exatamente
+duas cores** — tudo o mais no sistema é derivado delas:
 
-### Background glow (no `body`)
+| Cor da marca | Hex |
+|---|---|
+| Turquesa | `#61C1D0` |
+| Vermelho | `#D53E36` |
 
-```css
-body {
-  background-color: #0A0A0F;
-  background-image:
-    radial-gradient(ellipse at 20% 0%, rgba(59, 130, 246, 0.06), transparent 50%),
-    radial-gradient(ellipse at 80% 100%, rgba(37, 99, 235, 0.04), transparent 50%);
-  min-height: 100vh;
-}
-```
+**Tipografia da marca:** `Arboria` (Adobe Fonts, licença paga — a clínica não
+tem). Usamos **`Figtree`** (Google Fonts), de desenho próximo.
 
-### Glass card padrão
+### ⚠️ A regra de contraste que não se negocia
 
-```css
-.glass-card {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.02));
-  backdrop-filter: blur(40px);
-  -webkit-backdrop-filter: blur(40px);
-  border: 1px solid rgba(59, 130, 246, 0.25);
-  border-radius: 16px;
-  box-shadow:
-    0 0 20px rgba(59, 130, 246, 0.06),
-    inset 0 1px 0 rgba(59, 130, 246, 0.1);
-}
+**`#61C1D0` tem 2,09:1 sobre branco. Não serve para texto.** Use-o em
+preenchimento, ícone grande e borda. Para texto, link e botão use
+`--color-accent-primary` (`#0A7787`, 5,25:1).
 
-.glass-card:hover {
-  border-color: rgba(59, 130, 246, 0.45);
-  box-shadow:
-    0 0 30px rgba(59, 130, 246, 0.12),
-    0 0 60px rgba(59, 130, 246, 0.04),
-    inset 0 1px 0 rgba(59, 130, 246, 0.2);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-```
+Cinco valores do sistema foram fechados por medição de contraste, não por
+gosto. Todo par de texto passa em **WCAG AA (4,5:1)**; o pior do sistema está
+em **4,48:1**. Ao criar cor nova, **meça** — é uma tela que a recepção encara
+oito horas por dia.
 
-### Tipografia
+### Tokens
 
-```css
-* { font-family: 'Inter', sans-serif; }
+A paleta vive em `src/styles/globals.css`, documentada no topo do arquivo.
+**Consuma sempre por token** (`var(--color-...)`), nunca escreva cor à mão:
+foi exatamente isso que espalhou 420 ocorrências do dourado antigo por 48
+arquivos e tornou a migração cara.
 
-.text-display { font-weight: 700; }
-.text-stat    { font-size: 2.5rem; font-weight: 800; }
+Principais: `--color-bg-primary` · `--color-bg-surface` · `--color-bg-subtle`
+· `--color-text-primary` · `--color-text-secondary` · `--color-text-muted` ·
+`--color-accent-primary` (texto/botão) · `--color-accent-fill` (o turquesa) ·
+`--color-accent-bg` / `-border` · `--color-border-card` / `-divider` ·
+`--color-success` / `-bg` / `-border` · `--color-warning` / `-bg` / `-border`
+/ `-text` · `--color-error` / `-bg` · `--color-danger-bg` / `-border`.
 
-.text-label {
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-size: 0.7rem;
-  color: var(--text-secondary);
-}
+`.glass-card` **manteve o nome** (para não quebrar as telas) mas hoje é
+superfície branca com borda suave e sombra discreta — sem `backdrop-filter`.
+Companheiras: `.glass-card-static`, `.surface-float`.
 
-.text-body { font-weight: 400; font-size: 0.875rem; }
-```
+### Vocabulário da clínica
 
-### Bordas e separadores
+Nos textos que o usuário lê: **Orçamentos** (não "Oportunidades") e
+**Pacientes** (não "Pessoas"). **Só o rótulo visível** — rota, tabela, tipo e
+variável mantêm os nomes originais. E quem paga preço com desconto é
+**FILIADO** do Cartão de TODOS, **nunca "sócio"**.
 
-- Borders padrão: `rgba(59, 130, 246, 0.12)`.
-- Dividers: `rgba(59, 130, 246, 0.08)`.
-- Sidebar `border-right`: `1px solid rgba(59, 130, 246, 0.1)`.
-- Header `border-bottom`: `1px solid rgba(59, 130, 246, 0.08)`.
+### Estado da migração visual
 
-Componentes devem usar `var(--accent-primary)` / `var(--accent-secondary)` em
-vez de hardcodear `#3B82F6` / `#60A5FA`. Os hex listados acima são apenas o
-fallback default.
+**Prontas** (etapas 1 e 2): sistema de cores, **Conversas** e
+**Orçamentos/Funil**.
 
----
+**Cor trocada, acabamento pendente** (etapa 3, não autorizada): Painel (os
+gráficos Recharts ainda usam série do tema escuro), Pacientes, Disparos,
+Ajustes (9 seções), Fluxos, Atendente IA, Clientes, Contas, Login, `/setup`,
+Sidebar, Header e MobileNav.
+
+### Ícones
+
+SVG traçado, nunca emoji. 16/20/24px, estilo consistente.
 
 ## Notas de migração e variáveis não-triviais
 
