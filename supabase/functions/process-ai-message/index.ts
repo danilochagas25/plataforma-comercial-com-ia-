@@ -503,10 +503,12 @@ Deno.serve(async (req) => {
   }
 
   // 3. Credentials (da org da conversa).
+  // A openai_api_key deixou de ser obrigatória: ela só é necessária para o que
+  // de fato depende da OpenAI (embeddings do RAG e descrição de imagem). Com
+  // provider claude/gemini e sem base de conhecimento, a instalação roda com
+  // uma chave só. Sem ela, imagem e RAG são pulados — a conversa segue para o
+  // humano, que é o comportamento desejado.
   const creds = await loadAppCredentials(orgId);
-  if (!creds.openai_api_key) {
-    return jsonResponse({ ok: false, error: 'Credencial openai_api_key nao configurada. Configure na tela do agente de IA.' }, { status: 400 });
-  }
   const provider: LLMProvider | null = creds.llm_provider;
   const llmKey = creds.llm_api_key;
   if (!provider || !llmKey) {
@@ -518,7 +520,7 @@ Deno.serve(async (req) => {
   // persistida no content; áudio já vem transcrito pelo transcribe-audio (que
   // re-dispara este pipeline). Sem conteúdo textual ainda → aguarda/pula.
   if (message.content_type !== 'text' && !message.content && message.media_url) {
-    if (message.content_type === 'image') {
+    if (message.content_type === 'image' && creds.openai_api_key) {
       try {
         const desc = await describeImage(creds.openai_api_key, message.media_url);
         message.content = desc;
@@ -528,30 +530,50 @@ Deno.serve(async (req) => {
       }
     }
   }
+  // Sem chave OpenAI não haverá transcrição (Whisper) nem descrição de imagem:
+  // em vez de silêncio, o agente recebe um marcador do que chegou e trata pelo
+  // próprio prompt (que manda confirmar o recebimento e passar para o humano).
+  // O marcador vive só em memória — não é gravado na mensagem. Com chave, este
+  // caminho não é usado: transcribe-audio re-dispara o pipeline com o texto
+  // real, e responder aqui geraria resposta duplicada.
+  const MEDIA_MARKER: Record<string, string> = {
+    audio: '[o paciente enviou um áudio]',
+    image: '[o paciente enviou uma foto]',
+    video: '[o paciente enviou um vídeo]',
+    document: '[o paciente enviou um documento]',
+  };
+  if (!message.content && !creds.openai_api_key && message.content_type in MEDIA_MARKER) {
+    message.content = MEDIA_MARKER[message.content_type];
+  }
   if (!message.content) {
     return jsonResponse({ ok: true, skipped: `sem conteúdo textual (content_type=${message.content_type})` });
   }
 
-  // 4. Embed the inbound text.
-  let queryEmbedding: number[];
-  try {
-    queryEmbedding = await embed(creds.openai_api_key, message.content);
-  } catch (err) {
-    return jsonResponse(
-      { ok: false, error: `embed: ${err instanceof Error ? err.message : String(err)}` },
-      { status: 502 },
-    );
-  }
+  // 4-5. RAG: embed do texto + top-K por similaridade. Só roda quando há
+  //      chave OpenAI (os embeddings são sempre OpenAI) e a base tem algum
+  //      chunk. Base vazia é o caso desta instalação: o agente responde sem
+  //      contexto recuperado, e uma chamada de embedding por mensagem é
+  //      poupada. Falha aqui não derruba a resposta — degrada para sem RAG.
+  let ragChunks: string[] = [];
+  const { count: chunkCount } = await admin
+    .from('knowledge_chunks')
+    .select('id', { count: 'exact', head: true })
+    .eq('org_id', orgId);
 
-  // 5. Top-K RAG chunks (cosine similarity). Empty array is fine — the
-  //    agent still answers, just without retrieved context.
-  const { data: ragRows } = await admin.rpc('knowledge_search', {
-    p_query_embedding: queryEmbedding,
-    p_top_k: TOP_K,
-    p_org_id: orgId,
-  });
-  const ragChunks = ((ragRows ?? []) as Array<{ content: string; similarity: number }>)
-    .map((r) => r.content);
+  if (creds.openai_api_key && (chunkCount ?? 0) > 0) {
+    try {
+      const queryEmbedding = await embed(creds.openai_api_key, message.content);
+      const { data: ragRows } = await admin.rpc('knowledge_search', {
+        p_query_embedding: queryEmbedding,
+        p_top_k: TOP_K,
+        p_org_id: orgId,
+      });
+      ragChunks = ((ragRows ?? []) as Array<{ content: string; similarity: number }>)
+        .map((r) => r.content);
+    } catch (err) {
+      console.error(JSON.stringify({ event: 'rag_error', message_id: message.id, error: String(err) }));
+    }
+  }
 
   // 6. History — last N messages in this conversation, oldest first.
   const { data: historyRows } = await admin

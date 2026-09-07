@@ -14,8 +14,8 @@ export interface LLMCallInput {
   json?: boolean;
   maxTokens?: number;
   temperature?: number;
-  // Modelo escolhido pelo usuário (atualmente só usado no provider OpenAI;
-  // claude/gemini mantêm o default da casa).
+  // Modelo escolhido pelo usuário. Respeitado por OpenAI e Claude; gemini
+  // ainda mantém o default da casa.
   model?: string;
 }
 
@@ -63,8 +63,10 @@ async function callOpenAI(input: LLMCallInput): Promise<LLMCallResult> {
 }
 
 async function callClaude(input: LLMCallInput): Promise<LLMCallResult> {
-  // Defaults to the current best all-rounder per Anthropic's lineup.
-  const model = 'claude-sonnet-4-6';
+  // O id do modelo vem da tela do agente. O default é o all-rounder atual da
+  // Anthropic. Ids válidos hoje: claude-opus-5, claude-sonnet-5,
+  // claude-haiku-4-5-20251001. Id inválido devolve 404 da API.
+  const model = input.model?.trim() || 'claude-sonnet-5';
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {

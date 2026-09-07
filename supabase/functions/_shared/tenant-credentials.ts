@@ -12,6 +12,7 @@ export interface AppCredentials {
   llm_provider: 'openai' | 'claude' | 'gemini';
   llm_api_key: string | null;
   openai_api_key: string | null;
+  anthropic_api_key: string | null;
 }
 
 const VALID_PROVIDERS = new Set(['openai', 'claude', 'gemini']);
@@ -22,8 +23,8 @@ function nonEmpty(value: string | null | undefined): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
-// Default openai: o openai_api_key esta sempre presente (embeddings/Whisper),
-// entao 'openai' e o fallback seguro quando llm_provider nao foi gravado.
+// Default openai: e o provider historico desta app, entao e o fallback seguro
+// quando llm_provider nao foi gravado.
 function readProvider(value: string | null): AppCredentials['llm_provider'] {
   const raw = value?.trim();
   if (raw && VALID_PROVIDERS.has(raw)) {
@@ -40,13 +41,21 @@ export async function loadAppCredentials(orgId: string): Promise<AppCredentials>
     'llm_provider',
     'llm_api_key',
     'openai_api_key',
+    'anthropic_api_key',
   ]);
   const openaiKey = nonEmpty(values.openai_api_key);
+  const anthropicKey = nonEmpty(values.anthropic_api_key);
   const provider = readProvider(values.llm_provider);
   const llmKeyEnv = nonEmpty(values.llm_api_key);
-  // Allow a single openai_api_key to satisfy both embeddings and the LLM call
-  // when the operator picked OpenAI as the chat provider.
-  const llmKey = llmKeyEnv ?? (provider === 'openai' ? openaiKey : null);
+  // A chave do chat e a do provider ativo. O llm_api_key generico continua
+  // valendo como fallback (e e a unica opcao para gemini), mas a chave
+  // especifica tem prioridade: assim trocar de provider na tela nao exige
+  // redigitar a chave, e nao ha risco de mandar a chave de um vendor no
+  // header de outro.
+  const llmKey =
+    provider === 'claude' ? (anthropicKey ?? llmKeyEnv)
+    : provider === 'openai' ? (openaiKey ?? llmKeyEnv)
+    : llmKeyEnv;
 
   return {
     zernio_api_key: nonEmpty(values.zernio_api_key),
@@ -55,5 +64,6 @@ export async function loadAppCredentials(orgId: string): Promise<AppCredentials>
     llm_provider: provider,
     llm_api_key: llmKey,
     openai_api_key: openaiKey,
+    anthropic_api_key: anthropicKey,
   };
 }

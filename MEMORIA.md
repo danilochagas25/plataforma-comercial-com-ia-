@@ -4422,3 +4422,49 @@ nota **não se repete** na reimportação) · **D+30** (encerra só os 81 aberto
   os dois arquivos e conferir **81 · R$ 68.436,03** em "Orçamento apresentado" e
   **63 · R$ 34.703,31** em "Aprovado"; (4) decidir sobre o procedimento
   DENTALVIDAS órfão no catálogo.
+
+---
+
+## 07/09/2026 — Claude habilitado como provedor de resposta (código, ainda não publicado)
+
+Decisão do Danilo: usar **Claude** em vez de OpenAI no atendente. O suporte já
+existia em `_shared/llm.ts` (openai | claude | gemini), mas estava inalcançável.
+Cinco arquivos alterados:
+
+1. **`_shared/llm.ts`** — `callClaude` tinha o modelo **hardcoded como
+   `claude-sonnet-4-6`, id que não existe**: ligar o Claude devolveria 404 da
+   Anthropic. Agora respeita `input.model`, default `claude-sonnet-5`.
+2. **`process-ai-message/index.ts`** — removido o gate que exigia
+   `openai_api_key` **antes de tudo**, mesmo com provider Claude. A chave passou
+   a ser exigida só onde é de fato usada (visão e embeddings).
+3. **`process-ai-message`** — RAG agora só roda se houver chave OpenAI **e**
+   `knowledge_chunks` > 0. Antes chamava a API de embeddings **a cada
+   mensagem**, mesmo com a base vazia (que é o caso desta instalação).
+4. **`_shared/tenant-credentials.ts`** — nova credencial `anthropic_api_key`. A
+   chave do chat passou a ser escolhida **por provedor** (claude → anthropic,
+   openai → openai), com `llm_api_key` como fallback. Antes o `llm_api_key`
+   genérico tinha prioridade, o que permitia mandar a chave de um vendor no
+   header de outro ao trocar de provedor.
+5. **`AIAgentSettings.tsx`** — campo "Anthropic API Key" e seletor de modelo com
+   dois grupos (Claude / GPT). **O provedor não é campo separado: é derivado do
+   modelo** (`providerOf`), o que evita coluna nova e a combinação inválida
+   "provedor X com modelo de Y".
+
+**🔑 Buraco encontrado no caminho do áudio.** Para `content_type = audio`, o
+`meta-webhook` chama **só** `transcribe-audio` — que abortava com 400 sem a
+chave OpenAI e **nunca acionava a IA**. Paciente que mandasse áudio ficaria sem
+resposta nenhuma. Corrigido em `transcribe-audio`: sem chave, grava
+`[o paciente enviou um áudio]` e chama `reinvokeAiPipeline`. O prompt já tem a
+regra para isso ("confirme que recebeu e passe para a equipe").
+
+**Trade-off aceito:** sem chave OpenAI não há transcrição de áudio, leitura de
+imagem nem RAG. Não pesa **porque a IA passa tudo para o humano de todo jeito**.
+
+- **Tipos:** `tsc --noEmit` limpo. `deno check` acusa 4 erros **pré-existentes**
+  em `_shared/credentials.ts`, `channels.ts` e `supabase-admin.ts` — nenhum nos
+  arquivos alterados.
+- **Banco:** nenhuma migração.
+- **Falta publicar:** Edge Functions `process-ai-message` e `transcribe-audio`
+  (as duas que mudaram); e o frontend (Vercel) para o campo da chave aparecer.
+  `generate-template` e `process-knowledge` também importam os `_shared`
+  alterados — republicar por consistência.

@@ -153,10 +153,19 @@ Deno.serve(async (req) => {
       .eq('id', message.id);
   };
 
+  // Whisper é sempre OpenAI. Numa instalação que roda só com Claude não há
+  // essa chave — e isso é uma escolha, não um defeito. Em vez de deixar o
+  // áudio no vácuo (o webhook só chama esta função, não a da IA), marca o
+  // conteúdo e aciona o agente, que confirma o recebimento e passa para o
+  // atendimento humano.
   const creds = await loadAppCredentials(message.org_id);
   if (!creds.openai_api_key) {
-    await markFailure('credencial OpenAI ausente');
-    return jsonResponse({ ok: false, error: 'Credencial openai_api_key ausente. Configure na tela do agente de IA.' }, { status: 400 });
+    await admin
+      .from('messages')
+      .update({ content: '[o paciente enviou um áudio]' })
+      .eq('id', message.id);
+    reinvokeAiPipeline(message.id);
+    return jsonResponse({ ok: true, skipped: 'sem chave OpenAI: áudio encaminhado sem transcrição' });
   }
 
   try {

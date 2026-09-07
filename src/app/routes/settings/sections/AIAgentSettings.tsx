@@ -29,6 +29,19 @@ const GPT_MODELS = [
   'gpt-4o-mini',
 ];
 
+// Modelos Claude (Anthropic). O provedor não é um campo próprio: ele é
+// derivado do modelo escolhido (ver providerOf), o que evita uma coluna nova
+// no banco e impede a combinação inválida "provedor X com modelo de Y".
+const CLAUDE_MODELS = [
+  'claude-opus-5',
+  'claude-sonnet-5',
+  'claude-haiku-4-5-20251001',
+];
+
+function providerOf(model: string): 'openai' | 'claude' {
+  return model.startsWith('claude-') ? 'claude' : 'openai';
+}
+
 const TIMEZONES = [
   'America/Sao_Paulo',
   'America/Fortaleza',
@@ -67,11 +80,15 @@ export function AIAgentSettings() {
   const { userId } = useAppUser();
   const { session } = useAuth();
   const [rowId, setRowId] = useState<string | null>(null);
-  // Credenciais de LLM (em app_settings, salvas via /api/credentials).
-  // openai_api_key: usada em tudo (embeddings/RAG, Whisper, visão e respostas).
-  // A app é OpenAI-only — não há seletor de provider alternativo.
+  // Credenciais de LLM (em org_settings, salvas via /api/credentials).
+  // openai_api_key: embeddings (RAG), transcrição de áudio e leitura de imagem
+  // são sempre OpenAI. As respostas do agente podem vir da OpenAI ou do Claude,
+  // conforme o modelo escolhido — com Claude, a chave OpenAI é opcional e o que
+  // depende dela é simplesmente pulado.
   const [openaiKey, setOpenaiKey] = useState('');
   const [openaiKeyExists, setOpenaiKeyExists] = useState(false);
+  const [anthropicKey, setAnthropicKey] = useState('');
+  const [anthropicKeyExists, setAnthropicKeyExists] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_PROMPT);
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(1000);
@@ -85,14 +102,18 @@ export function AIAgentSettings() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Descobre se a OpenAI API Key já está configurada (para o placeholder).
+  // Descobre quais chaves já estão configuradas (para o placeholder). A API só
+  // devolve se existe — nunca o valor.
   useEffect(() => {
     if (!session) return;
-    fetch('/api/credentials?keys=openai_api_key', {
+    fetch('/api/credentials?keys=openai_api_key,anthropic_api_key', {
       headers: { Authorization: `Bearer ${session.access_token}` },
     })
       .then((r) => r.json())
-      .then((b) => setOpenaiKeyExists(Boolean(b?.openai_api_key?.exists)))
+      .then((b) => {
+        setOpenaiKeyExists(Boolean(b?.openai_api_key?.exists));
+        setAnthropicKeyExists(Boolean(b?.anthropic_api_key?.exists));
+      })
       .catch(() => {});
   }, [session]);
 
@@ -198,29 +219,38 @@ export function AIAgentSettings() {
       return;
     }
 
-    // OpenAI API Key: só grava se o usuário informou uma nova (campo vazio
-    // mantém a atual). Vai para public.app_settings via /api/credentials.
-    if (openaiKey.trim()) {
-      try {
-        const res = await fetch('/api/credentials', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session?.access_token ?? ''}`,
-          },
-          body: JSON.stringify({ credentials: { openai_api_key: openaiKey.trim() } }),
-        });
-        const body = await res.json();
-        if (!res.ok || !body.success) throw new Error(body.message ?? 'Falha ao salvar a chave.');
+    // Credenciais: chave só é gravada se o usuário digitou uma nova (campo
+    // vazio mantém a atual). O provedor acompanha o modelo escolhido — não é
+    // um campo separado, para não existir "provedor X com modelo de Y".
+    const credentials: Record<string, string> = { llm_provider: providerOf(model) };
+    if (openaiKey.trim()) credentials.openai_api_key = openaiKey.trim();
+    if (anthropicKey.trim()) credentials.anthropic_api_key = anthropicKey.trim();
+
+    try {
+      const res = await fetch('/api/credentials', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session?.access_token ?? ''}`,
+        },
+        body: JSON.stringify({ credentials }),
+      });
+      const body = await res.json();
+      if (!res.ok || !body.success) throw new Error(body.message ?? 'Falha ao salvar a chave.');
+      if (openaiKey.trim()) {
         setOpenaiKeyExists(true);
         setOpenaiKey('');
-      } catch (err) {
-        setSaving(false);
-        toast.error('Config salva, mas a OpenAI API Key falhou', {
-          description: err instanceof Error ? err.message : 'Erro interno',
-        });
-        return;
       }
+      if (anthropicKey.trim()) {
+        setAnthropicKeyExists(true);
+        setAnthropicKey('');
+      }
+    } catch (err) {
+      setSaving(false);
+      toast.error('Config salva, mas a chave de IA falhou', {
+        description: err instanceof Error ? err.message : 'Erro interno',
+      });
+      return;
     }
 
     setSaving(false);
@@ -410,8 +440,27 @@ export function AIAgentSettings() {
                   disabled={saving}
                 />
                 <p className="text-[11px] text-[var(--color-text-secondary)] opacity-70">
-                  Usada em tudo: embeddings (RAG), transcrição de áudio, leitura de imagem e as
-                  respostas do agente. Deixe em branco para manter a chave atual.
+                  Transcrição de áudio, leitura de imagem e busca na base de conhecimento são
+                  sempre da OpenAI. {providerOf(model) === 'claude'
+                    ? 'Como o modelo escolhido é Claude, esta chave é opcional — sem ela, áudio e foto vão direto para o atendimento humano.'
+                    : 'Com um modelo GPT, ela também gera as respostas do agente.'}{' '}
+                  Deixe em branco para manter a chave atual.
+                </p>
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="anthropic_api_key">Anthropic API Key (Claude)</Label>
+                <Input
+                  id="anthropic_api_key"
+                  type="password"
+                  autoComplete="off"
+                  value={anthropicKey}
+                  onChange={(e) => setAnthropicKey(e.target.value)}
+                  placeholder={anthropicKeyExists ? '•••••••••••• (configurada)' : 'sk-ant-...'}
+                  disabled={saving}
+                />
+                <p className="text-[11px] text-[var(--color-text-secondary)] opacity-70">
+                  Necessária apenas se o modelo escolhido abaixo for um Claude. Deixe em branco
+                  para manter a chave atual.
                 </p>
               </div>
               <div className="space-y-2">
@@ -423,12 +472,25 @@ export function AIAgentSettings() {
                   disabled={saving}
                   className="h-11 w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-4 text-sm text-[var(--color-text-primary)]"
                 >
-                  {GPT_MODELS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
+                  <optgroup label="Claude (Anthropic)">
+                    {CLAUDE_MODELS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="GPT (OpenAI)">
+                    {GPT_MODELS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
+                <p className="text-[11px] text-[var(--color-text-secondary)] opacity-70">
+                  O provedor acompanha o modelo: escolher um Claude passa as respostas para a
+                  Anthropic; um GPT, para a OpenAI.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="timezone">Fuso horário</Label>
