@@ -24,13 +24,21 @@
 //    telefone, e está certo assim. Isso NÃO muda com um orçamento por
 //    tratamento: o mesmo contato passa a ter mais orçamentos pendurados nele.
 //
-//  · SINAL DE APROVAÇÃO POR AUSÊNCIA, AGORA POR TRATAMENTO. O relatório traz
-//    APENAS não aprovados. Logo, a LINHA que some do relatório do dia seguinte
-//    foi aprovada (ou cancelada) — e só ela. O paciente pode ter a limpeza
-//    aprovada e a prótese ainda parada; são dois deals, e só o da limpeza se
-//    move. ⚠️ A inferência só vale para orçamentos DENTRO do período coberto
-//    pelo export — senão um orçamento de agosto, ausente de um relatório de
-//    setembro, seria dado como aprovado sem nenhuma evidência.
+//  · 🔴 APROVAÇÃO É **FATO**, NÃO INFERÊNCIA (decisão do Danilo, 07/09/2026).
+//    Passaram a entrar DOIS relatórios: o de não aprovados (`Dt Aprovação`
+//    vazia) e o de aprovados (`Dt Aprovação` cheia). Quem aparece no segundo
+//    vai para a etapa "Aprovado" com a DATA REAL da aprovação, fora de
+//    qualquer régua.
+//
+//    **O que morreu junto: "sumiu do relatório = aprovado".** Sair do relatório
+//    de não aprovados significa aprovado **ou cancelado**. Enquanto só existia
+//    um arquivo, o CRM chutava "aprovado" — e chute errado aqui vira RECEITA
+//    FANTASMA no relatório do dono. Agora, o orçamento que sai do arquivo de
+//    não aprovados e **não** aparece no de aprovados é apenas SINALIZADO para
+//    conferência humana: não vira aprovado, não vira perdido, não se move.
+//    ⚠️ A sinalização só vale para orçamentos DENTRO do período coberto pelo
+//    export, e só quando o relatório de NÃO aprovados foi realmente subido —
+//    sem ele não existe "sumiço", só falta de informação.
 //
 //  · D+7 ENCERRA. Orçamento que passou de 7 dias sem sair da primeira etapa vai
 //    para "Não aprovado". Deal que um humano já moveu (negociação, aguardando
@@ -51,9 +59,13 @@ import {
   chaveBaseDoRef,
   contarPacientes,
   dataDoRef,
+  grupoDoOrcamentoLido,
+  grupoDoRef,
   refWebdentalEhAntigo,
+  type ArquivoLido,
+  type LeituraCombinada,
   type Orcamento,
-  type ParseWebdentalResult,
+  type VendaPlano,
 } from '@/lib/webdental';
 
 export const PIPELINE_ODONTO = 'Odonto — Orçamentos';
@@ -64,6 +76,15 @@ export const ORIGEM = 'WebDental · Controle de Efetivação';
 
 /** Dias sem resposta até encerrar o orçamento como não aprovado. */
 export const DIAS_ATE_ENCERRAR = 7;
+
+/**
+ * Títulos fixos das notas de auditoria em `crm_activities`. São a origem
+ * declarada de cada movimento — e servem de trava: a nota de sumiço só é
+ * escrita uma vez por oportunidade, senão o histórico do card viraria uma
+ * parede de avisos idênticos, um por dia de importação.
+ */
+export const NOTA_APROVADO_POR_FATO = 'Aprovado por Dt Aprovação (relatório de aprovados)';
+export const NOTA_SUMICO = 'Sumiu dos dois relatórios — verificar';
 
 // ---------------------------------------------------------------------------
 // Tipos do plano
@@ -77,6 +98,8 @@ export interface AcaoDeal {
   valor: number;
   /** Tratamento do orçamento — agora é 1 por card, então é o que identifica. */
   tratamento?: string;
+  /** Data REAL da aprovação (relatório de aprovados). Null = não aprovado. */
+  dtAprovacao?: string | null;
   /** Só em "atualizados": o que mudou, em português. */
   mudancas?: string[];
   /** Só em "aprovados"/"não aprovados": id do deal já existente. */
@@ -95,14 +118,32 @@ export interface PlanoImportacao {
   pipelineId: string;
   etapas: Record<string, string>;
   periodo: { de: string | null; ate: string | null };
-  /** Orçamentos que ainda não existem no CRM. */
+  /** Orçamentos NÃO aprovados que ainda não existem no CRM → "Orçamento apresentado". */
   novos: AcaoDeal[];
+  /**
+   * Orçamentos do relatório de APROVADOS que ainda não existem no CRM. Entram
+   * direto na etapa "Aprovado", com a data real da aprovação — e portanto
+   * **fora de qualquer régua**, que só olha "Orçamento apresentado".
+   */
+  novosAprovados: AcaoDeal[];
+  /**
+   * Já existiam abertos (vieram do relatório de não aprovados num dia anterior)
+   * e agora apareceram no de APROVADOS. Movem para "Aprovado" com a data real,
+   * sem duplicar. É o cruzamento entre os dois arquivos.
+   */
+  movidosParaAprovado: AcaoDeal[];
   /** Já existem e alguma informação mudou. */
   atualizados: AcaoDeal[];
   /** Já existem e estão idênticos — nada a fazer. */
   inalterados: AcaoDeal[];
-  /** Sumiram do relatório dentro do período → serão marcados como APROVADOS. */
-  aprovados: AcaoDeal[];
+  /**
+   * 🔴 Sumiram do relatório de não aprovados e **não** apareceram no de
+   * aprovados. Provavelmente CANCELADOS — mas pode ser erro de export, filtro
+   * de período ou correção de cadastro. **Não viram aprovados, não viram
+   * perdidos, não se movem.** Ganham uma nota de conferência e ficam nesta
+   * lista para olho humano.
+   */
+  sumiramSemExplicacao: AcaoDeal[];
   /** Passaram de 7 dias na primeira etapa → serão marcados como NÃO APROVADOS. */
   naoAprovados: AcaoDeal[];
   /** Parados há mais de 7 dias mas JÁ movidos por uma pessoa — não são tocados. */
@@ -116,10 +157,23 @@ export interface PlanoImportacao {
   voltaramAoRelatorio: AcaoDeal[];
   contatosNovos: number;
   contatosExistentes: number;
-  /** Orçamentos no arquivo (= linhas válidas = 1 por tratamento). */
+  /** Orçamentos nos arquivos (= linhas válidas = 1 por tratamento). */
   orcamentosNoArquivo: number;
+  /** Quantos deles vieram do relatório de NÃO aprovados. */
+  orcamentosNaoAprovados: number;
+  /** Quantos vieram do relatório de APROVADOS. */
+  orcamentosAprovados: number;
   /** Pacientes distintos por trás desses orçamentos. */
   pacientesNoArquivo: number;
+  /** Os arquivos lidos, com o filtro que o CRM reconheceu em cada um. */
+  arquivos: ArquivoLido[];
+  /** Recebemos o universo dos não aprovados? Sem ele não existe "sumiço". */
+  temNaoAprovados: boolean;
+  /** Recebemos o universo dos aprovados? Sem ele não existe aprovação por fato. */
+  temAprovados: boolean;
+  /** 🔴 Vendas do plano DentalVidas — NÃO entram como orçamento odontológico. */
+  vendasPlano: VendaPlano[];
+  valorVendasPlano: number;
   /** Quantos orçamentos por especialidade — a leitura que a franqueadora cobra. */
   porEspecialidade: Array<{ especialidade: string; quantidade: number; valor: number }>;
   /** Telefones que atendem mais de um paciente. */
@@ -127,8 +181,11 @@ export interface PlanoImportacao {
   /** Procedimentos que não estão no catálogo e serão criados. */
   procedimentosNovos: string[];
   valorTotalArquivo: number;
-  valorNovos: number;
+  /** Soma só dos não aprovados (o que ainda está em jogo). */
+  valorNaoAprovados: number;
+  /** Soma só dos aprovados (o que já foi fechado). */
   valorAprovados: number;
+  valorNovos: number;
   avisos: string[];
 }
 
@@ -139,6 +196,7 @@ export interface ResultadoImportacao {
   dealsAtualizados: number;
   marcadosAprovados: number;
   marcadosNaoAprovados: number;
+  sinalizadosParaConferencia: number;
   procedimentosCriados: number;
   erros: string[];
 }
@@ -157,6 +215,7 @@ interface DealExistente {
   title: string;
   archived_at: string | null;
   stage_entered_at: string;
+  won_at: string | null;
 }
 
 interface ContextoBanco {
@@ -241,11 +300,29 @@ function valoresDoOrcamento(orc: Orcamento): Record<string, string> {
   };
 }
 
-/** Data de decisão esperada: o orçamento tem 7 dias de régua. */
-function previsaoFechamento(dtOrcamento: string): string {
-  const d = new Date(`${dtOrcamento}T00:00:00Z`);
+/**
+ * Data de fechamento do orçamento.
+ * · Aprovado → a data REAL da aprovação: o orçamento fechou naquele dia.
+ * · Não aprovado → a previsão: tem 7 dias de régua para decidir.
+ */
+function dataDeFechamento(orc: Orcamento): string {
+  if (orc.aprovado && orc.dtAprovacao) return orc.dtAprovacao;
+  const d = new Date(`${orc.dtOrcamento}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + DIAS_ATE_ENCERRAR);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Instante que vai para o relógio da etapa (`deals.stage_entered_at`).
+ *
+ * 🔴 Aprovado entra com a data da APROVAÇÃO, não com a do orçamento. É o que
+ * põe o card "fora de qualquer régua": a régua conta dias parados em
+ * "Orçamento apresentado", e o aprovado nunca esteve lá. Meio-dia UTC evita
+ * que o fuso de Itabuna (UTC-3) empurre a data para o dia anterior na tela.
+ */
+function relogioDaEtapa(orc: Orcamento): string {
+  const dia = orc.aprovado && orc.dtAprovacao ? orc.dtAprovacao : orc.dtOrcamento;
+  return `${dia}T12:00:00Z`;
 }
 
 function chunk<T>(arr: T[], n: number): T[][] {
@@ -280,7 +357,7 @@ async function carregarContexto(orcamentos: Orcamento[]): Promise<ContextoBanco>
     supabase.from('products').select('id, name, product_type'),
     supabase
       .from('deals')
-      .select('id, external_ref, contact_id, stage_id, value, status, title, archived_at, stage_entered_at')
+      .select('id, external_ref, contact_id, stage_id, value, status, title, archived_at, stage_entered_at, won_at')
       .eq('pipeline_id', pipelineId)
       .like('external_ref', 'webdental:%'),
   ]);
@@ -389,8 +466,12 @@ async function carregarContexto(orcamentos: Orcamento[]): Promise<ContextoBanco>
 // ---------------------------------------------------------------------------
 
 export interface OpcoesImportacao {
-  /** Marcar como aprovado quem sumiu do relatório (padrão: sim). */
-  inferirAprovados: boolean;
+  /**
+   * Escrever a nota de conferência em quem sumiu dos DOIS relatórios
+   * (padrão: sim). Desmarcar não muda o funil — o orçamento não se move de
+   * qualquer forma; só deixa de ficar registrado no histórico do card.
+   */
+  sinalizarSumicos: boolean;
   /** Encerrar como não aprovado quem passou de 7 dias (padrão: sim). */
   encerrarVencidos: boolean;
   /** "Hoje" — injetável para teste. */
@@ -398,12 +479,12 @@ export interface OpcoesImportacao {
 }
 
 export const OPCOES_PADRAO: OpcoesImportacao = {
-  inferirAprovados: true,
+  sinalizarSumicos: true,
   encerrarVencidos: true,
 };
 
 export async function planejarImportacao(
-  leitura: ParseWebdentalResult,
+  leitura: LeituraCombinada,
   opcoes: OpcoesImportacao = OPCOES_PADRAO,
 ): Promise<{ plano: PlanoImportacao; ctx: ContextoBanco }> {
   const ctx = await carregarContexto(leitura.orcamentos);
@@ -411,6 +492,8 @@ export async function planejarImportacao(
   const avisos = [...leitura.avisos];
 
   const novos: AcaoDeal[] = [];
+  const novosAprovados: AcaoDeal[] = [];
+  const movidosParaAprovado: AcaoDeal[] = [];
   const atualizados: AcaoDeal[] = [];
   const inalterados: AcaoDeal[] = [];
   const voltaramAoRelatorio: AcaoDeal[] = [];
@@ -420,8 +503,65 @@ export async function planejarImportacao(
 
   // Deals já casados com alguma linha do arquivo. É este conjunto — e não uma
   // lista de chaves — que decide a AUSÊNCIA lá embaixo, porque um orçamento
-  // pode ter sido reconhecido pela chave sem valor, com `external_ref` antigo.
+  // pode ter sido reconhecido por uma chave antiga.
   const idsNoArquivo = new Set<string>();
+
+  // -------------------------------------------------------------------------
+  // CASAMENTO ARQUIVO × BANCO — três passadas, da evidência mais forte para a
+  // mais fraca, e cada passada percorre TODAS as linhas antes da seguinte.
+  //
+  // 🔴 POR QUE EM PASSADAS, e não linha a linha. Casando linha a linha, um
+  // orçamento avaliado cedo pode "roubar" pela regra fraca (passada 3) o deal
+  // que uma linha posterior casaria pela regra forte (passada 1 ou 2). O
+  // resultado seria um card trocado e um sumiço inventado ao lado. Varrendo
+  // por passada, a evidência forte sempre ganha, independentemente da ordem.
+  //
+  //  1. chave inteira — mesmo paciente, dia, tratamento, ocorrência e valor;
+  //  2. GRUPO + VALOR — ignora a ocorrência. É o que sobrevive ao caso em que a
+  //     numeração dança porque o conjunto mudou (ver `grupoDoRef`): nos
+  //     arquivos reais de 07/09 três orçamentos trocam de ordinal quando o
+  //     relatório de aprovados entra junto;
+  //  3. chave sem o VALOR — é o orçamento cujo preço foi corrigido no
+  //     WebDental. Sem ela, uma correção de preço criaria um card novo E daria
+  //     o antigo como sumido.
+  const casado = new Map<string, DealExistente>();
+  const refAnteriorPorOrc = new Map<string, string>();
+  const pendentes = leitura.orcamentos.filter((orc) => {
+    const d = ctx.dealsPorRef.get(orc.externalRef);
+    if (!d || idsNoArquivo.has(d.id)) return true;
+    casado.set(orc.externalRef, d);
+    idsNoArquivo.add(d.id);
+    return false;
+  });
+
+  // Passada 2: grupo + valor. Só casa quando há UM candidato livre — casar por
+  // ambiguidade é pior do que não casar.
+  const porGrupoEValor = new Map<string, DealExistente[]>();
+  for (const d of ctx.dealsTodos) {
+    if (d.archived_at || idsNoArquivo.has(d.id)) continue;
+    const g = grupoDoRef(d.external_ref);
+    if (!g) continue;
+    const chave = `${g}|${dinheiro(Number(d.value ?? 0))}`;
+    porGrupoEValor.set(chave, [...(porGrupoEValor.get(chave) ?? []), d]);
+  }
+  const pendentes3 = pendentes.filter((orc) => {
+    const chave = `${grupoDoOrcamentoLido(orc)}|${orc.valor}`;
+    const livres = (porGrupoEValor.get(chave) ?? []).filter((d) => !idsNoArquivo.has(d.id));
+    if (livres.length !== 1) return true;
+    casado.set(orc.externalRef, livres[0]);
+    refAnteriorPorOrc.set(orc.externalRef, livres[0].external_ref);
+    idsNoArquivo.add(livres[0].id);
+    return false;
+  });
+
+  // Passada 3: mesma chave, valor diferente (correção de preço).
+  for (const orc of pendentes3) {
+    const candidato = ctx.dealsPorChaveBase.get(orc.chaveBase);
+    if (!candidato || idsNoArquivo.has(candidato.id)) continue;
+    casado.set(orc.externalRef, candidato);
+    refAnteriorPorOrc.set(orc.externalRef, candidato.external_ref);
+    idsNoArquivo.add(candidato.id);
+  }
 
   for (const orc of leitura.orcamentos) {
     const base: AcaoDeal = {
@@ -431,6 +571,7 @@ export async function planejarImportacao(
       dtOrcamento: orc.dtOrcamento,
       valor: orc.valor,
       tratamento: orc.tratamento,
+      dtAprovacao: orc.dtAprovacao,
     };
 
     if (ctx.contatoPorTelefone.has(orc.telefone)) telefonesExistentes.add(orc.telefone);
@@ -438,35 +579,50 @@ export async function planejarImportacao(
 
     if (!ctx.produtosPorNome.has(orc.tratamento.toLowerCase())) procedimentosNovos.add(orc.tratamento);
 
-    // 1ª tentativa: a chave inteira. 2ª: a chave sem o valor — é o orçamento
-    // cujo preço foi corrigido no WebDental. Sem esta segunda, a correção de
-    // preço criaria um card novo E daria o antigo como aprovado por ausência.
-    let existente = ctx.dealsPorRef.get(orc.externalRef);
-    let refAnterior: string | undefined;
-    if (!existente) {
-      const candidato = ctx.dealsPorChaveBase.get(orc.chaveBase);
-      if (candidato && !idsNoArquivo.has(candidato.id)) {
-        existente = candidato;
-        refAnterior = candidato.external_ref;
-      }
-    }
+    const existente = casado.get(orc.externalRef);
+    const refAnterior = refAnteriorPorOrc.get(orc.externalRef);
 
     if (!existente) {
-      novos.push(base);
+      // Orçamento novo: o relatório de origem decide a etapa em que ele nasce.
+      (orc.aprovado ? novosAprovados : novos).push(base);
       continue;
     }
-    idsNoArquivo.add(existente.id);
     // A gravação encontra o deal pela chave NOVA, mesmo quando ele foi
-    // reconhecido pela chave antiga.
+    // reconhecido por uma chave antiga.
     ctx.dealsPorRef.set(orc.externalRef, existente);
 
-    // Estava encerrado e voltou ao relatório de NÃO aprovados: a inferência
-    // anterior não se sustentou. Reabrir é decisão de gente — aqui só reporta.
-    if (existente.status !== 'open') {
+    // 🔴 O CRUZAMENTO ENTRE OS DOIS ARQUIVOS. O orçamento já existia (veio do
+    // relatório de não aprovados num dia anterior) e agora aparece no de
+    // APROVADOS: move para "Aprovado" com a data real, sem duplicar.
+    //
+    // Vale também quando o CRM já o tinha encerrado como "Não aprovado" pela
+    // régua de 7 dias: FATO vence prazo. A data de aprovação é evidência
+    // documental; o encerramento por prazo era só uma convenção nossa.
+    const jaAprovado = existente.status === 'won';
+    if (orc.aprovado && !jaAprovado) {
+      movidosParaAprovado.push({ ...base, dealId: existente.id });
+      if (existente.status === 'lost') {
+        avisos.push(
+          `${orc.pacienteNome} · ${orc.tratamento} (${orc.dtOrcamento}) estava encerrado como NÃO ` +
+            `aprovado no CRM, mas o relatório de aprovados traz a data ${orc.dtAprovacao}. ` +
+            'O CRM reabriu e marcou como aprovado — o fato vence o encerramento por prazo.',
+        );
+      }
+    } else if (!orc.aprovado && existente.status !== 'open') {
+      // Estava encerrado e voltou ao relatório de NÃO aprovados: o que o CRM
+      // registrou não se sustenta. Reabrir é decisão de gente — só reporta.
       voltaramAoRelatorio.push({ ...base, dealId: existente.id });
     }
 
     const mudancas: string[] = [];
+    // Reconhecido por uma chave antiga (passadas 2 e 3): a chave gravada
+    // PRECISA ser regravada, senão a próxima importação não o encontra mais e
+    // o orçamento vira card novo + sumiço.
+    if (refAnterior) mudancas.push('chave de identidade');
+    // Correção da data de aprovação no WebDental entre um export e outro.
+    if (orc.aprovado && jaAprovado && (existente.won_at ?? '').slice(0, 10) !== orc.dtAprovacao) {
+      mudancas.push('data de aprovação');
+    }
     if (dinheiro(Number(existente.value ?? 0)) !== orc.valor) {
       mudancas.push(`valor ${dinheiro(Number(existente.value ?? 0))} → ${orc.valor}`);
     }
@@ -491,22 +647,37 @@ export async function planejarImportacao(
     const contatoAtual = ctx.contatoPorTelefone.get(orc.telefone);
     if (contatoAtual && contatoAtual.id !== existente.contact_id) mudancas.push('contato');
 
-    if (mudancas.length === 0) inalterados.push(base);
-    else atualizados.push({ ...base, mudancas: [...new Set(mudancas)], dealId: existente.id, refAnterior });
+    // Quem vai para "Aprovado" já está contado na sua própria lista — a
+    // mudança de etapa e de data é aplicada lá, não no bloco de atualização.
+    const movidoAgora = movidosParaAprovado.some((m) => m.dealId === existente.id);
+    if (mudancas.length === 0) {
+      if (!movidoAgora) inalterados.push(base);
+    } else {
+      atualizados.push({ ...base, mudancas: [...new Set(mudancas)], dealId: existente.id, refAnterior });
+    }
   }
 
-  // --- Sumiu do relatório = APROVADO ---------------------------------------
-  // 🔴 AGORA POR TRATAMENTO, não por paciente. O deal representa UMA linha do
-  // relatório; se aquela linha não veio no export de hoje, aquele tratamento
-  // saiu da lista de não aprovados. Os outros tratamentos do mesmo paciente,
-  // que continuam no arquivo, seguem abertos — é exatamente o caso "aprovou a
-  // limpeza, a prótese ficou parada".
-  // Só dentro do período coberto pelo export, e só o que estava aberto.
+  // --- Sumiu dos DOIS relatórios = SINAL DE CONFERÊNCIA ---------------------
+  //
+  // 🔴 AQUI ESTAVA A RECEITA FANTASMA. Até 06/09 o CRM lia "sumiu do relatório
+  // de não aprovados" como "foi aprovado". Com o relatório de APROVADOS em
+  // mãos, essa dedução deixou de fazer sentido: quem foi aprovado APARECE, com
+  // data. Quem sumiu dos dois foi, quase sempre, CANCELADO — e contar
+  // cancelamento como aprovação vira dinheiro que não existe no relatório do
+  // dono.
+  //
+  // Regras da sinalização, todas conservadoras:
+  //  1. só quando o relatório de NÃO aprovados foi realmente subido (sem ele
+  //     "ausência" não quer dizer nada — o universo nem foi consultado);
+  //  2. só dentro do período coberto pelo export;
+  //  3. só o que estava aberto;
+  //  4. **o orçamento não se move.** Fica onde está, com uma nota.
   const etapaApresentado = ctx.etapas[ETAPA_APRESENTADO];
-  const aprovados: AcaoDeal[] = [];
+  const sumiramSemExplicacao: AcaoDeal[] = [];
   const naoAprovados: AcaoDeal[] = [];
   const paradosEmNegociacao: AcaoDeal[] = [];
   const formatoAntigo: AcaoDeal[] = [];
+  const idsMovidosParaAprovado = new Set(movidosParaAprovado.map((m) => m.dealId));
 
   for (const deal of ctx.dealsTodos) {
     if (deal.archived_at) continue;
@@ -534,19 +705,24 @@ export async function planejarImportacao(
 
     if (!idsNoArquivo.has(deal.id)) {
       // Deal do modelo ANTIGO (um orçamento por paciente+data). Ele nunca vai
-      // casar com uma linha do arquivo novo — dar isso como "aprovado por
-      // ausência" seria inventar receita. Fica de fora e é reportado.
+      // casar com uma linha do arquivo novo — tratá-lo como sumiço seria
+      // sinalizar um problema que é só de formato. Fica de fora e é reportado.
       if (refWebdentalEhAntigo(deal.external_ref)) {
         formatoAntigo.push(acao);
         continue;
       }
-      if (opcoes.inferirAprovados && dentroDoPeriodo) {
-        aprovados.push(acao);
+      if (leitura.temNaoAprovados && dentroDoPeriodo) {
+        sumiramSemExplicacao.push(acao);
       }
       continue;
     }
 
-    // Continua no relatório (= continua não aprovado) e já passou do prazo.
+    // 🔴 Quem está indo para "Aprovado" nesta mesma importação NÃO pode ser
+    // encerrado por prazo. Sem esta guarda, um orçamento antigo que acabou de
+    // ser aprovado seria marcado como ganho e como perdido no mesmo minuto.
+    if (idsMovidosParaAprovado.has(deal.id)) continue;
+
+    // Continua no relatório de NÃO aprovados e já passou do prazo.
     if (opcoes.encerrarVencidos && dias > DIAS_ATE_ENCERRAR) {
       if (deal.stage_id === etapaApresentado) naoAprovados.push(acao);
       else paradosEmNegociacao.push(acao);
@@ -556,9 +732,23 @@ export async function planejarImportacao(
   if (formatoAntigo.length > 0) {
     avisos.push(
       `${formatoAntigo.length} oportunidade(s) foram importadas no modelo antigo (um orçamento por ` +
-        'paciente e data, com vários tratamentos dentro). Elas NÃO são comparáveis com este arquivo ' +
-        'e ficaram de fora da inferência de aprovação — revise ou arquive na mão antes de confiar ' +
+        'paciente e data, com vários tratamentos dentro). Elas NÃO são comparáveis com estes ' +
+        'arquivos e ficaram de fora da conciliação — revise ou arquive na mão antes de confiar ' +
         'na conversão.',
+    );
+  }
+
+  if (!leitura.temAprovados) {
+    avisos.push(
+      'Você subiu apenas o relatório de NÃO aprovados. Sem o de APROVADOS o CRM não tem como ' +
+        'saber quem fechou: nenhum orçamento será marcado como aprovado, e o que sumir da lista ' +
+        'fica só sinalizado para conferência. Exporte também o filtro "APENAS APROVADOS".',
+    );
+  }
+  if (!leitura.temNaoAprovados) {
+    avisos.push(
+      'Você subiu apenas o relatório de APROVADOS. Sem o de NÃO aprovados o CRM não consegue ' +
+        'detectar orçamento que saiu da lista nem aplicar o encerramento por prazo.',
     );
   }
 
@@ -572,8 +762,17 @@ export async function planejarImportacao(
 
   if (!leitura.periodo.de || !leitura.periodo.ate) {
     avisos.push(
-      'Não identifiquei o período do relatório. Por segurança, NENHUM orçamento será marcado ' +
-        'como aprovado por ausência nesta importação.',
+      'Não identifiquei o período dos relatórios. Por segurança, NENHUM orçamento ausente será ' +
+        'sinalizado nesta importação — sem a janela do export, ausência não prova nada.',
+    );
+  }
+
+  if (sumiramSemExplicacao.length > 0) {
+    avisos.push(
+      `${sumiramSemExplicacao.length} orçamento(s) sumiram do relatório de não aprovados e NÃO ` +
+        `aparecem no de aprovados (${sumiramSemExplicacao.map((s) => s.paciente).slice(0, 3).join(', ')}` +
+        `${sumiramSemExplicacao.length > 3 ? '…' : ''}). O mais provável é CANCELAMENTO no ` +
+        'WebDental. O CRM não move nenhum deles — precisa de conferência humana.',
     );
   }
 
@@ -601,27 +800,40 @@ export async function planejarImportacao(
     .map(([especialidade, v]) => ({ especialidade, ...v }))
     .sort((a, b) => b.quantidade - a.quantidade);
 
+  const doArquivoAprovados = leitura.orcamentos.filter((o) => o.aprovado);
+  const doArquivoNaoAprovados = leitura.orcamentos.filter((o) => !o.aprovado);
+
   const plano: PlanoImportacao = {
     pipelineId: ctx.pipelineId,
     etapas: ctx.etapas,
     periodo: leitura.periodo,
     novos,
+    novosAprovados,
+    movidosParaAprovado,
     atualizados,
     inalterados,
-    aprovados,
+    sumiramSemExplicacao: opcoes.sinalizarSumicos ? sumiramSemExplicacao : [],
     naoAprovados,
     paradosEmNegociacao,
     voltaramAoRelatorio,
     contatosNovos: telefonesNovos.size,
     contatosExistentes: telefonesExistentes.size,
     orcamentosNoArquivo: leitura.orcamentos.length,
+    orcamentosNaoAprovados: doArquivoNaoAprovados.length,
+    orcamentosAprovados: doArquivoAprovados.length,
     pacientesNoArquivo: contarPacientes(leitura.orcamentos),
+    arquivos: leitura.arquivos,
+    temNaoAprovados: leitura.temNaoAprovados,
+    temAprovados: leitura.temAprovados,
+    vendasPlano: leitura.vendasPlano,
+    valorVendasPlano: dinheiro(leitura.vendasPlano.reduce((a, v) => a + v.valor, 0)),
     porEspecialidade,
     familias,
     procedimentosNovos: [...procedimentosNovos],
     valorTotalArquivo: dinheiro(leitura.orcamentos.reduce((a, o) => a + o.valor, 0)),
-    valorNovos: dinheiro(novos.reduce((a, n) => a + n.valor, 0)),
-    valorAprovados: dinheiro(aprovados.reduce((a, n) => a + n.valor, 0)),
+    valorNaoAprovados: dinheiro(doArquivoNaoAprovados.reduce((a, o) => a + o.valor, 0)),
+    valorAprovados: dinheiro(doArquivoAprovados.reduce((a, o) => a + o.valor, 0)),
+    valorNovos: dinheiro([...novos, ...novosAprovados].reduce((a, n) => a + n.valor, 0)),
     avisos,
   };
 
@@ -633,7 +845,7 @@ export async function planejarImportacao(
 // ---------------------------------------------------------------------------
 
 export async function aplicarImportacao(
-  leitura: ParseWebdentalResult,
+  leitura: LeituraCombinada,
   plano: PlanoImportacao,
   ctx: ContextoBanco,
   onProgresso?: (pct: number, etapa: string) => void,
@@ -646,6 +858,7 @@ export async function aplicarImportacao(
     dealsAtualizados: 0,
     marcadosAprovados: 0,
     marcadosNaoAprovados: 0,
+    sinalizadosParaConferencia: 0,
     procedimentosCriados: 0,
     erros: [],
   };
@@ -767,8 +980,19 @@ export async function aplicarImportacao(
   }
 
   // --- 3. Deals novos ------------------------------------------------------
+  //
+  // Cada orçamento novo nasce na etapa que o SEU relatório determina:
+  // não aprovado → "Orçamento apresentado"; aprovado → "Aprovado".
+  //
+  // ⚠️ O aprovado nasce com `status = 'open'` e só vira `'won'` no passo 6,
+  // depois de o `deal_products` existir. Não é capricho: o gatilho
+  // `_deal_won_to_sales` do banco lê os procedimentos do orçamento no instante
+  // em que o status vira "ganho" e, sem eles, registra a venda com o TÍTULO do
+  // card no lugar do nome do procedimento — o painel de vendas ficaria com
+  // "Fulano — Prótese · 03/09/2026" como se fosse um produto. A etapa e a data
+  // já entram certas aqui; só o carimbo de ganho espera.
   passo(35, 'Orçamentos novos');
-  const refsNovos = new Set(plano.novos.map((n) => n.externalRef));
+  const refsNovos = new Set([...plano.novos, ...plano.novosAprovados].map((n) => n.externalRef));
   const refsAtualizar = new Set(plano.atualizados.map((n) => n.externalRef));
   const porRef = new Map(leitura.orcamentos.map((o) => [o.externalRef, o]));
 
@@ -785,15 +1009,17 @@ export async function aplicarImportacao(
       external_ref: orc.externalRef,
       contact_id: contato.id,
       pipeline_id: plano.pipelineId,
-      stage_id: plano.etapas[ETAPA_APRESENTADO],
+      stage_id: plano.etapas[orc.aprovado ? ETAPA_APROVADO : ETAPA_APRESENTADO],
       title: tituloDoOrcamento(orc),
       value: orc.valor,
       currency: 'BRL',
       status: 'open',
       lead_type: 'Cliente', // o paciente JÁ é cliente da clínica
-      // 🔴 O relógio recebe a DATA DO ORÇAMENTO, nunca a data do import.
-      stage_entered_at: `${orc.dtOrcamento}T12:00:00Z`,
-      expected_close: previsaoFechamento(orc.dtOrcamento),
+      temperature: orc.aprovado ? 'Quente' : 'Frio',
+      // 🔴 O relógio recebe a data do ORÇAMENTO (ou a da APROVAÇÃO, quando o
+      // orçamento vem do relatório de aprovados) — nunca a data do import.
+      stage_entered_at: relogioDaEtapa(orc),
+      expected_close: dataDeFechamento(orc),
       origin_channel: 'webdental',
     });
   }
@@ -826,8 +1052,15 @@ export async function aplicarImportacao(
     const patch: Record<string, unknown> = {
       title: tituloDoOrcamento(orc),
       value: orc.valor,
-      expected_close: previsaoFechamento(orc.dtOrcamento),
+      expected_close: dataDeFechamento(orc),
     };
+    // Data de aprovação corrigida no WebDental: o carimbo de ganho e o relógio
+    // da etapa acompanham. `status` fica FORA do patch de propósito — mandá-lo
+    // acordaria `_sync_deal_outcome_ts`, que sobrescreveria o `won_at`.
+    if (orc.aprovado && deal.status === 'won') {
+      patch.won_at = relogioDaEtapa(orc);
+      patch.stage_entered_at = relogioDaEtapa(orc);
+    }
     // Só o preço mudou: o orçamento é o mesmo, a chave é que precisa acompanhar.
     if (refAnteriorPorRef.has(ref)) patch.external_ref = orc.externalRef;
     if (contato && contato.id !== deal.contact_id) patch.contact_id = contato.id;
@@ -906,38 +1139,127 @@ export async function aplicarImportacao(
     if (error) res.erros.push(`Limpeza de procedimentos: ${error.message}`);
   }
 
-  // --- 6. Aprovados por ausência ------------------------------------------
-  passo(85, 'Aprovados por ausência no relatório');
+  // --- 6. Carimbo de APROVADO (por fato, não por ausência) -----------------
+  //
+  // Roda DEPOIS dos procedimentos (passo 5) de propósito — ver a nota do
+  // passo 3 sobre `_deal_won_to_sales`.
+  //
+  // São dois grupos, e o `status` só muda aqui:
+  //  · os que nasceram nesta importação já na etapa "Aprovado" (passo 3);
+  //  · os que já existiam abertos e agora apareceram no relatório de aprovados.
+  passo(85, 'Aprovados (Dt Aprovação do relatório)');
   const hojeBr = new Date().toLocaleDateString('pt-BR');
-  for (const lote of chunk(plano.aprovados, 50)) {
-    const ids = lote.map((a) => a.dealId!).filter(Boolean);
-    if (ids.length === 0) continue;
+
+  interface Carimbo {
+    dealId: string;
+    acao: AcaoDeal;
+    orc: Orcamento | undefined;
+    novo: boolean;
+  }
+  const carimbos: Carimbo[] = [];
+  for (const a of plano.novosAprovados) {
+    const deal = ctx.dealsPorRef.get(a.externalRef);
+    if (deal) carimbos.push({ dealId: deal.id, acao: a, orc: porRef.get(a.externalRef), novo: true });
+  }
+  for (const a of plano.movidosParaAprovado) {
+    if (a.dealId) carimbos.push({ dealId: a.dealId, acao: a, orc: porRef.get(a.externalRef), novo: false });
+  }
+
+  for (const c of carimbos) {
+    const dia = c.acao.dtAprovacao;
+    if (!dia) continue;
+    const carimbo = `${dia}T12:00:00Z`;
     const { error } = await supabase
       .from('deals')
-      .update({ stage_id: plano.etapas[ETAPA_APROVADO], status: 'won', temperature: 'Quente' })
-      .in('id', ids);
+      .update({
+        stage_id: plano.etapas[ETAPA_APROVADO],
+        status: 'won',
+        won_at: carimbo,
+        // A data REAL da aprovação no relógio da etapa. O gatilho
+        // `deals_stage_clock` respeita o valor informado — é a guarda escrita
+        // na migração de 06/09 que permite importar histórico sem falsear o
+        // "parado há N dias".
+        stage_entered_at: carimbo,
+        lost_reason: null,
+        temperature: 'Quente',
+        expected_close: dia,
+      })
+      .eq('id', c.dealId);
     if (error) {
-      res.erros.push(`Marcar aprovados: ${error.message}`);
+      res.erros.push(`Marcar aprovado (${c.acao.paciente}): ${error.message}`);
       continue;
     }
-    res.marcadosAprovados += ids.length;
-    const notas = lote.map((a) => ({
-      deal_id: a.dealId,
+    res.marcadosAprovados++;
+    const { error: eNota } = await supabase.from('crm_activities').insert({
+      deal_id: c.dealId,
       type: 'note',
-      title: 'Aprovado por inferência (ausência no relatório)',
+      title: NOTA_APROVADO_POR_FATO,
       body:
-        `O tratamento "${a.tratamento ?? '—'}" de ${a.paciente} estava no relatório ` +
-        `"Controle de Efetivação — APENAS NÃO APROVADOS" e DEIXOU de aparecer na importação de ` +
-        `${hojeBr} (período do relatório: ${plano.periodo.de ?? '?'} a ${plano.periodo.ate ?? '?'}).\n\n` +
-        `A leitura é POR TRATAMENTO: outros orçamentos do mesmo paciente que continuam no ` +
-        `relatório seguem abertos e não foram tocados.\n\n` +
-        `⚠️ Isto é INFERÊNCIA, não confirmação humana: sair do relatório significa aprovado OU ` +
-        `cancelado no WebDental. Confirme na clínica antes de contar como receita.`,
+        `O tratamento "${c.acao.tratamento ?? '—'}" de ${c.acao.paciente}, orçado em ` +
+        `${c.acao.dtOrcamento}, veio no relatório "Controle de Efetivação — APENAS APROVADOS" ` +
+        `com Dt Aprovação ${dia} (importado em ${hojeBr}).\n\n` +
+        `Isto é FATO documentado pelo WebDental, não inferência: a data da aprovação está no ` +
+        `próprio relatório. O orçamento entrou na etapa "${ETAPA_APROVADO}" com essa data e fica ` +
+        `fora da régua de acompanhamento.\n\n` +
+        (c.novo
+          ? 'O orçamento não existia no CRM: foi criado já aprovado.'
+          : 'O orçamento já estava aberto no CRM e foi movido — sem duplicar o card.'),
       done: true,
       done_at: new Date().toISOString(),
-    }));
-    const { error: eNota } = await supabase.from('crm_activities').insert(notas);
-    if (eNota) res.erros.push(`Registro da inferência: ${eNota.message}`);
+    });
+    if (eNota) res.erros.push(`Registro da aprovação: ${eNota.message}`);
+  }
+
+  // --- 6b. Sumiram dos DOIS relatórios: sinalizar, NUNCA aprovar -----------
+  //
+  // Nada se move. O orçamento continua exatamente onde está, na etapa em que
+  // está, aberto. A única coisa que acontece é uma nota no histórico do card
+  // pedindo conferência — e ela é escrita **uma vez só**: sem essa trava, uma
+  // importação por dia encheria o card de avisos idênticos e ninguém leria
+  // nenhum.
+  passo(90, 'Sinalizar orçamentos que sumiram');
+  if (plano.sumiramSemExplicacao.length > 0) {
+    const idsSumidos = plano.sumiramSemExplicacao.map((s) => s.dealId!).filter(Boolean);
+    const jaSinalizados = new Set<string>();
+    for (const lote of chunk(idsSumidos, 200)) {
+      const { data, error } = await supabase
+        .from('crm_activities')
+        .select('deal_id')
+        .eq('title', NOTA_SUMICO)
+        .in('deal_id', lote);
+      if (error) {
+        // Sem conseguir ler o histórico, é melhor NÃO escrever do que escrever
+        // duplicado — a informação já está no resumo da tela.
+        res.erros.push(`Conferência de sumiços: ${error.message}`);
+        lote.forEach((id) => jaSinalizados.add(id));
+        continue;
+      }
+      for (const a of (data ?? []) as Array<{ deal_id: string | null }>) {
+        if (a.deal_id) jaSinalizados.add(a.deal_id);
+      }
+    }
+    const notas = plano.sumiramSemExplicacao
+      .filter((s) => s.dealId && !jaSinalizados.has(s.dealId))
+      .map((s) => ({
+        deal_id: s.dealId,
+        type: 'note',
+        title: NOTA_SUMICO,
+        body:
+          `O tratamento "${s.tratamento ?? '—'}" de ${s.paciente}, orçado em ${s.dtOrcamento}, ` +
+          `SAIU do relatório de não aprovados e NÃO apareceu no de aprovados (importação de ` +
+          `${hojeBr}; período dos relatórios: ${plano.periodo.de ?? '?'} a ${plano.periodo.ate ?? '?'}).\n\n` +
+          `A explicação mais provável é CANCELAMENTO no WebDental. Pode ser também correção de ` +
+          `cadastro, mudança de valor ou export incompleto.\n\n` +
+          `⚠️ O CRM NÃO marcou como aprovado e NÃO encerrou: o orçamento continua onde estava. ` +
+          `Contar isto como receita sem conferir na clínica seria inventar dinheiro. ` +
+          `Confira no WebDental e mova na mão.`,
+        done: false,
+      }));
+    for (const lote of chunk(notas, 100)) {
+      const { error } = await supabase.from('crm_activities').insert(lote);
+      if (error) res.erros.push(`Sinalização de sumiço: ${error.message}`);
+      else res.sinalizadosParaConferencia += lote.length;
+    }
   }
 
   // --- 7. Encerrar os que passaram de 7 dias -------------------------------

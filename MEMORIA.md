@@ -172,6 +172,10 @@ Nenhuma até agora.
 | 48 | **Quem opera a importação diária e em que horário** (a #4 continua aberta). O relatório precisa ser exportado do WebDental todo dia e subido no CRM; sem isso a régua e a inferência de aprovação param | Rotina | 06/09/2026 |
 | 49 | 🔴 **AGRUPAR O ENVIO POR CONTATO** — consequência direta de "um orçamento por tratamento" (06/09). Com 81 oportunidades em vez de 64, **a régua passaria a mandar uma mensagem por TRATAMENTO**: o paciente com 3 tratamentos parados receberia 3 mensagens no mesmo dia. Isso irrita, gera bloqueio e queima o número — o precedente do CDT (número restringido pela Meta em 07/05/2026 após volume alto) já custou caro uma vez. **A solução, quando o disparo entrar em escopo:** o motor de envio agrupa os orçamentos parados **por contato** e manda **UMA mensagem por pessoa**, citando os tratamentos, com o registro de envio marcado em todos os deals daquele contato. O funil continua separado por tratamento — só o ENVIO respeita a pessoa. Vale para `check-follow-ups` (ramo `stage_stalled`, pendência #44) e para qualquer campanha construída sobre o funil odonto | Qualquer disparo da régua | 06/09/2026 |
 | 50 | Rótulo do campo `tratamento` no banco ainda é **"Tratamento(s)"**, do tempo em que um orçamento tinha vários. Hoje é sempre um. Cosmético, aparece na ficha de toda oportunidade. Não mexi: é escrita em dado de configuração e não estava no pedido | Nada | 06/09/2026 |
+| 51 | 🔴 **Venda do plano DentalVidas fica FORA da importação.** 2 linhas, R$ 510,00 (Orenice Sotero Santos Souza e Carla Soane Dos Santos). Não é procedimento odontológico — o cabeçalho do relatório conta separado ("Valor Total Dental Vidas") e o PDF chama de "venda externa plano". O CRM identifica, relata no resumo e **não importa**. Falta o dono decidir se venda de plano entra no CRM e como (funil próprio? produto próprio? nada?) | Medir a venda de plano | 07/09/2026 |
+| 52 | 🔴 **A importação dos aprovados enche a fila de RECOMPRA.** Cada deal que vira `won` dispara `trg_deal_won_to_sales`, que grava em `sales_records` (aparece em /vendas) **e** em `repurchase_predictions` com `predicted_next` = aprovação + 30 dias. O cron `repurchase-dispatch-daily` (9h15) lê essa fila. **Não sai mensagem hoje** — `repurchase_config.auto_send=false` e `template_name` nulo, duas travas. Mas a primeira importação põe **63 previsões de recompra odontológica** numa fila que não foi pensada para isso. Ligar a recompra sem esvaziar/filtrar manda "seu estoque de Prótese está acabando" para 55 pacientes | Qualquer uso da recompra | 07/09/2026 |
+| 53 | **Os DOIS relatórios têm de ser subidos juntos, sempre.** A ocorrência (1º, 2º…) é posição dentro do grupo paciente+dia+tratamento e depende do conjunto: 3 orçamentos dos arquivos reais existem nos dois relatórios e trocam de ordinal conforme o que é subido. O casamento em 3 passadas (a 2ª por grupo+valor) absorve isso e foi testado — importar A sozinho e depois A+B dá **0 card fantasma** —, mas a rotina correta continua sendo subir os dois. A tela avisa quando só um vem. Some com a #48 quando a rotina diária for definida | Confiança na conciliação | 07/09/2026 |
+| 54 | **Data da aprovação não é campo personalizado.** Vive em `deals.won_at` e no relógio da etapa. Criar o campo exigiria migração; o dado já aparece no card. Só vira pendência se o dono quiser filtrar/relatar por data de aprovação na tela | Nada agora | 07/09/2026 |
 
 ---
 
@@ -3738,3 +3742,261 @@ Canvas publicado: artifact `f75f9006-7e91-4dc3-bf10-c6654b8c3784`.
    `custom_field_values`; exigiria consulta nova (território de Configuração).
 4. Chip "Parado N dias" na **lista** de conversas — o tipo
    `ConversationWithContact` não traz dado de orçamento.
+
+### 2026-09-07 · Claude Code · Logotipo AmorSaúde e nome da clínica (`e8669c0`)
+
+**Frente: DESIGN.** Nenhuma migração, nenhuma Edge Function, nenhum `SELECT`.
+
+**O app se identificava como "Plataforma Comercial"** — nome neutro do template
+do curso, com `brand-mark.png` genérico.
+
+**LOGOTIPOS — recortados do vetor oficial da rede**
+(`www.amorsaude.com/images/logo_as.svg`). O arquivo tem **44 traçados**: os
+**7 primeiros são o símbolo** (o mascote com touca de coração); os outros 37 são
+a palavra "amorsaude" e a linha "medicina, odontologia e exames".
+
+- **`public/amorsaude-simbolo.svg`** — só o símbolo, centralizado num viewBox
+  **quadrado 131×131**. Quadrado porque a sidebar, o login e o menu do celular
+  exibem a marca **dentro de um quadro** — o logotipo horizontal (452×131)
+  distorceria. **Conferido renderizado** (`qlmanage -t`): o mascote sai inteiro.
+- **`public/amorsaude-logo.svg`** — logotipo completo, para uso horizontal.
+  Exposto em `BRAND.wordmark`.
+
+Ambos carregam **apenas as duas cores da marca** (`#61C1D0`, `#D53E36`), as
+mesmas do design system. **Nada foi recolorido.**
+
+**`brand.ts`:** `owner: 'Clínica'` · `product: 'Amor Saúde Itabuna (BA)'` ·
+`companyName: 'Clínica Amor Saúde Itabuna (BA)'` · `mark` aponta para o símbolo
+· chave nova `wordmark`. O `<title>` e o subtítulo do login acompanham.
+
+**Detalhe que evitou logo torto:** a sidebar, o login e o menu do celular
+envolviam a imagem em `rounded-lg`/`rounded-xl` + sombra. **O símbolo JÁ é um
+quadrado de cantos arredondados** — o arredondamento por fora cortava as pontas
+dele. Removido nos três.
+
+**NÃO ALTERADO:** `src/lib/zernio.ts:201` ainda envia `name: 'Plataforma
+Comercial'` à API do Zernio. É arquivo da **frente de Configuração**, e o Zernio
+**não é mais usado** (o canal é a Meta direto). Fica registrado como pendência
+cosmética.
+
+**INCIDENTE EVITADO (2º do dia, mesma causa):** durante o build apareceu um erro
+novo em `ImportOrcamentosDialog.tsx` (`Cannot find name 'inferirAprovados'`).
+`stat` mostrou o arquivo **modificado 2 segundos antes** — a outra frente
+editando em tempo real. **Não foi tocado**; o erro sumiu sozinho no build
+seguinte. Confirmado depois que as 9 trocas de cor feitas por esta frente
+**sobreviveram** ao trabalho dela (55 tokens no arquivo, 0 cor cravada).
+**A regra de olhar o `stat` antes de tocar em arquivo alheio já evitou dois
+conflitos hoje.**
+
+- **Próximo:** Etapa 3 (as 12 telas restantes) — **não autorizada**.
+
+### 2026-09-07 · Claude Code · Marca d'água central (`0ebc09f`)
+
+**Frente: DESIGN.** Nenhuma migração, nenhuma Edge Function, nenhum `SELECT`.
+
+**Pedido do Danilo:** a logomarca ao centro da tela, "tipo sombra".
+
+**Implementado em `AppLayout.tsx`** — o símbolo ao fundo da área de trabalho,
+atrás do conteúdo. Decisões que a mantêm sem atrapalhar a leitura (todas
+comentadas no arquivo):
+- **opacidade `0.045`** — o símbolo é turquesa cheio; acima disso compete com o
+  texto por cima
+- **`pointer-events-none`** — não intercepta clique nenhum
+- **`select-none` + `aria-hidden`** — fora da seleção de texto e do leitor de
+  tela; é decoração, não informação
+- **`sticky` no centro da altura visível**, não fixo no topo — acompanha a
+  rolagem em vez de sumir numa lista longa
+- **escondida no celular** (`hidden sm:block`) — em tela pequena só disputaria
+  espaço
+- **largura fluida** `clamp(180px, 26vw, 380px)` — acompanha a tela sem virar
+  mancha em monitor grande
+
+O `padding` do `<main>` migrou para o div interno, porque o `<main>` passou a
+ser o ancoradouro (`relative`) da marca. **Verificado que nenhuma tela dependia
+do padding antigo.**
+
+**`setup.config.ts`:** `toolName` ainda era "Plataforma Comercial com IA" — era
+a **última ocorrência visível** do nome do template. Trocado para o nome da
+clínica. Só resta `src/lib/zernio.ts:201` (frente de Configuração, serviço
+abandonado).
+
+**`.claude/launch.json` criado** (`npm run dev`, porta 5173) para conferir
+mudança visual localmente antes de publicar. **Foi assim que a ocorrência do
+`setup.config.ts` apareceu** — rodar o app e olhar pegou o que o `grep` não
+pegava, porque a string estava num arquivo de configuração fora de `src/`.
+
+**Conferido no ar:** a tela de **login** mostra o mascote, "CLÍNICA / Amor Saúde
+Itabuna (BA)", tema claro e botão no turquesa da marca. **A marca d'água não
+pôde ser vista pelo agente** — fica dentro do app e o navegador do agente não
+tem a sessão do Danilo. **Pendente de conferência dele.**
+
+### 2026-09-07 · [FRENTE: configuração] · Importação dos dois relatórios
+
+- **Pedido:** a importação passa a receber **dois** arquivos do WebDental — o de
+  "APENAS NÃO APROVADOS" (81 linhas · R$ 68.436,03) e o de "APENAS APROVADOS"
+  (65 linhas · R$ 35.213,31). Motivo: o WebDental **trunca a exportação em 100
+  linhas**; com "Exibir: TODOS" são 143 tratamentos e 43 se perdem em silêncio.
+  O CRM reconhece qual é qual pela coluna `Dt Aprovação` — o usuário não escolhe
+  nada. Sem `Dt Aprovação` → "Orçamento apresentado" com a Dt Orçamento no
+  relógio; com `Dt Aprovação` → "Aprovado" com a data real, fora de qualquer
+  régua. As 2 linhas DENTALVIDAS não são tratamento e ficam de fora.
+
+**1. 🔴 A APROVAÇÃO DEIXOU DE SER PALPITE.** Até 06/09 o CRM lia "sumiu do
+relatório de não aprovados" como "foi aprovado". Isso morreu. Agora:
+
+| Situação | O que o CRM faz |
+|---|---|
+| Aparece no relatório de **aprovados** | Etapa "Aprovado", `won_at` e `stage_entered_at` = **Dt Aprovação real**, fora da régua |
+| Estava aberto e passa a aparecer nos aprovados | **Move** o mesmo card, sem duplicar |
+| Estava encerrado por prazo e aparece nos aprovados | **Reabre e aprova** — fato vence prazo, com aviso no resumo |
+| Sai dos não aprovados e **não** aparece nos aprovados | **NÃO vira aprovado, NÃO se move.** Só ganha nota de conferência |
+
+> **Por que a última linha é a mais importante.** Sair do relatório de não
+> aprovados significa aprovado **ou cancelado**. Contar cancelamento como
+> aprovação vira receita fantasma no relatório do dono. O orçamento fica onde
+> está, aberto, com a nota `Sumiu dos dois relatórios — verificar` explicando o
+> que aconteceu e pedindo conferência na clínica. A nota é escrita **uma vez
+> só** — sem essa trava, uma importação por dia encheria o card de avisos
+> idênticos e ninguém leria nenhum.
+
+Cada movimento fica registrado em `crm_activities` com a origem declarada:
+`Aprovado por Dt Aprovação (relatório de aprovados)` × `Sumiu dos dois
+relatórios — verificar`.
+
+**2. 🔴 DENTALVIDAS FORA — e a prova de que não é tratamento.** As 2 linhas
+(R$ 255,00 cada, Orenice Sotero Santos Souza e Carla Soane Dos Santos) são
+**venda do plano**, não procedimento:
+- o cabeçalho do próprio relatório conta separado — "QTD Tratamento Aprovados:
+  **63**" e "Valor Total Dental Vidas: **R$ 510,00**", contra 65 linhas somando
+  R$ 35.213,31. A diferença é exatamente R$ 510,00;
+- o PDF do relatório traz a legenda "VENDA EXTERNA PLANO DENTALVIDAS".
+
+Importar como orçamento criaria um procedimento "DENTALVIDAS" no catálogo,
+inflaria a conversão por especialidade e somaria R$ 510,00 de receita que não é
+de tratamento. Saem antes da classificação de especialidade, são listadas
+nominalmente no resumo e viram a pendência **#51**.
+
+**3. 🔴 O DEFEITO QUE SÓ A SIMULAÇÃO REVELOU — a ocorrência dança.**
+A ocorrência (1º, 2º…) é uma POSIÇÃO dentro do grupo *paciente + dia +
+tratamento*, e posição depende do conjunto. Nos arquivos reais **três**
+orçamentos existem nos dois relatórios ao mesmo tempo (Gustavo Pereira Santos,
+Laura Hage Moraes, Tania Santos Vieira — mesmo paciente, dia e tratamento, um
+aprovado e outro não). O único "Clínica Geral" do Gustavo em 01/09 é o **1º** no
+arquivo de não aprovados sozinho e o **2º** na união com o de aprovados: a
+chave inteira muda sem nada ter mudado no mundo real.
+
+Consequência se não fosse tratado: importar A sozinho num dia e A+B no outro
+geraria **cards fantasma** de um lado e **sumiços inventados** do outro — os
+sumiços que hoje pedem conferência humana. Conferido: acontece com 2 chaves.
+
+**A correção — casamento em TRÊS PASSADAS, cada uma varrendo todas as linhas
+antes da seguinte:**
+1. chave inteira (paciente, dia, tratamento, ocorrência, valor);
+2. **grupo + valor** — ignora a ocorrência; é a passada nova;
+3. chave sem o valor — o orçamento cujo preço foi corrigido.
+
+> **Por que em passadas, e não linha a linha.** Casando linha a linha, um
+> orçamento avaliado cedo rouba pela regra fraca (3) o deal que uma linha
+> posterior casaria pela regra forte (1 ou 2) — foi exatamente o que a
+> simulação mostrou: o card ficava trocado e nascia um sumiço ao lado. Varrendo
+> por passada, a evidência forte sempre ganha, independentemente da ordem.
+> Quando o casamento vem das passadas 2 ou 3, o `external_ref` é **regravado**,
+> senão a importação seguinte não encontra mais o orçamento.
+
+**4. GATILHO DO BANCO QUE OBRIGOU A INVERTER A ORDEM DA GRAVAÇÃO.**
+`trg_deal_won_to_sales` dispara **no INSERT** quando `status='won'` e lê
+`deal_products` naquele instante para montar a linha de `sales_records`. Um
+orçamento inserido já como ganho não tem procedimento ainda: a venda entraria
+no painel de /vendas com o **título do card** ("Fulano — Prótese · 03/09/2026")
+no lugar do nome do procedimento. Por isso o aprovado **nasce `status='open'`**
+na etapa "Aprovado", com a data certa, e só vira `'won'` no passo 6, depois dos
+procedimentos. Efeito colateral bom: se a importação falhar no meio, a
+reimportação conserta sozinha (o deal aberto em "Aprovado" cai em
+`movidosParaAprovado`).
+
+**5. SIMULAÇÃO COM OS ARQUIVOS REAIS — 9 cenários, 84 conferências, todas
+passaram.** Rodada fora do navegador, com cliente Supabase de mentira alimentado
+com o **estado real** do banco (lido por SELECT; nada foi escrito lá). O fake
+reproduz os gatilhos que importam (`deals_stage_clock`, `_sync_deal_outcome_ts`).
+
+| Conferência | Resultado |
+|---|---|
+| Arquivo A · tipo reconhecido sozinho | **não aprovados** · 81 · **R$ 68.436,03 exato** |
+| Arquivo B · tipo reconhecido sozinho | **aprovados** · **63** · **R$ 34.703,31 exato** |
+| DENTALVIDAS separado | 2 linhas · R$ 510,00 · fora da conta |
+| **União** | **144 orçamentos · R$ 103.139,34** · 144 chaves únicas |
+| Primeira importação | 81 em "Orçamento apresentado" · 63 em "Aprovado" |
+| `stage_entered_at` = data certa | **144 de 144** |
+| `won_at` = Dt Aprovação real | **63 de 63** |
+| `deal_products` · campos | 144 (todos quantity 1) · 1296 (144×9) |
+| Reimportar os dois | 0 novos · 0 atualizados · 144 sem mudança · **0 gravações** |
+| **Cruzado** (5 saem de A e aparecem em B) | 5 movidos · **144 deals, sem duplicar** · data real em todos |
+| **Sumiço** (7 saem de A e não aparecem em B) | **0 aprovados** · 7 sinalizados · os 7 seguem abertos e parados |
+| Nota de sumiço na 2ª importação | **não se repete** |
+| Só o arquivo A | 81 · chaves **idênticas** às do modelo de 06/09 · avisa que falta o de aprovados |
+| Só o arquivo B | 63 aprovados · **0 sumiços** (sem universo de não aprovados) |
+| D+7 aos 30 dias | encerra só os 81 abertos · **nenhum aprovado tocado** |
+| **A sozinho e DEPOIS A+B** | **0 cards fantasma · 0 sumiços inventados** · 2 chaves regravadas · 3ª importação com 0 gravações |
+
+Distribuição das 144: Clínica Geral 114 (R$ 61.744,63) · Prótese 20
+(R$ 28.865,30) · Ortodontia 8 (R$ 8.715,00) · Implantodontia 2 (R$ 3.814,41).
+
+**6. A TELA.** Um seletor só, com `multiple`: o dono escolhe **os dois arquivos
+de uma vez** e o CRM diz o que reconheceu em cada um ("Não aprovados · 81
+orçamentos · R$ 68.436,03"). Nada de escolher filtro numa lista. O resumo ganhou
+os cartões "Em aberto" × "Aprovados", o bloco do DENTALVIDAS com os nomes, a
+lista dos que sumiram (aberta por padrão) e a dos que saem do funil aberto para
+Aprovado. A caixa "marcar como aprovado quem sumiu" **deixou de existir** — no
+lugar entrou "sinalizar para conferência quem sumiu dos dois relatórios".
+Quando só um arquivo é subido, o resumo avisa o que o CRM não consegue fazer.
+
+- **Banco:** **nenhuma migração, nenhuma escrita.** Só SELECTs de leitura para
+  montar a simulação e conferir o estado. Conferido ao fim: **0 deals ·
+  0 deal_products · 0 custom_field_values · 0 crm_activities · 0 sales_records ·
+  0 repurchase_predictions · 3 contatos · 4 procedimentos.**
+- **Arquivos:** `src/lib/webdental.ts` · `src/lib/odontoImport.ts` ·
+  `src/components/funil/ImportOrcamentosDialog.tsx` · `MEMORIA.md`.
+- **Publicado: não.** Nenhum `git add`, nenhum `git commit`, nenhum `git push`,
+  nenhum deploy na Vercel.
+- **Validação:** `npx tsc -b`, `npx tsc -p tsconfig.api.json --noEmit` e
+  `npx vite build` passam sem erro.
+
+- **Convivência com as outras frentes:** a frente de design **commitou durante
+  esta sessão** (`d940f21`, `d259d8e`) e o commit `d940f21` **inclui**
+  `ImportOrcamentosDialog.tsx` com o tema claro. Minhas edições entraram **por
+  cima** dessa versão: conferido que o diff não reverte nenhuma cor
+  (`git diff | grep` por hex e rgba nas linhas adicionadas volta vazio) e que
+  não introduzi cor fora dos tokens. Nenhum arquivo de design, layout ou estilo
+  foi tocado.
+
+- **Não feito / limites desta entrega:**
+  - **A data da aprovação não virou campo personalizado.** Ela vive em
+    `deals.won_at` e no relógio da etapa. Criar o campo exigiria migração e o
+    dado já está no card — não fiz.
+  - **Venda do plano DentalVidas não é importada de forma alguma** — só
+    identificada e relatada (pendência **#51**).
+  - Nenhuma Edge Function tocada ou publicada. `check-follow-ups` intacta.
+  - Nenhum segredo lido, pedido ou gravado. Nenhuma pendência fechada (regra 4).
+  - O rótulo do campo no banco continua "Tratamento(s)" (pendência #50).
+
+- **⚠️ REGISTRO PARA O FUTURO — o que a importação dos aprovados dispara no
+  banco.** Cada orçamento que vira `won` aciona `trg_deal_won_to_sales`, que
+  grava uma linha em `sales_records` (fonte `crm:negocio_ganho`, aparece em
+  /vendas) **e** uma linha em `repurchase_predictions` com `predicted_next` =
+  data da aprovação + 30 dias. O cron `repurchase-dispatch-daily` (9h15) lê essa
+  fila. **Hoje não sai mensagem nenhuma** — conferido no banco:
+  `repurchase_config.auto_send = false` e `template_name` nulo, duas travas
+  independentes. Mas na primeira importação são **63 previsões de recompra** de
+  paciente odontológico entrando numa fila que não foi pensada para isso. Se
+  alguém ligar a recompra sem olhar, o CRM manda "seu estoque de Prótese está
+  acabando" para 55 pacientes. **Antes de ligar qualquer recompra, esvaziar ou
+  filtrar essa fila.**
+
+- **Próximo:** (1) o Danilo subir os dois arquivos pela tela e conferir
+  **144 cards · R$ 103.139,34** no funil (81 em "Orçamento apresentado",
+  63 em "Aprovado") — depende do deploy na Vercel, pendência #46;
+  (2) decidir o que fazer com a venda de plano DentalVidas (#51);
+  (3) definir quem exporta os DOIS relatórios todo dia (#48) — agora são dois,
+  e subir só um degrada a conciliação;
+  (4) conferir os sumiços que aparecerem na 2ª importação, antes de qualquer
+  número virar relatório (#47).

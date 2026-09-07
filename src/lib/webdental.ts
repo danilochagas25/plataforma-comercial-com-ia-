@@ -2,7 +2,18 @@
 // src/lib/webdental.ts — leitura do relatório *Controle de Efetivação*
 // ----------------------------------------------------------------------------
 // Fonte: WebDental / Dental Vidas (`relatorios.webdentalsolucoes.io`),
-// filtro "APENAS NÃO APROVADOS", unidade AmorSaúde Itabuna Centro.
+// unidade AmorSaúde Itabuna Centro.
+//
+// 🔴 SÃO **DOIS** ARQUIVOS (decisão do Danilo, 07/09/2026).
+//    · Arquivo A — filtro "APENAS NÃO APROVADOS": `Dt Aprovação` SEMPRE vazia.
+//    · Arquivo B — filtro "APENAS APROVADOS":     `Dt Aprovação` SEMPRE cheia.
+//
+//    **Por que dois e não um.** O WebDental TRUNCA a exportação em 100 linhas.
+//    Com "Exibir: TODOS" são 143 tratamentos e 43 se perdem em silêncio —
+//    verificado em três exports. Separados, cada um cabe no limite.
+//
+//    **O CRM reconhece qual é qual pela coluna `Dt Aprovação`** — o usuário não
+//    escolhe nada na tela. É `classificarRelatorio()`, aqui embaixo.
 //
 // ⚠️ O ARQUIVO NÃO É UM XLS. Apesar da extensão `.xls`, o export é uma PÁGINA
 //    HTML com sete `<table>`. A tabela de dados é a que tem o cabeçalho
@@ -63,6 +74,19 @@ export interface Orcamento {
   pacienteNome: string;
   /** AAAA-MM-DD */
   dtOrcamento: string;
+  /**
+   * AAAA-MM-DD quando o orçamento veio do relatório de APROVADOS, null quando
+   * veio do de não aprovados.
+   *
+   * 🔴 É o campo que muda o destino do orçamento no funil, e é FATO — não
+   * inferência. Com data → etapa "Aprovado", com a data real da aprovação,
+   * fora de qualquer régua. Sem data → "Orçamento apresentado".
+   */
+  dtAprovacao: string | null;
+  /** Atalho de leitura: `dtAprovacao !== null`. */
+  aprovado: boolean;
+  /** Nome do arquivo que trouxe esta linha — só para auditoria e resumo. */
+  arquivo: string;
   /** AAAA-MM-DD ou null */
   dtAgenda: string | null;
   /** Valor da linha (Valor Total do tratamento). */
@@ -98,6 +122,34 @@ export interface LinhaIgnorada {
   paciente?: string;
 }
 
+/**
+ * 🔴 DENTALVIDAS **NÃO É TRATAMENTO ODONTOLÓGICO** — é a venda do plano.
+ *
+ * Prova documental, para ninguém desfazer isto por engano depois:
+ *  · o cabeçalho do próprio relatório conta separado — "QTD Tratamento
+ *    Aprovados: 63" e "Valor Total Dental Vidas: R$ 510,00", contra 65 linhas
+ *    somando R$ 35.213,31. A diferença é exatamente R$ 510,00 (2 × R$ 255,00);
+ *  · o PDF do relatório traz a legenda "VENDA EXTERNA PLANO DENTALVIDAS".
+ *
+ * Entrar como orçamento odontológico criaria um procedimento "DENTALVIDAS" no
+ * catálogo, inflaria a conversão por especialidade e somaria R$ 510,00 de
+ * receita que não é de tratamento. Fica separado, é relatado no resumo e vira
+ * pendência para o dono decidir o que fazer com a venda de plano.
+ */
+export interface VendaPlano {
+  paciente: string;
+  telefone: string | null;
+  dtOrcamento: string;
+  dtAprovacao: string | null;
+  valor: number;
+  tratamento: string;
+  linha: number;
+  arquivo: string;
+}
+
+/** O que o filtro do WebDental produziu, deduzido da coluna `Dt Aprovação`. */
+export type TipoRelatorio = 'nao_aprovados' | 'aprovados' | 'misto' | 'vazio';
+
 export interface ParseWebdentalResult {
   orcamentos: Orcamento[];
   /** Linhas de dados lidas (sem o cabeçalho). */
@@ -109,6 +161,12 @@ export interface ParseWebdentalResult {
   formato: 'html' | 'planilha';
   /** Avisos que não invalidam a linha, mas o dono precisa ver. */
   avisos: string[];
+  /** Nome do arquivo lido. */
+  arquivo: string;
+  /** Aprovados / não aprovados — deduzido, não perguntado ao usuário. */
+  tipo: TipoRelatorio;
+  /** Linhas de venda do plano DENTALVIDAS — fora dos orçamentos. */
+  vendasPlano: VendaPlano[];
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +355,15 @@ const ESPECIALIDADES: Array<{ teste: RegExp } & EspecialidadeInfo> = [
 ];
 
 /**
+ * Reconhece a linha de VENDA DO PLANO DentalVidas, que o WebDental mistura com
+ * os tratamentos. Ver o comentário de `VendaPlano` para a prova de que não é
+ * procedimento. Cobre "DENTALVIDAS", "Dental Vidas" e "Plano DentalVidas".
+ */
+export function ehVendaDePlano(tratamento: string): boolean {
+  return /dental\s*vidas/i.test(tratamento);
+}
+
+/**
  * Tratamento do relatório → especialidade + tipo do catálogo.
  * O arquivo real só traz 4 (Clínica Geral, Prótese, Ortodontia,
  * Implantodontia); as demais estão previstas para não travar um export futuro.
@@ -396,15 +463,95 @@ function tabelaViaSheetJs(bytes: Uint8Array): Tabela | null {
 // Parse principal
 // ---------------------------------------------------------------------------
 
+/** Um orçamento antes de ganhar a chave de identidade e a ocorrência. */
+export type OrcamentoSemChave = Omit<
+  Orcamento,
+  'externalRef' | 'chaveBase' | 'ocorrencia' | 'totalOcorrencias'
+>;
+
+/** Grupo de identidade: mesmo paciente, mesma data, mesmo tratamento. */
+function grupoDoOrcamento(o: OrcamentoSemChave): string {
+  return `${slug(o.pacienteNome)}|${o.dtOrcamento}|${slug(o.tratamento)}`;
+}
+
+/**
+ * Atribui ocorrência e chave de identidade a um conjunto de orçamentos.
+ *
+ * ⚠️ A ocorrência NÃO é a ordem do arquivo. Se fosse, um relatório que
+ * exportasse as duas linhas do mesmo tratamento em ordem trocada geraria chaves
+ * diferentes para os mesmos dois orçamentos: dois cards novos de um lado e dois
+ * "aprovados por ausência" do outro — receita inventada. A ordem é decidida
+ * pelo CONTEÚDO: valor, depois não-aprovado antes de aprovado, depois a linha.
+ *
+ * 🔴 POR QUE O CRITÉRIO "não aprovado antes de aprovado" ENTROU (07/09/2026).
+ * Com DOIS arquivos, `linha` deixou de ser único: a linha 15 existe nos dois.
+ * Sem um critério anterior a ela, dois tratamentos iguais do mesmo paciente no
+ * mesmo dia — um em cada arquivo — poderiam receber a MESMA ocorrência e, se o
+ * valor também coincidisse, a MESMA chave: dois orçamentos disputando um único
+ * card. Com o critério, os arquivos ficam sempre separados antes de a linha ser
+ * consultada.
+ *
+ * ⚠️ Limite conhecido e aceito: se dois tratamentos idênticos, no mesmo dia,
+ * pelo mesmo valor, forem aprovados em dias diferentes, o ordinal de cada um
+ * troca de lugar entre um export e outro. Como as duas linhas são
+ * indistinguíveis (mesmo paciente, tratamento, data e valor), o efeito prático
+ * é nenhum: um dos dois cards se move para Aprovado, e é impossível dizer qual
+ * "deveria" ser. Não há chave melhor sem um identificador do WebDental, que o
+ * relatório não exporta.
+ */
+export function atribuirChaves(itens: OrcamentoSemChave[]): Orcamento[] {
+  const porGrupo = new Map<string, OrcamentoSemChave[]>();
+  for (const c of itens) {
+    const g = grupoDoOrcamento(c);
+    const lista = porGrupo.get(g) ?? [];
+    lista.push(c);
+    porGrupo.set(g, lista);
+  }
+  const out: Orcamento[] = [];
+  for (const [grupo, lista] of porGrupo) {
+    lista.sort(
+      (a, b) =>
+        a.valor - b.valor ||
+        Number(a.aprovado) - Number(b.aprovado) ||
+        a.linha - b.linha ||
+        a.arquivo.localeCompare(b.arquivo),
+    );
+    lista.forEach((c, i) => {
+      const chaveBase = `webdental:${grupo.split('|').join(':')}:${i + 1}`;
+      out.push({
+        ...c,
+        chaveBase,
+        externalRef: `${chaveBase}:${Math.round(c.valor * 100)}`,
+        ocorrencia: i + 1,
+        totalOcorrencias: lista.length,
+      });
+    });
+  }
+  return out;
+}
+
+/** Ordena para exibição: data, paciente, tratamento, ocorrência. */
+function ordenarParaExibicao(orcamentos: Orcamento[]): void {
+  orcamentos.sort((a, b) => {
+    if (a.dtOrcamento !== b.dtOrcamento) return a.dtOrcamento.localeCompare(b.dtOrcamento);
+    const nome = a.pacienteNome.localeCompare(b.pacienteNome, 'pt-BR');
+    if (nome !== 0) return nome;
+    const trat = a.tratamento.localeCompare(b.tratamento, 'pt-BR');
+    return trat !== 0 ? trat : a.ocorrencia - b.ocorrencia;
+  });
+}
+
 /**
  * Lê o relatório e devolve **um orçamento por linha** — 1 linha = 1 tratamento
  * = 1 oportunidade no funil. Nada é agrupado por paciente.
  *
  * @param bytes conteúdo bruto do arquivo
+ * @param arquivo nome do arquivo, só para o resumo e a auditoria
  */
-export function parseWebdental(bytes: Uint8Array): ParseWebdentalResult {
+export function parseWebdental(bytes: Uint8Array, arquivo = ''): ParseWebdentalResult {
   const avisos: string[] = [];
   const ignoradas: LinhaIgnorada[] = [];
+  const vendasPlano: VendaPlano[] = [];
 
   const texto = new TextDecoder('utf-8').decode(bytes);
   const pareceHtml = /<table/i.test(texto.slice(0, 400_000));
@@ -426,7 +573,8 @@ export function parseWebdental(bytes: Uint8Array): ParseWebdentalResult {
   if (!tabela) {
     throw new Error(
       'Não encontrei a tabela de tratamentos. Confira se o arquivo é o relatório ' +
-        '"Controle de Efetivação" do WebDental, exportado com o filtro "APENAS NÃO APROVADOS".',
+        '"Controle de Efetivação" do WebDental, exportado com o filtro ' +
+        '"APENAS NÃO APROVADOS" ou "APENAS APROVADOS".',
     );
   }
 
@@ -439,6 +587,8 @@ export function parseWebdental(bytes: Uint8Array): ParseWebdentalResult {
     tel: col('Tel'),
     endereco: col('Endereço'),
     dtOrcamento: cabecalho.findIndex((h) => h.startsWith('dt or')),
+    // 🔴 A coluna que decide o destino do orçamento. Cheia = aprovado (fato).
+    dtAprovacao: cabecalho.findIndex((h) => h.startsWith('dt aprova')),
     tratamento: col('Tratamento'),
     valor: col('Valor Total'),
     convenio: cabecalho.findIndex((h) => h.startsWith('total particip')),
@@ -469,10 +619,7 @@ export function parseWebdental(bytes: Uint8Array): ParseWebdentalResult {
   // dois tratamentos — e a reimportação criaria dois cards novos, dando os dois
   // antigos por aprovados. Ordenar pelo CONTEÚDO torna a chave independente da
   // ordem em que o WebDental resolveu exportar.
-  interface Cru extends Omit<Orcamento, 'externalRef' | 'chaveBase' | 'ocorrencia' | 'totalOcorrencias'> {
-    grupo: string;
-  }
-  const crus: Cru[] = [];
+  const crus: OrcamentoSemChave[] = [];
   const tratamentosDesconhecidos = new Set<string>();
   const telefonesPorPaciente = new Map<string, Set<string>>();
   let linhasLidas = 0;
@@ -485,10 +632,30 @@ export function parseWebdental(bytes: Uint8Array): ParseWebdentalResult {
     const paciente = limparTexto(r[idx.paciente]);
     const telCru = limparTexto(r[idx.tel]);
     const dt = parseDataRelatorio(r[idx.dtOrcamento]);
+    const dtAprov = idx.dtAprovacao >= 0 ? parseDataRelatorio(r[idx.dtAprovacao]) : null;
 
     // Linha de rodapé/total do relatório: sem paciente e sem data.
     if (!paciente && !dt) continue;
     linhasLidas++;
+
+    // 🔴 VENDA DO PLANO, não tratamento. Sai ANTES de classificar a
+    // especialidade — senão viraria um procedimento "DENTALVIDAS" no catálogo,
+    // R$ 510,00 de receita que não é de tratamento e uma conversão por
+    // especialidade errada. Ver o comentário de `VendaPlano`.
+    const tratamentoDaLinha = limparTexto(r[idx.tratamento]);
+    if (ehVendaDePlano(tratamentoDaLinha)) {
+      vendasPlano.push({
+        paciente,
+        telefone: telefoneDoRelatorio(telCru),
+        dtOrcamento: dt ?? '',
+        dtAprovacao: dtAprov,
+        valor: Math.round(parseValor(r[idx.valor]) * 100) / 100,
+        tratamento: tratamentoDaLinha,
+        linha: numeroLinha,
+        arquivo,
+      });
+      continue;
+    }
 
     if (!paciente) {
       ignoradas.push({ linha: numeroLinha, motivo: 'Sem nome de paciente.' });
@@ -508,18 +675,20 @@ export function parseWebdental(bytes: Uint8Array): ParseWebdentalResult {
       continue;
     }
 
-    const tratamentoBruto = limparTexto(r[idx.tratamento]) || 'Não informado';
+    const tratamentoBruto = tratamentoDaLinha || 'Não informado';
     const classe = classificarTratamento(tratamentoBruto);
     if (!classe.conhecido) tratamentosDesconhecidos.add(tratamentoBruto);
 
     const tabelaPrecoCrua = idx.tabela >= 0 ? limparTexto(r[idx.tabela]) : '';
 
     crus.push({
-      grupo: `${slug(paciente)}|${dt}|${slug(tratamentoBruto)}`,
       telefone,
       telefoneCru: telCru,
       pacienteNome: paciente,
       dtOrcamento: dt,
+      dtAprovacao: dtAprov,
+      aprovado: dtAprov !== null,
+      arquivo,
       dtAgenda: idx.dtAgenda >= 0 ? parseDataRelatorio(r[idx.dtAgenda]) : null,
       valor: Math.round(parseValor(r[idx.valor]) * 100) / 100,
       participacaoConvenio:
@@ -541,27 +710,11 @@ export function parseWebdental(bytes: Uint8Array): ParseWebdentalResult {
   }
 
   // --- 2ª passada: ocorrência e chave de identidade -------------------------
-  const porGrupo = new Map<string, Cru[]>();
-  for (const c of crus) {
-    const lista = porGrupo.get(c.grupo) ?? [];
-    lista.push(c);
-    porGrupo.set(c.grupo, lista);
-  }
-  const orcamentos: Orcamento[] = [];
-  for (const [, lista] of porGrupo) {
-    lista.sort((a, b) => (a.valor === b.valor ? a.linha - b.linha : a.valor - b.valor));
-    lista.forEach((c, i) => {
-      const { grupo, ...resto } = c;
-      const chaveBase = `webdental:${grupo.split('|').join(':')}:${i + 1}`;
-      orcamentos.push({
-        ...resto,
-        chaveBase,
-        externalRef: `${chaveBase}:${Math.round(c.valor * 100)}`,
-        ocorrencia: i + 1,
-        totalOcorrencias: lista.length,
-      });
-    });
-  }
+  //
+  // ⚠️ Quando os DOIS relatórios são importados juntos, esta atribuição é
+  // REFEITA sobre a união em `combinarLeituras()`. Aqui ela vale para o arquivo
+  // isolado, que é como a função é usada em conferência e teste.
+  const orcamentos = atribuirChaves(crus);
 
   // --- Avisos ---------------------------------------------------------------
   if (tratamentosDesconhecidos.size > 0) {
@@ -625,15 +778,193 @@ export function parseWebdental(bytes: Uint8Array): ParseWebdentalResult {
     }
   }
 
-  orcamentos.sort((a, b) => {
-    if (a.dtOrcamento !== b.dtOrcamento) return a.dtOrcamento.localeCompare(b.dtOrcamento);
-    const nome = a.pacienteNome.localeCompare(b.pacienteNome, 'pt-BR');
-    if (nome !== 0) return nome;
-    const trat = a.tratamento.localeCompare(b.tratamento, 'pt-BR');
-    return trat !== 0 ? trat : a.ocorrencia - b.ocorrencia;
-  });
+  ordenarParaExibicao(orcamentos);
 
-  return { orcamentos, linhasLidas, ignoradas, periodo, formato, avisos };
+  // --- Que relatório é este? ------------------------------------------------
+  // Deduzido da coluna `Dt Aprovação`, nunca perguntado ao usuário.
+  const comAprovacao = orcamentos.filter((o) => o.aprovado).length;
+  const tipo: TipoRelatorio =
+    orcamentos.length === 0
+      ? 'vazio'
+      : comAprovacao === 0
+        ? 'nao_aprovados'
+        : comAprovacao === orcamentos.length
+          ? 'aprovados'
+          : 'misto';
+
+  if (tipo === 'misto') {
+    // Acontece se o WebDental for exportado com "Exibir: TODOS" — que é
+    // exatamente a exportação que TRUNCA em 100 linhas e perde registros.
+    avisos.push(
+      `Este arquivo tem aprovados E não aprovados misturados (${comAprovacao} com data de ` +
+        `aprovação, ${orcamentos.length - comAprovacao} sem). Provavelmente foi exportado com ` +
+        '"Exibir: TODOS", que o WebDental TRUNCA em 100 linhas — registros podem estar faltando. ' +
+        'Exporte separado: "APENAS NÃO APROVADOS" e "APENAS APROVADOS".',
+    );
+  }
+  if (vendasPlano.length > 0) {
+    const total = Math.round(vendasPlano.reduce((a, v) => a + v.valor, 0) * 100) / 100;
+    avisos.push(
+      `${vendasPlano.length} linha(s) de VENDA DO PLANO DentalVidas (R$ ${total.toFixed(2)}) ficaram ` +
+        `FORA da importação: ${vendasPlano.map((v) => v.paciente).join(', ')}. ` +
+        'Não é procedimento odontológico — o próprio relatório conta separado ' +
+        '("Valor Total Dental Vidas") e o PDF chama de "venda externa plano". ' +
+        'O que fazer com a venda de plano é decisão do dono.',
+    );
+  }
+
+  return {
+    orcamentos,
+    linhasLidas,
+    ignoradas,
+    periodo,
+    formato,
+    avisos,
+    arquivo,
+    tipo,
+    vendasPlano,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// União dos DOIS relatórios
+// ---------------------------------------------------------------------------
+
+/** Rótulo em português do tipo de relatório — para a tela. */
+export function rotuloDoTipo(tipo: TipoRelatorio): string {
+  switch (tipo) {
+    case 'nao_aprovados':
+      return 'Não aprovados';
+    case 'aprovados':
+      return 'Aprovados';
+    case 'misto':
+      return 'Misturado (aprovados + não aprovados)';
+    default:
+      return 'Vazio';
+  }
+}
+
+export interface ArquivoLido {
+  nome: string;
+  tipo: TipoRelatorio;
+  linhas: number;
+  orcamentos: number;
+  valor: number;
+  vendasPlano: number;
+}
+
+/**
+ * O que a importação consome: a união dos relatórios subidos numa mesma vez.
+ * Substitui o `ParseWebdentalResult` de um arquivo só na entrada de
+ * `planejarImportacao`.
+ */
+export interface LeituraCombinada {
+  orcamentos: Orcamento[];
+  linhasLidas: number;
+  ignoradas: LinhaIgnorada[];
+  periodo: { de: string | null; ate: string | null };
+  avisos: string[];
+  vendasPlano: VendaPlano[];
+  arquivos: ArquivoLido[];
+  /** Recebemos o universo dos NÃO aprovados? Sem isso não existe "sumiço". */
+  temNaoAprovados: boolean;
+  /** Recebemos o universo dos aprovados? Sem isso não existe aprovação por fato. */
+  temAprovados: boolean;
+}
+
+/**
+ * Junta as leituras dos arquivos subidos e **REATRIBUI ocorrência e chave**
+ * sobre a união.
+ *
+ * 🔴 POR QUE REATRIBUIR, e não só concatenar. A ocorrência é calculada dentro
+ * do grupo (mesmo paciente, mesma data, mesmo tratamento). Se cada arquivo
+ * calculasse a sua, um paciente com duas limpezas no mesmo dia — uma aprovada,
+ * uma não — teria ocorrência 1 nos DOIS arquivos. Com o mesmo valor, isso vira
+ * a MESMA chave para dois orçamentos diferentes: um sobrescreveria o outro no
+ * banco (a chave é única por organização) e um tratamento sumiria do funil sem
+ * ninguém perceber. Calculada sobre a união, a numeração é única por definição.
+ */
+export function combinarLeituras(leituras: ParseWebdentalResult[]): LeituraCombinada {
+  const avisos: string[] = [];
+  const ignoradas: LinhaIgnorada[] = [];
+  const vendasPlano: VendaPlano[] = [];
+  const arquivos: ArquivoLido[] = [];
+  const semChave: OrcamentoSemChave[] = [];
+
+  for (const l of leituras) {
+    avisos.push(...l.avisos);
+    ignoradas.push(...l.ignoradas);
+    vendasPlano.push(...l.vendasPlano);
+    arquivos.push({
+      nome: l.arquivo,
+      tipo: l.tipo,
+      linhas: l.linhasLidas,
+      orcamentos: l.orcamentos.length,
+      valor: somarOrcamentos(l.orcamentos),
+      vendasPlano: l.vendasPlano.length,
+    });
+    for (const o of l.orcamentos) {
+      const { externalRef: _r, chaveBase: _b, ocorrencia: _o, totalOcorrencias: _t, ...resto } = o;
+      semChave.push(resto);
+    }
+  }
+
+  const orcamentos = atribuirChaves(semChave);
+  ordenarParaExibicao(orcamentos);
+
+  // Período = união dos períodos declarados. É a janela dentro da qual a
+  // AUSÊNCIA de um orçamento significa alguma coisa.
+  const des = leituras.map((l) => l.periodo.de).filter((d): d is string => Boolean(d));
+  const ates = leituras.map((l) => l.periodo.ate).filter((d): d is string => Boolean(d));
+  const periodo = {
+    de: des.length === leituras.length && des.length > 0 ? des.slice().sort()[0] : null,
+    ate: ates.length === leituras.length && ates.length > 0 ? ates.slice().sort().pop()! : null,
+  };
+
+  const temNaoAprovados = leituras.some((l) => l.tipo === 'nao_aprovados' || l.tipo === 'misto');
+  const temAprovados = leituras.some((l) => l.tipo === 'aprovados' || l.tipo === 'misto');
+
+  // Dois arquivos do MESMO filtro: o dono provavelmente subiu o mesmo relatório
+  // duas vezes, ou esqueceu de trocar o filtro. Metade do quadro fica faltando.
+  const tipos = arquivos.map((a) => a.tipo).filter((t) => t !== 'vazio');
+  const repetido = tipos.find((t, i) => tipos.indexOf(t) !== i);
+  if (repetido) {
+    avisos.push(
+      `Dois arquivos com o MESMO filtro ("${rotuloDoTipo(repetido)}"). Confira: o esperado é um ` +
+        'relatório "APENAS NÃO APROVADOS" e um "APENAS APROVADOS".',
+    );
+  }
+
+  // Mesmo tratamento, mesmo dia, mesmo valor, aparecendo nos dois relatórios ao
+  // mesmo tempo. Não deveria existir (os filtros são excludentes) e é o único
+  // caso em que a numeração de ocorrência fica ambígua — então é relatado.
+  const gruposMistos = new Map<string, Set<boolean>>();
+  for (const o of orcamentos) {
+    const chave = `${grupoDoOrcamento(o)}|${Math.round(o.valor * 100)}`;
+    const s = gruposMistos.get(chave) ?? new Set<boolean>();
+    s.add(o.aprovado);
+    gruposMistos.set(chave, s);
+  }
+  const ambiguos = [...gruposMistos.values()].filter((s) => s.size > 1).length;
+  if (ambiguos > 0) {
+    avisos.push(
+      `${ambiguos} tratamento(s) idênticos (mesmo paciente, dia e valor) aparecem nos DOIS ` +
+        'relatórios ao mesmo tempo — um como aprovado e outro não. Os filtros do WebDental são ' +
+        'excludentes, então confira o export. Cada linha virou um orçamento próprio.',
+    );
+  }
+
+  return {
+    orcamentos,
+    linhasLidas: leituras.reduce((a, l) => a + l.linhasLidas, 0),
+    ignoradas,
+    periodo,
+    avisos,
+    vendasPlano,
+    arquivos,
+    temNaoAprovados,
+    temAprovados,
+  };
 }
 
 /** Soma dos valores — usada no resumo antes de aplicar. */
@@ -665,6 +996,31 @@ export function refWebdentalEhAntigo(ref: string): boolean {
 export function chaveBaseDoRef(ref: string): string | null {
   const p = ref.split(':');
   return p.length === 6 ? p.slice(0, 5).join(':') : null;
+}
+
+/**
+ * A chave sem a ocorrência e sem o valor — `webdental:<paciente>:<data>:<tratamento>`.
+ *
+ * 🔴 PARA QUE SERVE. A ocorrência é uma POSIÇÃO dentro do grupo, e posição
+ * depende do conjunto: no arquivo de não aprovados sozinho, o único
+ * "Clínica Geral" do Gustavo em 01/09 é o 1º; na união com o arquivo de
+ * aprovados, onde existe outro Clínica Geral dele no mesmo dia, ele vira o 2º.
+ * A chave inteira muda sem que nada tenha mudado no mundo real — e o CRM veria
+ * um card novo e um sumiço no lugar do mesmo orçamento.
+ *
+ * Nos arquivos reais de 07/09/2026 isso acontece com 3 orçamentos. Por isso o
+ * casamento tem uma passada por GRUPO + VALOR, que ignora a ocorrência: dois
+ * exports do mesmo orçamento têm sempre o mesmo paciente, dia, tratamento e
+ * preço, mesmo quando a numeração dança.
+ */
+export function grupoDoRef(ref: string): string | null {
+  const p = ref.split(':');
+  return p.length === 6 ? p.slice(0, 4).join(':') : null;
+}
+
+/** Grupo (sem ocorrência e sem valor) de um orçamento lido do arquivo. */
+export function grupoDoOrcamentoLido(o: Orcamento): string {
+  return `webdental:${grupoDoOrcamento(o).split('|').join(':')}`;
 }
 
 /** Data do orçamento embutida na chave (plano B quando o campo não foi lido). */
