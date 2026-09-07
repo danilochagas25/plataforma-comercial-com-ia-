@@ -4000,3 +4000,93 @@ Quando só um arquivo é subido, o resumo avisa o que o CRM não consegue fazer.
   e subir só um degrada a conciliação;
   (4) conferir os sumiços que aparecerem na 2ª importação, antes de qualquer
   número virar relatório (#47).
+
+### 2026-09-07 · [FRENTE: configuração] · Importação dos dois relatórios PUBLICADA (`498dddb`)
+
+**Publicado** commit `498dddb`, com **4 arquivos apenas** — adicionados um a um,
+sem `git add -A`, preservando o trabalho não commitado das outras frentes.
+
+**⚠️ CONTEXTO NOVO E CRÍTICO:** o Danilo trabalha com **três agentes
+simultâneos** na mesma pasta e no mesmo banco — **design**, **comercial**
+(textos) e **configuração** (esta frente). Protocolo em
+**`COORDENACAO-AGENTES.md`** (criado hoje). A frente de design já publicou:
+`d940f21`, `d259d8e`, `e8669c0`, `0ebc09f` — **o design system virou TEMA
+CLARO** (o `CLAUDE.md` foi corrigido por ela). O dark glassmorphism **não vale
+mais** para código novo de interface.
+
+> **Quase incidente:** esta frente vinha usando `git add -A` em todos os
+> deploys. Se tivesse publicado durante o trabalho da frente de design, teria
+> levado o redesign **pela metade** para produção. Regra nova: **adicionar
+> arquivo por arquivo e listar ao Danilo antes de publicar.**
+
+**RESULTADO DA SIMULAÇÃO (9 cenários, 84 conferências, nada gravado):**
+A isolado **81 · R$ 68.436,03** · B isolado **63 · R$ 34.703,31** ·
+união **144 · R$ 103.139,34** · `stage_entered_at` certo em 144/144 ·
+`won_at` = Dt Aprovação em 63/63 · reimportar → **0 gravações** ·
+cruzado (sai de A, aparece em B) → move o mesmo card, sem duplicar ·
+D+7 aos 30 dias → encerra só os 81 abertos, **nenhum aprovado tocado**.
+
+**MUDANÇA DE PAPEL DA INFERÊNCIA (importante):** antes o CRM deduzia "sumiu do
+relatório = aprovado". Com o arquivo B, a aprovação é **FATO**. Orçamento que
+some dos **dois** relatórios **não vira aprovado** — fica onde está, com nota
+`Sumiu dos dois relatórios — verificar` (escrita **uma vez só**; testado que não
+repete). O provável é **cancelamento**, e contá-lo como receita seria inventar
+dinheiro no relatório do dono. A caixa "marcar aprovado quem sumiu" **deixou de
+existir**.
+
+**ACHADO 1 — a ocorrência dançava.** Três orçamentos existem nos **dois**
+relatórios (mesmo paciente, dia e tratamento). O ordinal mudava conforme quais
+arquivos fossem subidos — importar A sozinho e depois A+B geraria **cards
+fantasma e sumiços inventados**. Corrigido com casamento em **três passadas**
+(a nova é grupo + valor, que ignora o ordinal), varrendo todas as linhas por
+passada para a evidência forte sempre ganhar. Testado: 0 fantasma.
+
+**🔴 ACHADO 2 — PENDÊNCIA #52: a importação dos aprovados ENCHE A FILA DE
+RECOMPRA.** Cada deal `won` dispara `trg_deal_won_to_sales`, que grava em
+`sales_records` **e** em `repurchase_predictions`. O cron
+`repurchase-dispatch-daily` (9h15) lê essa fila. **A 1ª importação põe 63
+previsões de recompra odontológica ali.** Hoje não sai mensagem — `auto_send=false`
+e sem template, duas travas. Mas se alguém ligar a recompra sem esvaziar a fila,
+o CRM manda *"seu estoque de Prótese está acabando"* para **55 pacientes**.
+A função veio do template de infoproduto; **recompra não existe em odontologia**.
+**Recomendação registrada: desligar a recompra de vez.**
+
+Isso obrigou a inverter a gravação: o aprovado **nasce `open`** na etapa Aprovado
+e só vira `won` depois de gravados os procedimentos — senão a venda entraria em
+`/vendas` com o título do card no lugar do procedimento.
+
+**DENTALVIDAS fora** (pendência #51): 2 linhas de R$ 255,00 são **venda de
+plano**, não procedimento. Prova: cabeçalho conta 63 tratamentos contra 65
+linhas (diferença exata de R$ 510,00) e o PDF traz a legenda "VENDA EXTERNA
+PLANO DENTALVIDAS".
+
+**Tela:** um seletor, os dois arquivos de uma vez. O CRM diz o que reconheceu em
+cada um. Se subir só um, o resumo avisa o que deixa de conseguir fazer.
+
+- **Banco:** nenhuma migração. Nenhuma escrita (só SELECT).
+- **Pendências novas:** #51 venda de plano · **#52 fila de recompra (perigosa)** ·
+  #53 subir sempre os dois · #54 data de aprovação não é campo.
+- **Próximo:** Danilo importa pela tela e confere os 144 orçamentos no funil.
+
+### 2026-09-07 · [FRENTE: configuração] · Prova concreta do risco entre frentes
+
+**O `COORDENACAO-AGENTES.md` foi publicado pela FRENTE DE DESIGN**, no commit
+`d940f21` ("Identidade AmorSaude no CRM: tema claro"). Ela usou `git add -A` e
+levou junto um arquivo que acabara de ser criado pela frente de configuração e
+que ela desconhecia.
+
+**O arquivo que proíbe `git add -A` foi publicado por um `git add -A`.**
+
+Não houve dano — era documentação. **Mas é a evidência de que o risco é real:**
+se em vez de um `.md` fosse código de outra frente pela metade, teria ido para
+produção igual. É o mesmo mecanismo do quase-incidente desta sessão.
+
+**Reforça a Regra 1 do protocolo:** adicionar arquivo por arquivo e listar ao
+dono antes de publicar. **O protocolo precisa ser colado nas outras duas
+sessões** — hoje elas não sabem que existem outras frentes.
+
+**Estado dos documentos do projeto:**
+`ODONTO.md` · `PLANO-MIGRACAO-META.md` · `COORDENACAO-AGENTES.md` ·
+`MEMORIA.md` → versionados.
+`PROMPT-CONTINUIDADE.md` → **não versionado**; o Danilo disse que não precisa
+mais dele. Aguarda decisão: apagar ou manter local.
