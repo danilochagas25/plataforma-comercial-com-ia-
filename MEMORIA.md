@@ -4090,3 +4090,335 @@ sessões** — hoje elas não sabem que existem outras frentes.
 `MEMORIA.md` → versionados.
 `PROMPT-CONTINUIDADE.md` → **não versionado**; o Danilo disse que não precisa
 mais dele. Aguarda decisão: apagar ou manter local.
+
+### 2026-09-07 · Claude Code · OS 3 TEMPLATES SUBMETIDOS — 2 já aprovados
+
+| Modelo | Categoria | Idioma | Status |
+|---|---|---|---|
+| `odonto_orcamento_d1` (id `1417008766950524`) | Marketing | pt_BR | ✅ **Ativo** |
+| `odonto_orcamento_d3` | Marketing | pt_BR | ✅ **Ativo** |
+| `odonto_orcamento_d7` | Marketing | pt_BR | ⏳ Em análise |
+
+Todos com **botões de resposta rápida** (tipo "Personalizado" no painel) e
+variável `{{1}}` = primeiro nome, amostra "Maria".
+
+**AJUSTE DE CONTEÚDO no D+7 (feito durante o cadastro):** o texto aprovado
+usava `{{1}}` **duas vezes** (abertura e fecho). A Meta **numera cada ocorrência
+em sequência** — o segundo `{{1}}` virou `{{2}}`, criando uma segunda variável
+que complicaria o envio à toa. O fecho passou de "Seguimos à disposição,
+{{1}}." para **"Seguimos à disposição quando for melhor para você."**, e o corpo
+ganhou "na Amor Saúde Odontologia" para não perder a identificação da clínica.
+**Regra que fica: uma variável = uma ocorrência no texto.**
+
+**🔑 DESCOBERTA QUE DESTRAVOU TUDO — a Meta ignora campo preenchido por
+programa.** O formulário aceita o valor no DOM (e até exibe na prévia), mas a
+**validação usa o estado interno do React**, que só é atualizado por digitação
+real. Sintoma: "Texto obrigatório ausente" com **todos os campos visivelmente
+preenchidos**. Nem o setter nativo com `_valueTracker.setValue('')` resolveu.
+
+**Método que funciona (usar sempre neste painel):**
+1. `find` para pegar o `ref` do campo
+2. `computer left_click` no ref
+3. `cmd+a` e, se preciso, `Delete`
+4. **`computer type`** com o texto — digitação real
+5. `Tab` para disparar o blur
+6. Conferir com `[aria-invalid="true"]` — é o que aponta **qual** campo a página
+   ainda considera vazio (foi assim que se descobriu que era o **nome**, e não
+   o corpo)
+
+**O idioma é a única exceção:** o seletor é um DIV customizado que **não abre
+por automação** — testadas 7 abordagens (ref, coordenada calculada por
+`getBoundingClientRect`, eventos de mouse completos, teclado, `form_input`, JS
+com clique programático). **O Danilo trocou manualmente nos dois casos.**
+Para o próximo: peça ao dono para selecionar o idioma e assuma o resto.
+
+**Outras armadilhas confirmadas:** `Page.captureScreenshot` trava nessas telas
+(usar `find`/`read_page`/`get_page_text`/JS); botão de resposta rápida chama-se
+**"Personalizado"** no menu de tipos.
+
+- **Banco:** nenhuma migração.
+- **Próximo (território deste chat):** quando o D+7 aprovar, **vincular os 3 às
+  regras `stage_stalled`** já criadas — que seguem **`is_active=false`**,
+  conforme o escopo vigente (disparo fora de escopo por decisão do Danilo).
+
+---
+
+## 07/09/2026 — Prompt do atendente de IA escrito e salvo (IA segue desligada)
+
+**O que se decidiu.** A IA faz **pré-atendimento e cadência**, nunca
+atendimento completo: responde **breve** (1–2 mensagens), entende o assunto em
+uma frase e **sempre** passa para a recepção. Escopo definido pelo Danilo
+("a função dela será mais de cadência do paciente", "sempre passa para o
+humano, o contato deve ser breve").
+
+**A IA não fala preço.** Decisão discutida e aprovada. Quatro razões: o valor
+tem duas versões (filiado do Cartão de TODOS × particular), o dado importado do
+WebDental pode estar velho, preço dito por robô **encerra a conversa** e tira da
+recepção a chance de negociar.
+
+**Limite técnico que moldou o texto.** `process-ai-message` **não injeta os
+dados do orçamento** no prompt — a IA não sabe valor, tratamento nem há quantos
+dias está parado. Recebe apenas `{nome_do_contato}`, as variáveis de horário
+(`{horario_atendimento}`, `{dentro_do_horario}`, `{mensagem_fora_horario}`,
+`{horario_inicial_week}` etc.), `{midias_disponiveis}` e o RAG. Por isso o
+prompt **proíbe fingir que conhece o caso**. Se um dia quisermos a IA citando o
+orçamento, é preciso alterar a Edge Function — não basta editar o texto.
+
+**Sem nome próprio, de propósito.** A IA se identifica como atendimento
+automático da clínica. Batizá-la faria o paciente crer que fala com pessoa, e
+isso azeda quando ele descobre.
+
+**Também no texto:** nada de orientação clínica (regulado pelo CFO); dor ou
+sintoma é prioridade e passa na hora; sempre **"filiado"**, nunca "sócio".
+
+- **Banco:** `update whatsapp_hub.ai_agent_config set system_prompt = ...`
+  (2.914 caracteres). Nenhuma migração — é dado, não estrutura.
+- **`is_active` continua `false`.** Ligar é decisão do Danilo, depois da base de
+  conhecimento.
+- **Próximo (território deste chat):** montar a base de conhecimento — hoje com
+  **0 entradas**. É ela que define o que a IA pode responder sem chamar a
+  recepção.
+
+---
+
+## 07/09/2026 — Horário no banco, escopo da IA fechado, base de conhecimento dispensada
+
+**O `business_hours` estava `{}` — vazio.** O `{horario_atendimento}` do prompt
+renderizava em branco. Preenchido: **seg–sex 08:00–18:00, sábado 08:00–12:00,
+domingo fechado**, no formato que `buildScheduleVars` espera
+(`{ mon: {enabled,start,end}, ... }`).
+
+**A `out_of_hours_message` não estava com lixo de template** — cheguei a dizer
+isso ao Danilo e estava errado. Os `{dia_inicial}`, `{final_de_semana}` etc.
+são **preenchidos por `buildScheduleVars`** a partir do `business_hours`; sem
+horário cadastrado é que saíam vazios. Reescrita só a última frase, que dizia
+"eu continuo disponível para lhe auxiliar" — contradizia o papel da IA, que
+sempre entrega para humano.
+
+**Escopo restringido pelo Danilo.** Ele vetou dois itens da base:
+**não citar tratamentos** e **não falar do Cartão de TODOS**. Ambos viraram
+proibição explícita no prompt — a seção que autorizava confirmar atendimento a
+filiados **foi removida**. Regra nova: convênio/plano/cartão de desconto → não
+confirma, não nega, passa para a recepção.
+
+**🔑 A base de conhecimento ficou desnecessária.** Sobraram **dois fatos**
+(endereço e horário). Colocá-los no `system_prompt` é mais confiável que RAG:
+`knowledge_search` é top-5 por similaridade e pode simplesmente não trazer o
+chunk. Endereço entrou como texto fixo; horário entra pela variável.
+**A base segue com 0 entradas — de propósito, não por pendência.**
+
+- **Banco:** `update whatsapp_hub.app_settings` (business_hours +
+  out_of_hours_message) e `update whatsapp_hub.ai_agent_config`
+  (system_prompt, 3.371 caracteres). Nenhuma migração.
+- **`is_active` continua `false`.**
+- **Pendente com o Danilo:** formas de pagamento e o que levar na primeira
+  consulta — perguntados, não respondidos. Sem eles a IA passa para a recepção,
+  que é o comportamento correto por padrão.
+
+---
+
+## 07/09/2026 — Teste da IA falhou: falta a chave da OpenAI
+
+**Sintoma:** Danilo mandou "Boa tarde" às 15:05 (BRT) do celular pessoal.
+Mensagem gravada em `messages` (inbound, 18:05:41 UTC). Nenhuma resposta.
+
+**Diagnóstico pelos logs** (`function_edge_logs` + `edge_logs`), sequência de
+0,4 s: `conversations` ✓ → `ai_agent_config` ✓ → `channels.ai_enabled` ✓ →
+`org_settings` key `openai_api_key` → **HTTP 400**. Parou exatamente na busca
+da chave.
+
+**Causa: `public.org_settings` só tem `meta_app_secret` e
+`meta_webhook_verify_token`. Não existe `openai_api_key`.** Sem ela não há
+resposta, nem embedding, nem Whisper — a app é **OpenAI-only** (comentário
+explícito em `AIAgentSettings.tsx:72`: "não há seletor de provider
+alternativo"). O `llm_provider` multi-provider descrito no CLAUDE.md **não
+existe mais neste código**.
+
+**🔑 Correção de rota documental:** o CLAUDE.md diz que as credenciais vivem em
+`public.app_settings`. **Hoje a tabela é `public.org_settings`**, com `org_id`.
+Da mesma forma, `whatsapp_hub.app_settings` e `ai_agent_config` têm `org_id`
+(org atual: `2f61f310-1f2b-4049-9f2e-df9b6bc699e6`) — resquício do build SaaS.
+
+**Onde o dono cadastra:** Ajustes → Atendente IA → campo "OpenAI API Key"
+(grava via `/api/credentials`). **Nunca pedir a chave no chat.**
+
+**⚠️ Armadilha ao salvar por essa tela:** o formulário envia prompt +
+temperature + max_tokens **junto** com a chave. Como o `system_prompt` foi
+escrito por SQL, é preciso conferir se a tela carregou o texto certo antes de
+salvar — se exibir o `DEFAULT_PROMPT` do template, salvar **apaga** o texto
+aprovado.
+
+- **Estado deixado:** `is_active = true`, temperature **0.3**, max_tokens
+  **300** (apertados para forçar brevidade). Conversa do Danilo (final 2570)
+  despausada; a de **Sérgio O. Fernandes** (4142) **pausada** para não receber
+  resposta de prompt não validado.
+- **Banco:** nenhuma migração.
+- **Próximo:** Danilo cadastra a chave OpenAI → refazer o teste.
+
+### 2026-09-07 · [FRENTE: configuração] · Correção do bug de classificação de aprovados
+
+- **Pedido:** o Danilo importou os dois relatórios em produção e o funil ficou
+  com **94 orçamentos apresentados (R$ 78.983,37)** e **49 aprovados
+  (R$ 23.793,10)**, quando o certo é **81 (R$ 68.436,03)** e **63
+  (R$ 34.703,31)**. Dezesseis cards do arquivo de APROVADOS foram parar em
+  "Orçamento apresentado", mesmo com as 65 linhas do arquivo trazendo
+  `Dt Aprovação` preenchida. Achar a causa **raiz**, não o sintoma, e garantir
+  que as duas ordens de importação (A→B e B→A) deem o mesmo resultado.
+
+**1. 🔴 CAUSA RAIZ: O CÓDIGO QUE RODOU EM PRODUÇÃO NÃO ERA O CÓDIGO NOVO.**
+
+A importação do Danilo executou o commit **`c56a637`** (de 06/09, "um orçamento
+por tratamento"), **não** o `498dddb` (de hoje, que lê a coluna `Dt Aprovação` e
+aceita os dois arquivos). O `c56a637` não conhece `Dt Aprovação`: ele ainda
+deduzia **"sumiu do relatório = foi aprovado"**, e só aceitava **um arquivo por
+vez**.
+
+**A cronologia fecha em minutos:**
+
+| Horário (local) | O que aconteceu |
+|---|---|
+| 06/09 21:35 | commit `c56a637` — versão que estava no ar |
+| 07/09 **14:37:40** | commit `498dddb` — a versão nova |
+| 07/09 **14:43:15** | **1ª importação do Danilo** — 5 min 35 s depois do commit |
+| 07/09 14:45 | 2ª importação |
+
+A Vercel ainda não tinha terminado de publicar. O navegador do Danilo carregou o
+pacote antigo.
+
+**AS TRÊS PROVAS, independentes entre si:**
+
+**(a) A simulação do código antigo reproduz produção AO CENTAVO.** Rodei o
+`c56a637` fora do navegador (Supabase de mentira, estado real do banco), na
+ordem que o Danilo usou — arquivo de APROVADOS primeiro, de NÃO APROVADOS
+depois:
+
+| | Simulação com `c56a637` | O que o Danilo viu |
+|---|---|---|
+| Orçamento apresentado | **94 · R$ 78.983,37** | 94 · R$ 78.983,37 |
+| Aprovado | **49 · R$ 23.793,10** | 49 · R$ 23.793,10 |
+| Total de cards | 143 | 143 |
+
+E os **16 nomes** saíram exatamente iguais aos da lista do Danilo, com os mesmos
+valores — inclusive os três esquisitos (Gustavo R$ 236,68 · Laura R$ 62,40 ·
+Tania R$ 1.047,38), que têm valor do arquivo A em cards nascidos do arquivo B.
+
+**(b) O procedimento "DENTALVIDAS" no catálogo, criado às 14:43:15.** O
+`498dddb` **remove** as linhas DentalVidas antes de qualquer coisa — não tem
+como criar esse procedimento. O `c56a637` não removia. A linha existe no banco
+com `created_at = 2026-09-07 17:43:15 UTC`, o minuto exato da importação. É a
+impressão digital da versão antiga.
+
+**(c) As contas batem uma a uma.** Os 13 cards errados vindos do arquivo B somam
+**R$ 10.547,34** — exatamente o excesso de "Orçamento apresentado"
+(78.983,37 − 68.436,03). Os três cards cruzados somam **R$ 872,87** no arquivo
+B — exatamente o que falta em "Aprovado" depois de descontar os 13.
+
+**2. POR QUE 13 E NÃO OUTRO NÚMERO — o mecanismo do código antigo.**
+O `c56a637` marcava como aprovado quem **sumia** do relatório, e só **dentro do
+período coberto pelo export**. Na 2ª importação (arquivo A), o período lido foi
+**01/09 a 05/09** — o intervalo das datas do próprio arquivo. Os 13 orçamentos
+do arquivo B com **Dt Orçamento anterior a 01/09** (13/05, 27/05, 18/07, 05/08,
+12/08, 13/08, 14/08, 19/08, 22/08, 25/08, 26/08, 28/08) ficaram **fora da
+janela** e nunca foram marcados. Ficaram parados em "Orçamento apresentado",
+onde tinham nascido. Não é aleatório e não tem a ver com `Dt Finalização`: é a
+data do orçamento contra a janela do export.
+
+Os outros 3 dos 16 (Gustavo, Laura, Tania) são o caso cruzado: cada um tem
+**dois** orçamentos de Clínica Geral no mesmo dia — um aprovado e outro em
+aberto, de valores diferentes. O código antigo casou os dois como se fossem o
+mesmo, e o card do arquivo B ficou com o valor do arquivo A.
+
+**3. 🔴 O SEGUNDO DEFEITO — ESTE É DE CÓDIGO, E FOI CORRIGIDO.**
+A causa raiz acima é de publicação, não de lógica. Mas ao rodar o código **novo**
+(`498dddb`) nas duas ordens, o resultado **não** era o mesmo:
+
+| Ordem | Antes da correção | Deveria ser |
+|---|---|---|
+| Os dois juntos | 144 · R$ 103.139,34 ✅ | 144 |
+| **A e depois B** | **141** — 3 orçamentos sumiram do funil | 144 |
+| **B e depois A** | **141** + Aprovado com **R$ 35.176,90** (valor errado) | 144 · R$ 34.703,31 |
+
+**Onde estava.** O casamento arquivo × banco tem três passadas. A terceira usa a
+`chaveBase` — a chave **sem o valor** — e existe para reconhecer o orçamento cujo
+**preço foi corrigido** no WebDental. Só que a `chaveBase` também depende da
+**ocorrência** (1º, 2º…), que é uma **posição dentro do conjunto importado**.
+Quando os dois relatórios sobem em importações **separadas**, cada arquivo vê
+metade do universo e os dois orçamentos de Clínica Geral do Gustavo no dia 01/09
+recebem "1º" cada um, um em cada arquivo — **a mesma `chaveBase` para dois
+orçamentos diferentes**. A passada 3 então casava um com o outro:
+
+- subindo A e depois B, a linha aprovada **engolia** o card aberto (some um
+  orçamento do funil);
+- subindo B e depois A, a linha não aprovada **sobrescrevia o valor** de uma
+  venda já documentada.
+
+**A correção.** A passada 3 passou a **não atravessar a fronteira aprovado ×
+não aprovado**: só casa quando os dois lados estão no mesmo estado. O raciocínio
+é do negócio, não do código — **correção de preço no WebDental não muda em qual
+relatório o orçamento aparece**. Se um lado está aprovado e o outro não, são
+coisas diferentes, e a evidência fraca não basta. O caso legítimo de travessia
+(saiu dos não aprovados e apareceu nos aprovados) tem evidência **forte** e já é
+resolvido na passada 2, por grupo + valor. O estado do deal é lido pelo `status`
+**ou** pela etapa, para não errar com um aprovado cuja gravação parou no meio
+(ele nasce `open` na etapa "Aprovado").
+
+**4. VALIDAÇÃO — 7 cenários de ordem + 4 de regressão, nada gravado no banco.**
+Simulação fora do navegador, cliente Supabase de mentira alimentado com o estado
+real (só SELECT).
+
+| Cenário | Resultado |
+|---|---|
+| Os dois juntos | 81 · R$ 68.436,03 · 63 · R$ 34.703,31 · **144 · R$ 103.139,34** |
+| **A e depois B** | **idêntico** |
+| **B e depois A** | **idêntico** |
+| Juntos, 2 vezes | idêntico · 2ª importação com **0 gravações** |
+| A, depois B, depois os dois | idêntico · 6 chaves regravadas · nada duplicado |
+| B, depois A, depois os dois | idêntico · 6 chaves regravadas · nada duplicado |
+| Juntos, 3 vezes | idêntico · 2ª e 3ª com **0 gravações** |
+
+Em todos: **144 chaves únicas**, **63/63** aprovados com `won_at` = Dt Aprovação
+real, e **nenhum** dos 16 títulos da lista do Danilo indevidamente em "Orçamento
+apresentado". Os 2 DENTALVIDAS (R$ 510,00) ficam fora e são relatados à parte.
+
+Regressões, todas passando: correção de preço num **não aprovado** (1 atualizado,
+0 novos) · correção de preço num **aprovado** (1 atualizado, 0 novos) · orçamento
+que **some dos dois relatórios** (não vira aprovado, 1 nota de conferência, e a
+nota **não se repete** na reimportação) · **D+30** (encerra só os 81 abertos, os
+63 aprovados intactos).
+
+- **Arquivos:** `src/lib/odontoImport.ts` (só ele) · `MEMORIA.md`.
+  `src/lib/webdental.ts` e `ImportOrcamentosDialog.tsx` **não** foram tocados —
+  a leitura dos arquivos e a tela já estavam certas.
+- **Banco:** **nenhuma migração, nenhuma escrita.** Só SELECT para montar a
+  simulação e datar o procedimento DENTALVIDAS.
+- **Publicado: não.** Nenhum `git add`, `git commit` ou `git push`. Sem deploy.
+- **Validação técnica:** `npx tsc -b`, `npx tsc -p tsconfig.api.json --noEmit` e
+  `npx vite build` passam sem erro.
+- **Convivência com as outras frentes:** só o arquivo do meu território mudou.
+  `git status` continua mostrando o `PROMPT-CONTINUIDADE.md` não versionado, que
+  não é meu.
+
+- **Não feito / pendências abertas:**
+  - **O procedimento "DENTALVIDAS" continua no catálogo** (criado às 14:43 pela
+    importação quebrada). É lixo: o código atual nunca mais vai usá-lo, mas ele
+    aparece na lista de procedimentos e pode entrar em relatório. **Apagar é uma
+    escrita no banco — não fiz, aguardo o "pode".**
+  - **O deploy na Vercel é obrigatório antes de reimportar.** Enquanto o pacote
+    novo não estiver no ar, a tela vai repetir o mesmo erro. E vale a regra que
+    faltava: **esperar a publicação terminar** antes de usar — 5 minutos entre o
+    commit e a importação não bastaram.
+  - Nenhuma Edge Function tocada. Nenhum segredo lido. Nenhuma pendência de
+    outra frente fechada.
+
+- **⚠️ LIÇÃO QUE FICA.** Uma importação que grava direto no banco não pode ser
+  disparada logo depois de um commit. O CRM não mostra em nenhum lugar qual
+  versão está rodando, e o navegador do Danilo pode estar com o pacote antigo em
+  cache. **Antes de importar: recarregar a página com o cache limpo e conferir
+  que o resumo da tela fala em "dois arquivos" e em DentalVidas fora da conta.**
+  Se o resumo não mencionar isso, é a versão velha.
+
+- **Próximo:** (1) Danilo autoriza o deploy na Vercel do `odontoImport.ts`
+  corrigido; (2) confirmar que a página recarregou na versão nova; (3) importar
+  os dois arquivos e conferir **81 · R$ 68.436,03** em "Orçamento apresentado" e
+  **63 · R$ 34.703,31** em "Aprovado"; (4) decidir sobre o procedimento
+  DENTALVIDAS órfão no catálogo.

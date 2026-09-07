@@ -523,7 +523,8 @@ export async function planejarImportacao(
   //     relatório de aprovados entra junto;
   //  3. chave sem o VALOR — é o orçamento cujo preço foi corrigido no
   //     WebDental. Sem ela, uma correção de preço criaria um card novo E daria
-  //     o antigo como sumido.
+  //     o antigo como sumido. **Esta passada não atravessa a fronteira
+  //     aprovado × não aprovado** — ver `mesmoLadoDaAprovacao`, logo abaixo.
   const casado = new Map<string, DealExistente>();
   const refAnteriorPorOrc = new Map<string, string>();
   const pendentes = leitura.orcamentos.filter((orc) => {
@@ -555,9 +556,39 @@ export async function planejarImportacao(
   });
 
   // Passada 3: mesma chave, valor diferente (correção de preço).
+  //
+  // 🔴 A FRONTEIRA QUE ESTA PASSADA NÃO PODE ATRAVESSAR (bug de 07/09/2026).
+  // A `chaveBase` ignora o valor E depende da OCORRÊNCIA, que é uma posição
+  // dentro do conjunto importado. Quando os dois relatórios sobem em
+  // importações SEPARADAS, cada arquivo enxerga metade do universo e o mesmo
+  // paciente com o mesmo tratamento no mesmo dia recebe "1º" nos dois lados —
+  // mesmo sendo DOIS orçamentos diferentes. Nos arquivos reais isso acontece
+  // 3 vezes (Gustavo Pereira, Laura Hage, Tania Santos: um orçamento de
+  // Clínica Geral aprovado e OUTRO, de valor diferente, ainda em aberto).
+  //
+  // Sem esta guarda, a passada 3 casava os dois: a linha do relatório de
+  // aprovados engolia o card aberto (some um orçamento do funil) ou a linha do
+  // relatório de não aprovados sobrescrevia o valor de uma venda já
+  // documentada. O total ia a 141 em vez de 144, e o resultado passava a
+  // depender da ORDEM em que os arquivos foram subidos.
+  //
+  // A regra: a passada 3 só vale entre iguais. Correção de preço no WebDental
+  // NÃO muda o relatório em que o orçamento aparece — logo, se um lado está
+  // aprovado e o outro não, a evidência fraca não basta. O caso legítimo de
+  // travessia (saiu dos não aprovados, apareceu nos aprovados) tem evidência
+  // FORTE e é resolvido na passada 2, por grupo + valor.
+  //
+  // O deal conta como aprovado pelo `status` OU pela etapa: um aprovado cuja
+  // gravação parou no meio nasce `open` já na etapa "Aprovado" (passo 3 da
+  // aplicação), e continua sendo um aprovado.
+  const etapaAprovado = ctx.etapas[ETAPA_APROVADO];
+  const mesmoLadoDaAprovacao = (deal: DealExistente, orc: Orcamento): boolean =>
+    (deal.status === 'won' || deal.stage_id === etapaAprovado) === orc.aprovado;
+
   for (const orc of pendentes3) {
     const candidato = ctx.dealsPorChaveBase.get(orc.chaveBase);
     if (!candidato || idsNoArquivo.has(candidato.id)) continue;
+    if (!mesmoLadoDaAprovacao(candidato, orc)) continue;
     casado.set(orc.externalRef, candidato);
     refAnteriorPorOrc.set(orc.externalRef, candidato.external_ref);
     idsNoArquivo.add(candidato.id);

@@ -10,6 +10,7 @@
 | Frente | Desde | Mexendo em | Status |
 |---|---|---|---|
 | configuração | 07/09 14:00 | `src/lib/odontoImport.ts` · `src/lib/webdental.ts` · `ImportOrcamentosDialog.tsx` · banco | **concluído** — publicado em `498dddb` |
+| configuração | 07/09 15:00 | `src/lib/odontoImport.ts` (só ele) | **concluído** — bug de classificação de aprovados corrigido. **NÃO publicado**, aguarda o "pode" do Danilo |
 | design | 07/09 13:30 | `globals.css` · `src/components/ui/*` · `src/app/layout/*` · `design/` | publicou `d940f21`, `d259d8e`, `e8669c0`, `0ebc09f` — verificar se segue ativa |
 | comercial | — | textos e templates | não declarou |
 
