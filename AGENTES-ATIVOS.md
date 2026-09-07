@@ -1,0 +1,32 @@
+# Agentes ativos
+
+> Cada frente declara aqui o que está fazendo **antes de começar**, e marca como
+> concluído ao terminar. É o único jeito de uma frente saber o que a outra está
+> tocando — as sessões não se enxergam.
+>
+> **Antes de editar qualquer arquivo, veja se outra frente já declarou.**
+> Se já declarou, pare e pergunte ao Danilo.
+
+| Frente | Desde | Mexendo em | Status |
+|---|---|---|---|
+| configuração | 07/09 14:00 | `src/lib/odontoImport.ts` · `src/lib/webdental.ts` · `ImportOrcamentosDialog.tsx` · banco | **concluído** — publicado em `498dddb` |
+| design | 07/09 13:30 | `globals.css` · `src/components/ui/*` · `src/app/layout/*` · `design/` | publicou `d940f21`, `d259d8e`, `e8669c0`, `0ebc09f` — verificar se segue ativa |
+| comercial | — | textos e templates | não declarou |
+
+---
+
+## Territórios deste projeto
+
+| Frente | Dona de | NÃO mexe em |
+|---|---|---|
+| **design** | `src/styles/*` · `src/components/ui/*` · `src/app/layout/*` · `design/` · tema e identidade | banco · Edge Functions · importação · canal WhatsApp |
+| **comercial** | textos de template · cópia da interface | infraestrutura · banco · deploy |
+| **configuração** | banco e migrations · Edge Functions · canal Meta/WhatsApp · importação WebDental · `api/*` · `src/lib/*` | estilos · componentes visuais · layout |
+
+## Regras curtas (o detalhe está em `COORDENACAO-AGENTES.md`)
+
+1. **Nunca `git add -A`.** Arquivo por arquivo, e liste ao Danilo antes de publicar.
+2. **Só a frente de configuração aplica migração de banco.** As outras pedem.
+3. **Build quebrado em arquivo alheio: relate, não conserte.**
+4. **Registre no `MEMORIA.md` identificando a frente.**
+5. **Nunca reverta trabalho de outra frente.**
