@@ -41,7 +41,7 @@ export function Sidebar() {
         <img
           src={BRAND.mark}
           alt={BRAND.product}
-          className="h-9 w-9 shrink-0 rounded-lg shadow-[0_4px_14px_rgba(23,40,43,0.08)]"
+          className="h-9 w-9 shrink-0"
         />
         {!collapsed && (
           <div className="leading-tight min-w-0 flex-1">

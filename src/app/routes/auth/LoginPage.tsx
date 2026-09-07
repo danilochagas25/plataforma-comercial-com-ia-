@@ -56,7 +56,7 @@ export default function LoginPage() {
   return (
     <AuthShell
       title="Entrar"
-      subtitle="Acesse sua Plataforma Comercial."
+      subtitle="Acesse o CRM da odontologia."
       footer={
         <>
           Ainda não tem conta?{' '}

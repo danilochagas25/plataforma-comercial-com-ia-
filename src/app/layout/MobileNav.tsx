@@ -45,7 +45,7 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
             <img
               src={BRAND.mark}
               alt={BRAND.product}
-              className="h-9 w-9 rounded-xl"
+              className="h-9 w-9"
             />
             <span className="font-semibold text-[var(--color-text-primary)]">{BRAND.product}</span>
           </div>
