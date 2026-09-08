@@ -80,7 +80,7 @@ export interface Orcamento {
    *
    * 🔴 É o campo que muda o destino do orçamento no funil, e é FATO — não
    * inferência. Com data → etapa "Aprovado", com a data real da aprovação,
-   * fora de qualquer régua. Sem data → "Orçamento apresentado".
+   * fora de qualquer régua. Sem data → "Orçamento sob avaliação".
    */
   dtAprovacao: string | null;
   /** Atalho de leitura: `dtAprovacao !== null`. */

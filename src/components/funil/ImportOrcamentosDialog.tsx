@@ -292,7 +292,7 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Cartao
-              rotulo="Novos em Orçamento apresentado"
+              rotulo={`Novos em ${ETAPA_APRESENTADO}`}
               valor={plano.novos.length}
               detalhe="entram com a Dt Orçamento no relógio"
             />

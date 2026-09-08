@@ -69,7 +69,14 @@ import {
 } from '@/lib/webdental';
 
 export const PIPELINE_ODONTO = 'Odonto — Orçamentos';
-export const ETAPA_APRESENTADO = 'Orçamento apresentado';
+
+// ⚠️ ESTES NOMES SÃO CHAVE DE BUSCA NO BANCO, não rótulo de tela.
+// A importação acha a etapa por `name`; renomear uma etapa no funil sem mudar
+// a constante aqui faz a importação inteira parar com "A etapa X não existe"
+// (falha limpa, sem corromper dado — mas para). Aconteceu em 08/09/2026, quando
+// "Orçamento apresentado" virou "Orçamento sob avaliação" a pedido do Danilo:
+// "não aprovado" soava como decisão tomada, e o paciente está só avaliando.
+export const ETAPA_APRESENTADO = 'Orçamento sob avaliação';
 export const ETAPA_APROVADO = 'Aprovado';
 export const ETAPA_NAO_APROVADO = 'Não aprovado';
 export const ORIGEM = 'WebDental · Controle de Efetivação';
@@ -118,12 +125,12 @@ export interface PlanoImportacao {
   pipelineId: string;
   etapas: Record<string, string>;
   periodo: { de: string | null; ate: string | null };
-  /** Orçamentos NÃO aprovados que ainda não existem no CRM → "Orçamento apresentado". */
+  /** Orçamentos NÃO aprovados que ainda não existem no CRM → "Orçamento sob avaliação". */
   novos: AcaoDeal[];
   /**
    * Orçamentos do relatório de APROVADOS que ainda não existem no CRM. Entram
    * direto na etapa "Aprovado", com a data real da aprovação — e portanto
-   * **fora de qualquer régua**, que só olha "Orçamento apresentado".
+   * **fora de qualquer régua**, que só olha "Orçamento sob avaliação".
    */
   novosAprovados: AcaoDeal[];
   /**
@@ -317,7 +324,7 @@ function dataDeFechamento(orc: Orcamento): string {
  *
  * 🔴 Aprovado entra com a data da APROVAÇÃO, não com a do orçamento. É o que
  * põe o card "fora de qualquer régua": a régua conta dias parados em
- * "Orçamento apresentado", e o aprovado nunca esteve lá. Meio-dia UTC evita
+ * "Orçamento sob avaliação", e o aprovado nunca esteve lá. Meio-dia UTC evita
  * que o fuso de Itabuna (UTC-3) empurre a data para o dia anterior na tela.
  */
 function relogioDaEtapa(orc: Orcamento): string {
@@ -1013,7 +1020,7 @@ export async function aplicarImportacao(
   // --- 3. Deals novos ------------------------------------------------------
   //
   // Cada orçamento novo nasce na etapa que o SEU relatório determina:
-  // não aprovado → "Orçamento apresentado"; aprovado → "Aprovado".
+  // não aprovado → "Orçamento sob avaliação"; aprovado → "Aprovado".
   //
   // ⚠️ O aprovado nasce com `status = 'open'` e só vira `'won'` no passo 6,
   // depois de o `deal_products` existir. Não é capricho: o gatilho

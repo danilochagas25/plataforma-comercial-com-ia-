@@ -5291,18 +5291,29 @@ algo como "Orçado — não fechou", que é o que a etapa realmente contém.
 
 ---
 
-## 08/09/2026 — DECISÃO DO DONO: os nomes das etapas ficam como estão
+## 08/09/2026 — "Orçamento apresentado" virou "Orçamento sob avaliação"
 
-Propus renomear "Orçamento apresentado" para "Não aprovado", já que é onde
-estão os 81 orçamentos que não fecharam. **O Danilo decidiu manter os nomes.**
+Propus renomear a etapa para "Não aprovado". O Danilo recusou os dois nomes e
+deu um terceiro, melhor que o meu:
 
-> "pode manter os nomes, porque os orçamentos não aprovados que estão na coluna
-> orçamentos apresentado"
+> "ao invés de orçamento não aprovado, poderíamos usar orçamento sob avaliação"
 
-**Não reverter isso.** A etapa "Não aprovado" continua vazia por opção, e
-"Orçamento apresentado" continua sendo o alvo dos disparos de recuperação. Quem
-for montar campanha usa a contagem de pacientes que aparece ao lado de cada
-etapa (publicada em `ece3061`) para não errar.
+Ele está certo: **"não aprovado" descreve uma decisão que o paciente não tomou.**
+Ele recebeu o plano de tratamento e está decidindo — o nome da coluna tem que
+dizer isso, porque é o que a recepção lê antes de ligar. Aplicado.
+
+Funil hoje: **Orçamento sob avaliação (81 · 59 pacientes · R$ 68.436,03)** ·
+Em negociação (0) · Aguardando decisão (0) · Aprovado (63 · 54 · R$ 34.703,31)
+· Não aprovado (0, reservada para quem recusou em definitivo).
+
+### O nome da etapa é chave de busca, não rótulo
+
+`src/lib/odontoImport.ts` acha a etapa por `name` (constante
+`ETAPA_APRESENTADO`). Renomear no banco sem mudar a constante faz a importação
+inteira parar com *"A etapa X não existe no funil"* — falha limpa, sem corromper
+dado, mas para. As duas coisas andam juntas, e agora há um aviso em caixa alta
+no arquivo dizendo isso. Migration `20260908090000` deixa instalação nova já
+com o nome certo.
 
 ### Defeito dos templates — confirmado NA META, não é do CRM
 
