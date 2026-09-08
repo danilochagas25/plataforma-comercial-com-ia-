@@ -5125,3 +5125,28 @@ v2→v3, `send-operator-reaction` v1 nova, as três `ACTIVE`.
 
 **O token expira em 7 dias** (14/09/2026). Depois disso, gerar outro pelo mesmo
 caminho.
+
+---
+
+## 07/09/2026 · 19h — Menu cortado na inbox: a causa era o `overflow-y-auto`
+
+O Danilo abriu o menu de uma mensagem e viu uma tira de ~100px: o resto ficou
+fora da tela, cortado pela borda esquerda do painel da conversa.
+
+**Não era z-index.** Pela especificação do CSS, um `overflow-y` diferente de
+`visible` **força o `overflow-x` a também recortar**. A lista de conversas e a
+thread são os dois `overflow-y-auto`; qualquer menu `absolute` dentro deles é
+cortado nas laterais e embaixo por mais alto que seja o z-index. Nos balões
+colados na borda esquerda o menu de 240px simplesmente não tinha para onde ir.
+
+**Correção:** `FloatingMenu.tsx` — renderiza em `document.body` via portal, com
+`position: fixed` e a posição medida a partir do botão. Escolhe abrir para cima
+quando não cabe embaixo, encosta na janela em vez de sair dela, e limita a
+altura ao espaço disponível. Fecha ao rolar: com `fixed`, um menu que ficasse
+aberto durante a rolagem apareceria parado sobre outra mensagem.
+
+Detalhe de implementação que evita um piscar: o menu entra no DOM já na
+primeira renderização (para ter altura mensurável), mas com
+`visibility: hidden` e fora da tela até o `useLayoutEffect` calcular a posição.
+
+Usado nos dois menus — o da mensagem e o da conversa.

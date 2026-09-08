@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ChevronDown,
   Copy,
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ThreadMessage } from '@/hooks/useMessages';
+import { FloatingMenu } from './FloatingMenu';
 
 // As seis do WhatsApp, na mesma ordem — a recepção reconhece sem ler.
 export const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
@@ -49,31 +50,9 @@ export function MessageActions({
   onDelete,
 }: MessageActionsProps) {
   const [open, setOpen] = useState(false);
-  // Menu longo perto do rodapé abriria para fora da tela; medimos e viramos
-  // para cima quando não cabe embaixo.
-  const [dropUp, setDropUp] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const botaoRef = useRef<HTMLButtonElement>(null);
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  useLayoutEffect(() => {
-    if (!open || !wrapRef.current) return;
-    const rect = wrapRef.current.getBoundingClientRect();
-    setDropUp(window.innerHeight - rect.bottom < 340);
-  }, [open]);
+  const fechar = useCallback(() => setOpen(false), []);
 
   // Balão otimista ainda não tem id no banco: nada aqui funcionaria.
   if (message._state === 'pending' || message._state === 'failed') return null;
@@ -95,8 +74,9 @@ export function MessageActions({
   const hasText = Boolean(message.content?.trim());
 
   return (
-    <div ref={wrapRef} className={cn('absolute top-1 z-20', outbound ? 'left-1' : 'right-1')}>
+    <div className={cn('absolute top-1 z-20', outbound ? 'left-1' : 'right-1')}>
       <button
+        ref={botaoRef}
         type="button"
         aria-label="Ações da mensagem"
         aria-expanded={open}
@@ -113,15 +93,14 @@ export function MessageActions({
         <ChevronDown className="h-3.5 w-3.5" />
       </button>
 
-      {open && (
-        <div
-          role="menu"
-          className={cn(
-            'absolute z-30 w-60 overflow-hidden rounded-xl border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] shadow-xl',
-            outbound ? 'left-0' : 'right-0',
-            dropUp ? 'bottom-8' : 'top-8',
-          )}
-        >
+      <FloatingMenu
+        anchorRef={botaoRef}
+        open={open}
+        onClose={fechar}
+        align={outbound ? 'left' : 'right'}
+        width={240}
+      >
+        <>
           {onReact && (
             <div className="flex items-center gap-0.5 border-b border-[var(--color-border-divider)] px-2 py-2">
               {QUICK_REACTIONS.map((emoji) => (
@@ -205,8 +184,8 @@ export function MessageActions({
               />
             </div>
           )}
-        </div>
-      )}
+        </>
+      </FloatingMenu>
     </div>
   );
 }

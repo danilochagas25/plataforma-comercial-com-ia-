@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   Archive,
   ArchiveRestore,
@@ -27,6 +27,7 @@ import { cn } from '@/lib/utils';
 import { Avatar } from '@/components/ui/Avatar';
 import type { WhatsappProvider } from '@/hooks/useWhatsappProvider';
 import type { ConversationChannel, ConversationWithContact } from '@/types/inbox';
+import { FloatingMenu } from './FloatingMenu';
 
 // Badge de canal/provedor: WhatsApp Meta (oficial), UAZAPI (não oficial, sem
 // janela de 24h) ou Instagram.
@@ -140,33 +141,14 @@ export function ConversationList({
   const [menuFor, setMenuFor] = useState<string | null>(null);
   // Submenu de "Silenciar" aberto dentro do menu.
   const [muteOpen, setMuteOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  // Clicar fora ou apertar Esc fecha o menu. Os hooks ficam antes dos returns
-  // antecipados de loading/vazio — a ordem das chamadas não pode variar.
-  useEffect(() => {
-    if (!menuFor) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuFor(null);
-        setMuteOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setMenuFor(null); setMuteOpen(false); } };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [menuFor]);
+  // O menu vive num portal (FloatingMenu), então precisa do botão como âncora.
+  const botaoRef = useRef<HTMLButtonElement>(null);
+  const closeMenu = useCallback(() => { setMenuFor(null); setMuteOpen(false); }, []);
 
   const hasMenu = Boolean(
     onMarkUnread || onMarkRead || onArchive || onClose || onPin || onMute
     || onBlock || onShowContact || onExport || onClear || onDelete,
   );
-
-  const closeMenu = () => { setMenuFor(null); setMuteOpen(false); };
 
   if (loading) {
     return (
@@ -274,8 +256,9 @@ export function ConversationList({
                 por isso o menu vive fora dele, posicionado por cima. Some
                 quando a conversa está travada por outro operador. */}
             {hasMenu && !locked && (
-              <div ref={menuOpen ? menuRef : undefined} className="absolute right-1.5 top-2.5">
+              <div className="absolute right-1.5 top-2.5">
                 <button
+                  ref={menuOpen ? botaoRef : undefined}
                   type="button"
                   aria-label="Ações da conversa"
                   aria-expanded={menuOpen}
@@ -292,11 +275,14 @@ export function ConversationList({
                   <MoreVertical className="h-4 w-4" />
                 </button>
 
-                {menuOpen && (
-                  <div
-                    role="menu"
-                    className="absolute right-0 top-8 z-30 w-60 overflow-hidden rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] py-1 shadow-lg"
-                  >
+                <FloatingMenu
+                  anchorRef={botaoRef}
+                  open={menuOpen}
+                  onClose={closeMenu}
+                  align="right"
+                  width={240}
+                >
+                  <div className="py-1">
                     {onClose && c.status !== 'closed' && (
                       <MenuItem icon={X} label="Fechar conversa" onClick={() => { closeMenu(); onClose(c); }} />
                     )}
@@ -374,7 +360,7 @@ export function ConversationList({
                       <MenuItem icon={Trash2} label="Apagar conversa" danger onClick={() => { closeMenu(); onDelete(c); }} />
                     )}
                   </div>
-                )}
+                </FloatingMenu>
               </div>
             )}
           </li>
