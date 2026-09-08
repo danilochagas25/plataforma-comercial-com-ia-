@@ -5043,3 +5043,75 @@ selo de canal, janela de 24h, transcrição de áudio recebido.
 fixar conversa no topo, silenciar, buscar dentro das mensagens, favoritar,
 marcar várias de uma vez. Nenhum deles tem coluna no banco — todos exigem
 migração.
+
+---
+
+## 07/09/2026 · 18h — Inbox com as funcionalidades do WhatsApp
+
+O Danilo mandou dois prints do WhatsApp Desktop — o menu da mensagem e o menu
+da conversa — e pediu as mesmas funcionalidades. Frente de **configuração**.
+
+### Banco (migration `20260907170000_inbox_whatsapp_features.sql`, aplicada)
+
+`messages`: `reply_to_id` · `reaction` · `contact_reaction` · `forwarded` ·
+`forwarded_from_id` · `deleted_at` · `deleted_by` · `starred` · `pinned`.
+`conversations`: `pinned` · `muted_until` · `cleared_at`.
+`contacts`: `blocked_at` · `blocked_by`.
+
+Três decisões que não são óbvias:
+
+1. **Duas colunas de reação, não uma.** Clínica e paciente reagem à MESMA
+   mensagem de forma independente; uma coluna só perderia um dos dois lados.
+2. **Apagar e limpar são LÓGICOS.** A Cloud API não tem endpoint para apagar
+   mensagem já entregue — o que sai daqui não some do celular do paciente — e
+   conversa de clínica é registro de atendimento. `deleted_at` esconde da tela;
+   `cleared_at` marca a partir de quando a thread aparece. Nada some do banco.
+3. **`muted_until` é data, não booleano.** Silenciar para sempre é como um
+   paciente some sem ninguém notar. "Sempre" virou uma data absurda (2999).
+
+### Backend
+
+- `_shared/meta-cloud.ts`: `metaReplyContext` (o `context.message_id` da Meta,
+  que ela mesma usa para montar a citação no aparelho) e `metaSendReaction`
+  (emoji vazio remove — é como a Meta modela, não há "desreagir").
+- `_shared/inbox-delivery.ts`: `replyToProviderId` no payload.
+- `send-operator-message`: aceita `reply_to_id` e `forwarded_from_id`. A
+  mensagem citada é validada **na mesma conversa** — sem isso um id qualquer
+  vazaria conteúdo de outro paciente para dentro desta. Falhando a validação,
+  envia SEM citação em vez de recusar: perde-se a citação, não a mensagem.
+- `send-operator-reaction` (nova): manda para a Meta **antes** de gravar. Ao
+  contrário de uma mensagem — onde persistir primeiro é certo — uma reação que
+  só existe no CRM é mentira visual.
+- `meta-webhook`: reação do paciente é interceptada ANTES de virar mensagem
+  (senão cada 👍 viraria linha solta e subiria o contador de não lidas), e
+  `context.id` do inbound vira `reply_to_id`.
+
+### Frontend
+
+`MessageActions.tsx` (menu da mensagem, com as 6 reações rápidas na ordem do
+WhatsApp) · `ForwardDialog.tsx` · `MessageInfoDialog.tsx` ·
+`lib/conversationExport.ts` (.txt no formato do "Exportar conversa").
+`MessageThread` foi reescrita: o balão virou o componente `Bubble` porque
+precisa de hooks — resolver a URL assinada da mídia **uma vez** para a tela e
+para o "Salvar arquivo" do menu.
+
+Busca dentro da conversa roda **no cliente**: as mensagens já estão todas
+carregadas, ir ao banco seria uma ida de rede para reencontrar o que já temos.
+
+Fixada vai ao topo em QUALQUER ordenação, inclusive a alfabética — `sort` é
+estável no JS moderno, então a ordem escolhida é preservada dentro do grupo.
+
+### 🚧 BLOQUEIO — as Edge Functions NÃO foram publicadas
+
+`npx supabase` não tem `SUPABASE_ACCESS_TOKEN` (o CLI nunca foi autenticado
+nesta máquina), e publicar pelo MCP exigiria retranscrever ~200KB de código nos
+comandos — risco de erro de transcrição alto demais para código que já está
+correto no disco.
+
+**Enquanto as funções não subirem, o frontend NÃO pode ser publicado:**
+reagir daria 404 e responder citando falharia em silêncio. Tudo commitado,
+nada em produção.
+
+**Destrava com:** token em `supabase.com/dashboard/account/tokens` salvo em
+`~/.config/agente-gestor/supabase-crm-odonto.env`. Depois:
+`npx supabase functions deploy meta-webhook send-operator-message send-operator-reaction --project-ref feptvmsjzreovfynrlql`

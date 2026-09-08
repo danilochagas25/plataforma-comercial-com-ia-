@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
 import { toast } from 'sonner';
-import { Clock, FileText, Loader2, Mic, Paperclip, Send, Square, StickyNote, X } from 'lucide-react';
+import { Clock, CornerUpLeft, FileText, Loader2, Mic, Paperclip, Send, Square, StickyNote, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { functionErrorMessage, getSupabase } from '@/lib/supabase';
 import type { SendResult } from '@/hooks/useMessages';
@@ -23,11 +23,23 @@ interface MessageInputProps {
   // campo por cima do que ela fez. O token muda a cada clique em "Usar", então
   // o campo só é reescrito quando ela pede de novo.
   prefill?: { text: string; token: number } | null;
+  // Mensagem sendo citada. A barra de citação some sozinha depois do envio —
+  // quem limpa é o dono do estado (InboxPage), via onCancelReply.
+  replyingTo?: { id: string; author: string; preview: string } | null;
+  onCancelReply?: () => void;
 }
 
 const MAX_BYTES = 25 * 1024 * 1024;
 
-export function MessageInput({ conversationId, disabled, withinWindow = true, onSendText, prefill = null }: MessageInputProps) {
+export function MessageInput({
+  conversationId,
+  disabled,
+  withinWindow = true,
+  onSendText,
+  prefill = null,
+  replyingTo = null,
+  onCancelReply,
+}: MessageInputProps) {
   const [content, setContent] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [showTemplate, setShowTemplate] = useState(false);
@@ -199,6 +211,27 @@ export function MessageInput({ conversationId, disabled, withinWindow = true, on
       onSubmit={handleSubmit}
       className="space-y-3 border-t border-[var(--color-border-card)] bg-[var(--color-bg-surface)] p-4"
     >
+      {replyingTo && (
+        <div className="flex items-start gap-2 rounded-lg border-l-[3px] border-[var(--accent-primary)] bg-[var(--color-bg-subtle)] px-3 py-2">
+          <CornerUpLeft className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent-primary)]" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] font-semibold text-[var(--accent-primary)]">
+              Respondendo {replyingTo.author}
+            </div>
+            <div className="line-clamp-2 break-words text-[12px] text-[var(--color-text-secondary)]">
+              {replyingTo.preview}
+            </div>
+          </div>
+          <button
+            type="button"
+            aria-label="Cancelar resposta"
+            onClick={onCancelReply}
+            className="shrink-0 rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)] hover:text-[var(--color-text-primary)]"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
       <div className="flex items-center gap-2">
         <button
           type="button"

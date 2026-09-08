@@ -21,6 +21,13 @@ interface Payload {
   conversation_id?: string;
   content?: string;
   is_private_note?: boolean;
+  // Id NO CRM da mensagem sendo citada (não o wamid — o cliente não conhece
+  // wamid). Traduzimos para o wamid aqui dentro.
+  reply_to_id?: string;
+  // Encaminhamento: id NO CRM da mensagem de origem. Só marca a procedência
+  // (o selo "Encaminhada" e o caminho de volta à conversa original) — o texto
+  // vem em `content` como em qualquer envio.
+  forwarded_from_id?: string;
 }
 
 Deno.serve(async (req) => {
@@ -43,6 +50,8 @@ Deno.serve(async (req) => {
     const conversationId = body.conversation_id?.trim();
     const content = (body.content ?? '').trim();
     const isPrivate = Boolean(body.is_private_note);
+    const replyToId = body.reply_to_id?.trim() || null;
+    const forwardedFromId = body.forwarded_from_id?.trim() || null;
 
     if (!conversationId) return jsonResponse({ ok: false, error: 'conversation_id ausente.' }, { status: 400 });
     if (!content) return jsonResponse({ ok: false, error: 'Conteúdo vazio.' }, { status: 400 });
@@ -59,6 +68,47 @@ Deno.serve(async (req) => {
     }
 
     const admin = getAdminClient();
+
+    // Mensagem citada: precisa ser da MESMA conversa (senão um id qualquer
+    // vazaria conteúdo de outro paciente para dentro desta) e da mesma org.
+    // Se não passar na checagem, seguimos SEM citação em vez de recusar o
+    // envio — a atendente perde a citação, não a mensagem.
+    let replyToWamId: string | null = null;
+    let replyToValidId: string | null = null;
+    if (replyToId) {
+      const { data: quoted } = await admin
+        .from('messages')
+        .select('id, conversation_id, org_id, zernio_message_id, is_private_note')
+        .eq('id', replyToId)
+        .maybeSingle();
+      const q = quoted as {
+        id: string;
+        conversation_id: string;
+        org_id: string;
+        zernio_message_id: string | null;
+        is_private_note: boolean;
+      } | null;
+      if (q && q.conversation_id === conversationId && q.org_id === caller.orgId) {
+        replyToValidId = q.id;
+        // Nota privada nunca foi para a Meta: guardamos a citação no CRM, mas
+        // não há wamid para pedir que ela seja citada no aparelho.
+        replyToWamId = q.is_private_note ? null : q.zernio_message_id;
+      }
+    }
+
+    // A origem do encaminhamento vem de OUTRA conversa — por isso aqui só
+    // checamos a org. Sem essa checagem, um id qualquer viraria um link para
+    // a conversa de outro paciente.
+    let forwardedValidId: string | null = null;
+    if (forwardedFromId) {
+      const { data: origin } = await admin
+        .from('messages')
+        .select('id, org_id')
+        .eq('id', forwardedFromId)
+        .maybeSingle();
+      const o = origin as { id: string; org_id: string } | null;
+      if (o && o.org_id === caller.orgId) forwardedValidId = o.id;
+    }
 
     const { data: conv, error: convErr } = await admin
       .from('conversations')
@@ -86,6 +136,9 @@ Deno.serve(async (req) => {
         content_type: isPrivate ? 'note' : 'text',
         content,
         is_private_note: isPrivate,
+        reply_to_id: replyToValidId,
+        forwarded: Boolean(forwardedValidId),
+        forwarded_from_id: forwardedValidId,
       })
       .select()
       .single();
@@ -141,7 +194,7 @@ Deno.serve(async (req) => {
           zernioAccountId: convRow.zernio_account_id ?? null,
           provider: convRow.provider ?? null,
         },
-        { text: content },
+        { text: content, replyToProviderId: replyToWamId },
       );
 
       await admin

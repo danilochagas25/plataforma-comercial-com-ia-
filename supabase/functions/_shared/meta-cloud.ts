@@ -211,7 +211,7 @@ async function metaSendMessage(
 // code 131047 e a mensagem precisa ser template aprovado (metaSendTemplate).
 export async function metaSendText(
   ctx: MetaContext,
-  input: { phone: string; text: string },
+  input: { phone: string; text: string; replyToWamId?: string | null },
 ): Promise<{ messageId: string | null }> {
   return await metaSendMessage(ctx, {
     messaging_product: 'whatsapp',
@@ -219,6 +219,38 @@ export async function metaSendText(
     to: metaToNumber(input.phone),
     type: 'text',
     text: { body: input.text, preview_url: false },
+    ...metaReplyContext(input.replyToWamId),
+  });
+}
+
+// "Responder citando": a Meta só precisa do wamid da mensagem original em
+// `context`. Ela mesma monta a citação no aparelho do paciente — não repetimos
+// o texto citado no corpo.
+//
+// O wamid pode não existir (nota privada, mensagem que falhou no envio, linha
+// vinda de importação). Nesses casos mandamos SEM contexto: perder a citação é
+// melhor do que a Meta recusar a mensagem inteira com "invalid message id".
+function metaReplyContext(wamId: string | null | undefined): Record<string, unknown> {
+  const id = wamId?.trim();
+  return id ? { context: { message_id: id } } : {};
+}
+
+// Reagir com emoji. Emoji vazio REMOVE a reação — é assim que a própria Meta
+// modela, e não existe endpoint separado de "desreagir".
+//
+// Uma reação não é uma mensagem na conversa: ela gruda numa mensagem que já
+// existe. Por isso a resposta traz um wamid próprio que não guardamos em
+// `messages` — quem chama grava o emoji na coluna da mensagem alvo.
+export async function metaSendReaction(
+  ctx: MetaContext,
+  input: { phone: string; wamId: string; emoji: string },
+): Promise<{ messageId: string | null }> {
+  return await metaSendMessage(ctx, {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: metaToNumber(input.phone),
+    type: 'reaction',
+    reaction: { message_id: input.wamId, emoji: input.emoji },
   });
 }
 
@@ -294,6 +326,7 @@ export async function metaSendMedia(
     mediaId?: string;
     caption?: string;
     filename?: string;
+    replyToWamId?: string | null;
   },
 ): Promise<{ messageId: string | null }> {
   const mediaId = input.mediaId?.trim();
@@ -310,6 +343,7 @@ export async function metaSendMedia(
     to: metaToNumber(input.phone),
     type: input.type,
     [input.type]: media,
+    ...metaReplyContext(input.replyToWamId),
   });
 }
 

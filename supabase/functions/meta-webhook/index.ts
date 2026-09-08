@@ -280,8 +280,9 @@ function decodeInbound(message: Record<string, unknown>): DecodedInbound {
       const reply = asObj(inter.button_reply ?? inter.list_reply);
       return { contentType: 'text', content: str(reply, ['title', 'id']), ...noMedia };
     }
-    case 'reaction':
-      return { contentType: 'text', content: str(asObj(message.reaction), ['emoji']), ...noMedia };
+    // 'reaction' nunca chega aqui: é interceptada antes de virar mensagem
+    // (ver applyContactReaction). Se chegasse, o emoji entraria como uma
+    // mensagem solta no meio da conversa.
     default:
       // location, contacts, order, system, unknown — registra como texto para o
       // operador ver que algo chegou, sem inventar conteúdo.
@@ -414,6 +415,29 @@ function afterResponse(work: Promise<unknown>): void {
     .EdgeRuntime?.waitUntil?.(work);
 }
 
+// Grava (ou limpa) a reação do paciente na mensagem alvo. Emoji vazio = ele
+// removeu a reação — a Meta usa o mesmo evento para pôr e para tirar.
+//
+// A mensagem alvo pode não existir aqui: o paciente consegue reagir a algo
+// anterior à integração. Nesse caso não há o que atualizar, e ignorar é o
+// certo — não vale criar uma mensagem fantasma só para pendurar um emoji.
+async function applyContactReaction(
+  admin: AdminClient,
+  orgId: string,
+  reaction: Record<string, unknown>,
+  errors: string[],
+): Promise<void> {
+  const targetWamid = str(reaction, ['message_id']);
+  if (!targetWamid) return;
+  const emoji = str(reaction, ['emoji']);
+  const { error } = await admin
+    .from('messages')
+    .update({ contact_reaction: emoji && emoji.trim() ? emoji : null })
+    .eq('org_id', orgId)
+    .eq('zernio_message_id', targetWamid);
+  if (error) errors.push(`reaction update: ${error.message}`);
+}
+
 async function handleInboundMessage(
   admin: AdminClient,
   orgId: string,
@@ -430,6 +454,15 @@ async function handleInboundMessage(
   }
   if (wamid && !(await claimEvent(admin, orgId, `meta:msg:${wamid}`, 'meta.message.received'))) {
     return; // reentrega da Meta — já processada
+  }
+
+  // Reação do paciente ({ type:'reaction', reaction:{ message_id, emoji } }).
+  // Não é mensagem: gruda numa que já existe. Sai daqui antes de qualquer
+  // insert — senão cada 👍 viraria uma linha solta na conversa, e o contador
+  // de não lidas subiria como se o paciente tivesse escrito algo.
+  if ((str(message, ['type']) ?? '').toLowerCase() === 'reaction') {
+    await applyContactReaction(admin, orgId, asObj(message.reaction), errors);
+    return;
   }
 
   const waId = (str(message, ['from']) ?? '').replace(/\D/g, '');
@@ -461,6 +494,22 @@ async function handleInboundMessage(
     if (dup) return;
   }
 
+  // O paciente respondeu CITANDO: a Meta manda { context: { id: <wamid> } }.
+  // Traduzimos para o id local da mensagem citada; se ela não estiver no CRM
+  // (conversa anterior à integração, por exemplo), a resposta entra sem
+  // citação em vez de ser descartada.
+  const quotedWamid = str(asObj(message.context), ['id']);
+  let replyToId: string | null = null;
+  if (quotedWamid) {
+    const { data: quoted } = await admin
+      .from('messages')
+      .select('id')
+      .eq('org_id', orgId)
+      .eq('zernio_message_id', quotedWamid)
+      .maybeSingle();
+    replyToId = (quoted as { id: string } | null)?.id ?? null;
+  }
+
   const { contentType, content, mediaId, mimeType, filename } = decodeInbound(message);
 
   // A mensagem entra SEMPRE com media_url null. A mídia (foto/áudio/vídeo/
@@ -479,6 +528,7 @@ async function handleInboundMessage(
       media_url: null,
       zernio_message_id: wamid,
       is_private_note: false,
+      reply_to_id: replyToId,
     })
     .select('id')
     .single();

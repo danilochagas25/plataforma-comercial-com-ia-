@@ -179,19 +179,28 @@ export function sortConversations(
   sort: InboxSort,
 ): ConversationWithContact[] {
   const arr = [...list];
-  switch (sort) {
-    case 'antiga':
-      return arr.sort((a, b) => lastAt(a) - lastAt(b));
-    case 'nao_lidas':
-      return arr.sort(
-        (a, b) => (b.unread_count > 0 ? 1 : 0) - (a.unread_count > 0 ? 1 : 0) || lastAt(b) - lastAt(a),
-      );
-    case 'alfabetica':
-      return arr.sort((a, b) => convDisplayName(a).localeCompare(convDisplayName(b), 'pt-BR'));
-    case 'recente':
-    default:
-      return arr.sort((a, b) => lastAt(b) - lastAt(a));
-  }
+  const ordenado = (() => {
+    switch (sort) {
+      case 'antiga':
+        return arr.sort((a, b) => lastAt(a) - lastAt(b));
+      case 'nao_lidas':
+        return arr.sort(
+          (a, b) => (b.unread_count > 0 ? 1 : 0) - (a.unread_count > 0 ? 1 : 0) || lastAt(b) - lastAt(a),
+        );
+      case 'alfabetica':
+        return arr.sort((a, b) => convDisplayName(a).localeCompare(convDisplayName(b), 'pt-BR'));
+      case 'recente':
+      default:
+        return arr.sort((a, b) => lastAt(b) - lastAt(a));
+    }
+  })();
+
+  // Fixada vai para o topo em QUALQUER ordenação — inclusive na alfabética.
+  // Fixar é a atendente dizendo "esta eu não posso perder de vista"; uma
+  // ordenação que a empurrasse para baixo tornaria o recurso inútil.
+  // `sort` é estável no JS moderno, então a ordem escolhida acima é preservada
+  // dentro de cada grupo.
+  return ordenado.sort((a, b) => Number(b.pinned) - Number(a.pinned));
 }
 
 // ---- Persistência em querystring ------------------------------------------

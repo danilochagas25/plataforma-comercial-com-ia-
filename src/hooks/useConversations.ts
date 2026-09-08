@@ -16,6 +16,14 @@ interface UseConversationsResult {
   setArchived: (id: string, archived: boolean) => Promise<void>;
   markRead: (id: string) => Promise<void>;
   markUnread: (id: string) => Promise<void>;
+  // Fixar no topo da lista, silenciar até uma data (null = com som) e "limpar
+  // conversa" (esconde o que veio antes de agora, sem apagar nada).
+  setPinned: (id: string, pinned: boolean) => Promise<void>;
+  setMutedUntil: (id: string, until: string | null) => Promise<void>;
+  clearConversation: (id: string) => Promise<void>;
+  // Bloquear é do CONTATO, não da conversa: o mesmo paciente pode voltar por
+  // outro canal, e o bloqueio precisa valer para todos.
+  setContactBlocked: (contactId: string, blocked: boolean) => Promise<void>;
 }
 
 interface ContactRow {
@@ -24,6 +32,7 @@ interface ContactRow {
   name: string | null;
   email: string | null;
   profile_pic_url: string | null;
+  blocked_at: string | null;
   custom_fields: Record<string, unknown>;
 }
 
@@ -86,7 +95,7 @@ export function useConversations(): UseConversationsResult {
       fetchInChunks<ContactRow>(contactIds, (chunk) =>
         supabase
           .from('contacts')
-          .select('id, phone, name, email, profile_pic_url, custom_fields')
+          .select('id, phone, name, email, profile_pic_url, blocked_at, custom_fields')
           .in('id', chunk),
       ),
       fetchInChunks<{ contact_id: string; tag_id: string }>(contactIds, (chunk) =>
@@ -298,7 +307,49 @@ export function useConversations(): UseConversationsResult {
     if (error) throw new Error(translateDbError(error.message));
   };
 
-  return { conversations, loading, error, reload, setStatus, setAiPaused, setAssigned, setActiveDeal, setPinnedNote, setArchived, markRead, markUnread };
+  const setPinned: UseConversationsResult['setPinned'] = async (id, pinned) => {
+    const supabase = getSupabase();
+    const { error } = await supabase.schema('whatsapp_hub').from('conversations').update({ pinned }).eq('id', id);
+    if (error) throw new Error(translateDbError(error.message));
+  };
+
+  const setMutedUntil: UseConversationsResult['setMutedUntil'] = async (id, until) => {
+    const supabase = getSupabase();
+    const { error } = await supabase.schema('whatsapp_hub').from('conversations').update({ muted_until: until }).eq('id', id);
+    if (error) throw new Error(translateDbError(error.message));
+  };
+
+  // "Limpar conversa" NÃO apaga mensagem: marca a partir de quando a thread
+  // aparece na tela. O WhatsApp pessoal pode destruir histórico; conversa de
+  // paciente é registro de atendimento e continua no banco para auditoria.
+  const clearConversation: UseConversationsResult['clearConversation'] = async (id) => {
+    const supabase = getSupabase();
+    const { error } = await supabase
+      .schema('whatsapp_hub')
+      .from('conversations')
+      .update({ cleared_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw new Error(translateDbError(error.message));
+  };
+
+  const setContactBlocked: UseConversationsResult['setContactBlocked'] = async (contactId, blocked) => {
+    const supabase = getSupabase();
+    const { error } = await supabase
+      .schema('whatsapp_hub')
+      .from('contacts')
+      .update({
+        blocked_at: blocked ? new Date().toISOString() : null,
+        blocked_by: blocked ? userId : null,
+      })
+      .eq('id', contactId);
+    if (error) throw new Error(translateDbError(error.message));
+  };
+
+  return {
+    conversations, loading, error, reload, setStatus, setAiPaused, setAssigned,
+    setActiveDeal, setPinnedNote, setArchived, markRead, markUnread,
+    setPinned, setMutedUntil, clearConversation, setContactBlocked,
+  };
 }
 
 // Maps the most common Postgres/PostgREST errors to actionable pt-BR messages.

@@ -21,6 +21,15 @@ export interface Conversation {
   unread_count: number;
   pinned_note: string | null;
   archived: boolean;
+  // Fixada no topo da lista. Vale para a instância inteira, não por atendente:
+  // a recepção trabalha no mesmo número e o caso quente é o mesmo para todos.
+  pinned: boolean;
+  // Silenciada ATÉ esta data (null = com som). Data em vez de booleano porque
+  // silenciar para sempre é como um paciente some sem ninguém notar.
+  muted_until: string | null;
+  // "Limpar conversa": esconde o que veio antes desta data. As mensagens
+  // continuam no banco — registro de atendimento não se apaga.
+  cleared_at: string | null;
   // Conta Zernio que recebeu a conversa (multi-conta no Zernio).
   zernio_account_id: string | null;
   // Provedor: 'zernio' (WhatsApp Meta oficial / Instagram) × 'uazapi'
@@ -47,6 +56,26 @@ export interface Message {
   error_reason: string | null;
   is_private_note: boolean;
   created_at: string;
+
+  // --- Recursos de conversa equivalentes aos do WhatsApp -------------------
+  // Mensagem que esta responde citando. A citada continua no lugar dela na
+  // thread; aqui só guardamos o vínculo.
+  reply_to_id: string | null;
+  // Reação da CLÍNICA e reação do PACIENTE na mesma mensagem — independentes,
+  // cada lado troca a sua sem apagar a do outro. Emoji, ou null.
+  reaction: string | null;
+  contact_reaction: string | null;
+  // Encaminhada de outra conversa (selo "Encaminhada" + caminho de volta).
+  forwarded: boolean;
+  forwarded_from_id: string | null;
+  // Apagada NO CRM. A Meta não permite apagar mensagem já entregue: o paciente
+  // continua vendo. A tela precisa dizer isso, senão a atendente acha que o
+  // paciente deixou de ver.
+  deleted_at: string | null;
+  deleted_by: string | null;
+  // Favoritada (a estrela) e fixada no topo da conversa.
+  starred: boolean;
+  pinned: boolean;
 }
 
 export interface ConversationWithContact extends Conversation {
@@ -58,6 +87,8 @@ export interface ConversationWithContact extends Conversation {
     email: string | null;
     // Foto do lead (via UAZAPI). Null para leads Zernio → fallback iniciais.
     profile_pic_url: string | null;
+    // Contato bloqueado no CRM (não recebe disparo nem resposta da IA).
+    blocked_at?: string | null;
     custom_fields: Record<string, unknown>;
   } | null;
   lastMessagePreview: string | null;

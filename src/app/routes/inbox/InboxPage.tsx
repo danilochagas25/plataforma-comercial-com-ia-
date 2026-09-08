@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Inbox as InboxIcon, Info, PanelRightClose, PanelRightOpen, Pin, X } from 'lucide-react';
+import { ArrowLeft, Inbox as InboxIcon, Info, PanelRightClose, PanelRightOpen, Pin, Search, X } from 'lucide-react';
+import { toast } from 'sonner';
+import { getSupabase } from '@/lib/supabase';
 import { Avatar } from '@/components/ui/Avatar';
 import { useAppUser } from '@/app/providers/AppUserProvider';
 import { useAiChannels } from '@/hooks/useAiChannels';
@@ -15,6 +17,10 @@ import { MessageThread } from '@/components/inbox/MessageThread';
 import { MessageInput } from '@/components/inbox/MessageInput';
 import { CopilotPanel } from '@/components/inbox/CopilotPanel';
 import { ContactPanel } from '@/components/inbox/ContactPanel';
+import { ForwardDialog } from '@/components/inbox/ForwardDialog';
+import { MessageInfoDialog } from '@/components/inbox/MessageInfoDialog';
+import { exportarConversa } from '@/lib/conversationExport';
+import type { ThreadMessage } from '@/hooks/useMessages';
 import { InboxFilters } from '@/components/inbox/InboxFilters';
 import {
   matchesFilters,
@@ -125,6 +131,10 @@ export default function InboxPage() {
     setArchived,
     markRead,
     markUnread,
+    setPinned,
+    setMutedUntil,
+    clearConversation,
+    setContactBlocked,
   } = useConversations();
 
   // Conversa que o operador acabou de marcar como nao lida. No desktop a
@@ -133,18 +143,45 @@ export default function InboxPage() {
   // pular essa conversa ate ele escolher outra.
   const skipAutoSelect = useRef<string | null>(null);
 
+  // Mensagem sendo citada na resposta, busca dentro da conversa e os dois
+  // diálogos (encaminhar / dados). Tudo por conversa: trocar de conversa
+  // limpa, senão a atendente responderia no paciente errado.
+  const [replyTo, setReplyTo] = useState<ThreadMessage | null>(null);
+  const [buscaThread, setBuscaThread] = useState('');
+  const [buscaAberta, setBuscaAberta] = useState(false);
+  const [encaminhar, setEncaminhar] = useState<ThreadMessage | null>(null);
+  const [infoDe, setInfoDe] = useState<ThreadMessage | null>(null);
+  const [focoMensagem, setFocoMensagem] = useState<string | null>(null);
+
   const visibleConversations = useMemo(() => {
     const now = Date.now();
     const filtered = conversations.filter((c) => matchesFilters(c, filters, now));
     return sortConversations(filtered, sort);
   }, [conversations, filters, sort]);
 
-  const { messages, loading: loadingMsgs, sendText, retry, dismissFailed } = useMessages(selectedId);
+  const {
+    messages: todasMensagens,
+    loading: loadingMsgs,
+    sendText,
+    retry,
+    dismissFailed,
+    react,
+    setStarred,
+    setPinned: setMessagePinned,
+    deleteMessage,
+  } = useMessages(selectedId);
 
   const selected = useMemo(
     () => conversations.find((c) => c.id === selectedId) ?? null,
     [conversations, selectedId],
   );
+
+  // "Limpar conversa" esconde o que veio antes — as linhas continuam no banco.
+  const messages = useMemo(() => {
+    const corte = selected?.cleared_at ? new Date(selected.cleared_at).getTime() : 0;
+    if (!corte) return todasMensagens;
+    return todasMensagens.filter((m) => new Date(m.created_at).getTime() > corte);
+  }, [todasMensagens, selected?.cleared_at]);
 
   // Se a conversa aberta for (re)atribuída a outro operador (deep-link ou
   // realtime), fecha imediatamente para quem não pode vê-la.
@@ -194,6 +231,17 @@ export default function InboxPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleConversations, selectedId]);
 
+  // Trocar de conversa zera citação, busca e diálogos: responder ao paciente
+  // errado por causa de estado que sobrou é o tipo de erro que não se desfaz.
+  useEffect(() => {
+    setReplyTo(null);
+    setBuscaThread('');
+    setBuscaAberta(false);
+    setEncaminhar(null);
+    setInfoDe(null);
+    setFocoMensagem(null);
+  }, [selectedId]);
+
   // Clear unread count when a conversation is open AND visible.
   useEffect(() => {
     if (selected && selected.unread_count > 0) {
@@ -201,6 +249,72 @@ export default function InboxPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, selected?.unread_count]);
+
+  const nomePaciente = selected?.contact?.name?.trim() || selected?.contact?.phone || '-';
+
+  // Busca dentro da conversa acontece NO CLIENTE: as mensagens já estão todas
+  // aqui, então ir ao banco seria uma ida de rede para reencontrar o que já
+  // temos — e a digitação ficaria com atraso a cada tecla.
+  const resultadosBusca = useMemo(() => {
+    const q = buscaThread.trim().toLowerCase();
+    if (!q) return [];
+    return messages.filter((m) => (m.content ?? '').toLowerCase().includes(q));
+  }, [messages, buscaThread]);
+
+  const autorDe = useCallback((m: ThreadMessage): string => {
+    if (m.direction === 'inbound') return nomePaciente;
+    if (m.sender_type === 'ai') return 'a IA';
+    if (m.sender_type === 'owner') return 'o WhatsApp do celular';
+    return operatorName(m.sender_id) ?? 'a clínica';
+  }, [nomePaciente, operatorName]);
+
+  const aoReagir = useCallback(async (m: ThreadMessage, emoji: string) => {
+    const res = await react(m.id, emoji);
+    if (!res.ok) toast.error(res.error ?? 'Não foi possível reagir.');
+  }, [react]);
+
+  const aoApagarMensagem = useCallback((m: ThreadMessage) => {
+    // A Meta não apaga mensagem já entregue. Dizer isso ANTES é a diferença
+    // entre a atendente saber e a atendente achar que resolveu.
+    const ok = window.confirm(
+      'Apagar esta mensagem do CRM?\n\n'
+      + 'Ela some da tela para a equipe, mas o paciente CONTINUA VENDO no WhatsApp dele — '
+      + 'a Meta não permite apagar mensagem já entregue.',
+    );
+    if (!ok) return;
+    void deleteMessage(m.id);
+  }, [deleteMessage]);
+
+  const aoEncaminhar = useCallback(async (destinos: string[]) => {
+    const msg = encaminhar;
+    if (!msg) return;
+    const texto = msg.content?.trim();
+    if (!texto) {
+      toast.error('Só dá para encaminhar mensagem de texto por enquanto.');
+      setEncaminhar(null);
+      return;
+    }
+    const supabase = getSupabase();
+    let enviadas = 0;
+    for (const destino of destinos) {
+      const { data, error } = await supabase.functions.invoke('send-operator-message', {
+        body: {
+          conversation_id: destino,
+          content: texto,
+          is_private_note: false,
+          forwarded_from_id: msg.id,
+        },
+      });
+      if (!error && data?.ok) enviadas += 1;
+    }
+    setEncaminhar(null);
+    if (enviadas === destinos.length) {
+      toast.success(`Encaminhada para ${enviadas} ${enviadas === 1 ? 'conversa' : 'conversas'}.`);
+    } else {
+      toast.error(`Encaminhada para ${enviadas} de ${destinos.length}. Confira as que falharam.`);
+    }
+    void reloadConvs();
+  }, [encaminhar, reloadConvs]);
 
   return (
     <div className="h-[calc(100vh-6rem)] flex flex-col">
@@ -273,6 +387,46 @@ export default function InboxPage() {
                 if (archived && selectedId === c.id) setSelectedId(null);
                 void setArchived(c.id, archived);
               }}
+              onClose={(c) => { void setStatus(c.id, 'closed'); }}
+              onPin={(c, pinned) => { void setPinned(c.id, pinned); }}
+              onMute={(c, until) => { void setMutedUntil(c.id, until); }}
+              onBlock={(c, blocked) => {
+                if (!c.contact) return;
+                if (blocked && !window.confirm(
+                  `Bloquear ${c.contact.name?.trim() || c.contact.phone}?\n\n`
+                  + 'Ele para de receber disparo e resposta automática da IA. '
+                  + 'As mensagens que ele mandar continuam chegando aqui.',
+                )) return;
+                void setContactBlocked(c.contact.id, blocked);
+              }}
+              onShowContact={(c) => { setSelectedId(c.id); setShowPanelMobile(true); }}
+              onExport={(c) => {
+                if (c.id !== selectedId) {
+                  // Só temos as mensagens da conversa ABERTA carregadas.
+                  setSelectedId(c.id);
+                  toast.info('Conversa aberta. Clique em Exportar de novo para baixar.');
+                  return;
+                }
+                exportarConversa(messages, nomePaciente, c.contact?.phone ?? null);
+              }}
+              onClear={(c) => {
+                if (!window.confirm(
+                  'Limpar esta conversa?\n\n'
+                  + 'As mensagens somem da tela, mas continuam guardadas no banco — '
+                  + 'conversa de paciente é registro de atendimento e não se apaga de verdade.',
+                )) return;
+                void clearConversation(c.id);
+              }}
+              onDelete={(c) => {
+                if (!window.confirm(
+                  'Apagar esta conversa?\n\n'
+                  + 'Ela sai da lista e a tela fica vazia. O histórico permanece no banco '
+                  + 'para auditoria, e volta a aparecer se o paciente mandar mensagem de novo.',
+                )) return;
+                if (selectedId === c.id) setSelectedId(null);
+                void clearConversation(c.id);
+                void setArchived(c.id, true);
+              }}
             />
           </div>
         </div>
@@ -323,6 +477,18 @@ export default function InboxPage() {
                       : 'Janela 24h fechada'}
                 </span>
                 <button
+                  onClick={() => { setBuscaAberta((v) => !v); if (buscaAberta) setBuscaThread(''); }}
+                  aria-label="Buscar nesta conversa"
+                  title="Buscar nesta conversa"
+                  className={`h-9 w-9 shrink-0 flex items-center justify-center rounded-lg transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
+                    buscaAberta
+                      ? 'bg-[var(--color-accent-bg)] text-[var(--accent-primary)]'
+                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text-primary)]'
+                  }`}
+                >
+                  <Search className="h-4.5 w-4.5" />
+                </button>
+                <button
                   onClick={() => setShowPanelMobile(true)}
                   aria-label="Detalhes da conversa"
                   className="xl:hidden h-9 w-9 shrink-0 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text-primary)] transition-all duration-[400ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
@@ -330,6 +496,43 @@ export default function InboxPage() {
                   <Info className="h-4.5 w-4.5" />
                 </button>
               </div>
+              {buscaAberta && (
+                <div className="flex items-center gap-2 border-b border-[var(--color-border-soft)] bg-[var(--color-bg-subtle)] px-4 py-2">
+                  <Search className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-secondary)]" />
+                  <input
+                    autoFocus
+                    value={buscaThread}
+                    onChange={(e) => setBuscaThread(e.target.value)}
+                    placeholder="Buscar nesta conversa..."
+                    className="flex-1 bg-transparent text-[13px] text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)]"
+                  />
+                  <span className="shrink-0 text-[11px] text-[var(--color-text-secondary)]">
+                    {buscaThread.trim()
+                      ? `${resultadosBusca.length} ${resultadosBusca.length === 1 ? 'resultado' : 'resultados'}`
+                      : ''}
+                  </span>
+                  {/* Pular direto para o resultado mais recente: numa conversa
+                      longa, achar "implante" e ainda ter que rolar é o mesmo
+                      que não ter busca. */}
+                  {resultadosBusca.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setFocoMensagem(resultadosBusca[resultadosBusca.length - 1].id)}
+                      className="shrink-0 rounded px-2 py-0.5 text-[11px] font-semibold text-[var(--accent-primary)] hover:bg-[var(--color-bg-surface)]"
+                    >
+                      Ir para o último
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    aria-label="Fechar busca"
+                    onClick={() => { setBuscaAberta(false); setBuscaThread(''); setFocoMensagem(null); }}
+                    className="shrink-0 rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)]"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
               {selected.pinned_note && (
                 <div className="flex items-start gap-2 border-b border-[rgba(154,74,7,0.28)] bg-[var(--color-warning-bg)] px-4 py-2 text-sm text-[var(--color-warning)]">
                   <Pin className="h-3.5 w-3.5 mt-0.5 shrink-0" />
@@ -341,6 +544,15 @@ export default function InboxPage() {
                 loading={loadingMsgs}
                 onRetry={retry}
                 onDismiss={dismissFailed}
+                searchQuery={buscaThread}
+                focusMessageId={focoMensagem}
+                onReply={(m) => setReplyTo(m)}
+                onReact={(m, emoji) => { void aoReagir(m, emoji); }}
+                onToggleStar={(m) => { void setStarred(m.id, !m.starred); }}
+                onTogglePin={(m) => { void setMessagePinned(m.id, !m.pinned); }}
+                onForward={(m) => setEncaminhar(m)}
+                onShowInfo={(m) => setInfoDe(m)}
+                onDelete={aoApagarMensagem}
               />
               {selected.status !== 'closed' && (
                 <>
@@ -350,8 +562,18 @@ export default function InboxPage() {
                   <MessageInput
                     conversationId={selected.id}
                     withinWindow={effectiveWithinWindow}
-                    onSendText={sendText}
+                    onSendText={(text, isPrivate) => {
+                      const opts = replyTo ? { replyToId: replyTo.id } : undefined;
+                      setReplyTo(null);
+                      return sendText(text, isPrivate, opts);
+                    }}
                     prefill={copilotPrefill}
+                    replyingTo={replyTo ? {
+                      id: replyTo.id,
+                      author: autorDe(replyTo),
+                      preview: replyTo.content?.trim() || `[${replyTo.content_type}]`,
+                    } : null}
+                    onCancelReply={() => setReplyTo(null)}
                   />
                 </>
               )}
@@ -466,6 +688,24 @@ export default function InboxPage() {
             />
           </div>
         </div>
+      )}
+
+      {encaminhar && (
+        <ForwardDialog
+          message={encaminhar}
+          conversations={conversations}
+          currentConversationId={selectedId}
+          onCancel={() => setEncaminhar(null)}
+          onConfirm={aoEncaminhar}
+        />
+      )}
+
+      {infoDe && (
+        <MessageInfoDialog
+          message={infoDe}
+          senderLabel={autorDe(infoDe)}
+          onClose={() => setInfoDe(null)}
+        />
       )}
     </div>
   );

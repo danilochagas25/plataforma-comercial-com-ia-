@@ -2,8 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Archive,
   ArchiveRestore,
+  Ban,
+  Bell,
+  BellOff,
   Bot,
+  Download,
+  Eraser,
   Inbox,
+  Info,
   Instagram,
   Lock,
   Mail,
@@ -11,7 +17,11 @@ import {
   MessageCircle,
   MoreVertical,
   Pause,
+  Pin,
+  PinOff,
+  Trash2,
   User,
+  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Avatar } from '@/components/ui/Avatar';
@@ -43,10 +53,37 @@ interface ConversationListProps {
   isLocked?: (conv: ConversationWithContact) => boolean;
   // Provedor da conversa (WhatsApp Meta × UAZAPI × Instagram) p/ o badge.
   providerOf?: (conv: ConversationWithContact) => WhatsappProvider;
-  // Ações do menu "⋮" de cada conversa. Ausentes → o menu não aparece.
+  // Ações do menu "⋮" de cada conversa. Ausentes → o item não aparece.
   onMarkUnread?: (conv: ConversationWithContact) => void;
   onMarkRead?: (conv: ConversationWithContact) => void;
   onArchive?: (conv: ConversationWithContact, archived: boolean) => void;
+  onClose?: (conv: ConversationWithContact) => void;
+  onPin?: (conv: ConversationWithContact, pinned: boolean) => void;
+  onMute?: (conv: ConversationWithContact, until: string | null) => void;
+  onBlock?: (conv: ConversationWithContact, blocked: boolean) => void;
+  onShowContact?: (conv: ConversationWithContact) => void;
+  onExport?: (conv: ConversationWithContact) => void;
+  onClear?: (conv: ConversationWithContact) => void;
+  onDelete?: (conv: ConversationWithContact) => void;
+}
+
+// Opções de silenciar, iguais às do WhatsApp. "Sempre" é uma data absurda em
+// vez de NULL porque NULL já significa "com som" — e um booleano separado só
+// para o infinito seria um estado a mais para manter em sincronia.
+const MUTE_FOREVER = '2999-12-31T00:00:00.000Z';
+const MUTE_OPTIONS: Array<{ label: string; hours: number | null }> = [
+  { label: '8 horas', hours: 8 },
+  { label: '1 semana', hours: 24 * 7 },
+  { label: 'Sempre', hours: null },
+];
+
+function muteUntilIso(hours: number | null): string {
+  if (hours === null) return MUTE_FOREVER;
+  return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+}
+
+export function isMuted(conv: { muted_until: string | null }): boolean {
+  return Boolean(conv.muted_until && new Date(conv.muted_until).getTime() > Date.now());
 }
 
 function statusBadge(
@@ -90,9 +127,19 @@ export function ConversationList({
   onMarkUnread,
   onMarkRead,
   onArchive,
+  onClose,
+  onPin,
+  onMute,
+  onBlock,
+  onShowContact,
+  onExport,
+  onClear,
+  onDelete,
 }: ConversationListProps) {
   // Id da conversa cujo menu "⋮" está aberto (um por vez).
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  // Submenu de "Silenciar" aberto dentro do menu.
+  const [muteOpen, setMuteOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   // Clicar fora ou apertar Esc fecha o menu. Os hooks ficam antes dos returns
@@ -100,9 +147,12 @@ export function ConversationList({
   useEffect(() => {
     if (!menuFor) return;
     const onDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuFor(null);
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuFor(null);
+        setMuteOpen(false);
+      }
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuFor(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setMenuFor(null); setMuteOpen(false); } };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
     return () => {
@@ -111,7 +161,12 @@ export function ConversationList({
     };
   }, [menuFor]);
 
-  const hasMenu = Boolean(onMarkUnread || onMarkRead || onArchive);
+  const hasMenu = Boolean(
+    onMarkUnread || onMarkRead || onArchive || onClose || onPin || onMute
+    || onBlock || onShowContact || onExport || onClear || onDelete,
+  );
+
+  const closeMenu = () => { setMenuFor(null); setMuteOpen(false); };
 
   if (loading) {
     return (
@@ -176,6 +231,9 @@ export function ConversationList({
                       {displayName}
                     </div>
                     <div className="text-[10px] text-[var(--color-text-secondary)] shrink-0 inline-flex items-center gap-1">
+                      {contact?.blocked_at && <Ban className="h-3 w-3 text-[var(--color-error)]" />}
+                      {isMuted(c) && <BellOff className="h-3 w-3" />}
+                      {c.pinned && <Pin className="h-3 w-3" />}
                       {locked && <Lock className="h-3 w-3" />}
                       {formatTimestamp(c.last_message_at)}
                     </div>
@@ -237,29 +295,83 @@ export function ConversationList({
                 {menuOpen && (
                   <div
                     role="menu"
-                    className="absolute right-0 top-8 z-30 w-56 overflow-hidden rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] py-1 shadow-lg"
+                    className="absolute right-0 top-8 z-30 w-60 overflow-hidden rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] py-1 shadow-lg"
                   >
+                    {onClose && c.status !== 'closed' && (
+                      <MenuItem icon={X} label="Fechar conversa" onClick={() => { closeMenu(); onClose(c); }} />
+                    )}
                     {c.unread_count > 0
                       ? onMarkRead && (
-                          <MenuItem
-                            icon={MailOpen}
-                            label="Marcar como lida"
-                            onClick={() => { setMenuFor(null); onMarkRead(c); }}
-                          />
+                          <MenuItem icon={MailOpen} label="Marcar como lida" onClick={() => { closeMenu(); onMarkRead(c); }} />
                         )
                       : onMarkUnread && (
-                          <MenuItem
-                            icon={Mail}
-                            label="Marcar como não lida"
-                            onClick={() => { setMenuFor(null); onMarkUnread(c); }}
-                          />
+                          <MenuItem icon={Mail} label="Marcar como não lida" onClick={() => { closeMenu(); onMarkUnread(c); }} />
                         )}
                     {onArchive && (
                       <MenuItem
                         icon={c.archived ? ArchiveRestore : Archive}
                         label={c.archived ? 'Desarquivar' : 'Arquivar'}
-                        onClick={() => { setMenuFor(null); onArchive(c, !c.archived); }}
+                        onClick={() => { closeMenu(); onArchive(c, !c.archived); }}
                       />
+                    )}
+                    {onPin && (
+                      <MenuItem
+                        icon={c.pinned ? PinOff : Pin}
+                        label={c.pinned ? 'Desafixar' : 'Fixar'}
+                        onClick={() => { closeMenu(); onPin(c, !c.pinned); }}
+                      />
+                    )}
+                    {onBlock && (
+                      <MenuItem
+                        icon={Ban}
+                        label={contact?.blocked_at ? `Desbloquear ${displayName}` : `Bloquear ${displayName}`}
+                        onClick={() => { closeMenu(); onBlock(c, !contact?.blocked_at); }}
+                      />
+                    )}
+                    {onMute && (
+                      <div className="relative">
+                        <MenuItem
+                          icon={isMuted(c) ? BellOff : Bell}
+                          label={isMuted(c) ? 'Reativar som' : 'Silenciar'}
+                          chevron={!isMuted(c)}
+                          onClick={() => {
+                            // Já silenciada: o item vira o desfazer direto, sem
+                            // obrigar a passar pelo submenu para reativar.
+                            if (isMuted(c)) { closeMenu(); onMute(c, null); return; }
+                            setMuteOpen((v) => !v);
+                          }}
+                        />
+                        {muteOpen && !isMuted(c) && (
+                          <div className="border-y border-[var(--color-border-divider)] bg-[var(--color-bg-subtle)] py-1">
+                            {MUTE_OPTIONS.map((opt) => (
+                              <button
+                                key={opt.label}
+                                type="button"
+                                role="menuitem"
+                                onClick={() => { closeMenu(); onMute(c, muteUntilIso(opt.hours)); }}
+                                className="flex w-full items-center gap-2.5 py-1.5 pl-9 pr-3 text-left text-[12.5px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-surface)]"
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="my-1 h-px bg-[var(--color-border-divider)]" />
+
+                    {onShowContact && (
+                      <MenuItem icon={Info} label="Dados do contato" onClick={() => { closeMenu(); onShowContact(c); }} />
+                    )}
+                    {onExport && (
+                      <MenuItem icon={Download} label="Exportar conversa" onClick={() => { closeMenu(); onExport(c); }} />
+                    )}
+                    {onClear && (
+                      <MenuItem icon={Eraser} label="Limpar conversa" onClick={() => { closeMenu(); onClear(c); }} />
+                    )}
+                    {onDelete && (
+                      <MenuItem icon={Trash2} label="Apagar conversa" danger onClick={() => { closeMenu(); onDelete(c); }} />
                     )}
                   </div>
                 )}
@@ -276,20 +388,30 @@ function MenuItem({
   icon: Icon,
   label,
   onClick,
+  danger,
+  chevron,
 }: {
   icon: typeof Mail;
   label: string;
   onClick: () => void;
+  danger?: boolean;
+  chevron?: boolean;
 }) {
   return (
     <button
       type="button"
       role="menuitem"
       onClick={onClick}
-      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-subtle)]"
+      className={cn(
+        'flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px]',
+        danger
+          ? 'text-[var(--color-error)] hover:bg-[var(--color-error-bg)]'
+          : 'text-[var(--color-text-primary)] hover:bg-[var(--color-bg-subtle)]',
+      )}
     >
-      <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-secondary)]" />
-      {label}
+      <Icon className={cn('h-3.5 w-3.5 shrink-0', !danger && 'text-[var(--color-text-secondary)]')} />
+      <span className="truncate">{label}</span>
+      {chevron && <span className="ml-auto text-[var(--color-text-muted)]">›</span>}
     </button>
   );
 }

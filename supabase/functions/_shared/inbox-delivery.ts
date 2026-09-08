@@ -48,6 +48,10 @@ export interface InboxSendPayload {
   attachmentUrl?: string;
   attachmentType?: 'image' | 'video' | 'audio' | 'file';
   voiceNote?: boolean;
+  // Id da mensagem NO PROVEDOR (wamid, na Meta) que esta responde citando.
+  // Só a Meta usa hoje; Zernio e UAZAPI ignoram em silêncio, e é de propósito:
+  // perder a citação num canal é aceitável, deixar de enviar não é.
+  replyToProviderId?: string | null;
 }
 
 interface Resolved {
@@ -92,10 +96,15 @@ export async function sendInboxWithResolve(
         type,
         link: payload.attachmentUrl,
         caption: payload.text,
+        replyToWamId: payload.replyToProviderId ?? null,
       });
       return sent.messageId;
     }
-    const sent = await metaSendText(mctx, { phone: target.phone, text: payload.text ?? '' });
+    const sent = await metaSendText(mctx, {
+      phone: target.phone,
+      text: payload.text ?? '',
+      replyToWamId: payload.replyToProviderId ?? null,
+    });
     return sent.messageId;
   }
 

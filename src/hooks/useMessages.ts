@@ -9,7 +9,7 @@ export type ThreadMessage = Message & {
   _tempId?: string;
   _state?: 'pending' | 'sent' | 'failed';
   _realId?: string;
-  _retry?: { text: string; isPrivate: boolean };
+  _retry?: { text: string; isPrivate: boolean; opts?: SendOptions };
   // Chave de render estável: mantém o MESMO nó React quando o balão otimista é
   // substituído pela linha real (troca invisível, sem remontar/re-animar).
   _key?: string;
@@ -20,15 +20,38 @@ export interface SendResult {
   zernioError?: string | null;
 }
 
+// Extras de um envio: citar uma mensagem, ou marcar que este texto veio
+// encaminhado de outra conversa.
+export interface SendOptions {
+  replyToId?: string | null;
+  forwardedFromId?: string | null;
+}
+
 interface UseMessagesResult {
   messages: ThreadMessage[];
   loading: boolean;
   error: string | null;
   reload: () => Promise<void>;
-  sendText: (text: string, isPrivate: boolean) => Promise<SendResult>;
+  sendText: (text: string, isPrivate: boolean, opts?: SendOptions) => Promise<SendResult>;
   retry: (tempId: string) => Promise<SendResult>;
   dismissFailed: (tempId: string) => void;
+  // Ações sobre uma mensagem já existente.
+  react: (messageId: string, emoji: string) => Promise<{ ok: boolean; error?: string }>;
+  setStarred: (messageId: string, starred: boolean) => Promise<void>;
+  setPinned: (messageId: string, pinned: boolean) => Promise<void>;
+  deleteMessage: (messageId: string) => Promise<void>;
 }
+
+// Campos das colunas novas para o balão OTIMISTA — o que ainda não foi para o
+// banco nasce sem reação, sem estrela e não apagado.
+const NEW_MESSAGE_DEFAULTS = {
+  reaction: null,
+  contact_reaction: null,
+  deleted_at: null,
+  deleted_by: null,
+  starred: false,
+  pinned: false,
+} as const;
 
 export function useMessages(conversationId: string | null): UseMessagesResult {
   const { userId } = useAppUser();
@@ -158,14 +181,25 @@ export function useMessages(conversationId: string | null): UseMessagesResult {
 
   // Executa (ou re-executa) o envio de um balão otimista e concilia o estado.
   const doSend = useCallback(
-    async (tempId: string, text: string, isPrivate: boolean): Promise<SendResult> => {
+    async (
+      tempId: string,
+      text: string,
+      isPrivate: boolean,
+      opts?: SendOptions,
+    ): Promise<SendResult> => {
       if (!conversationId) return { ok: false };
       setOptimistic((prev) =>
         prev.map((o) => (o._tempId === tempId ? { ...o, _state: 'pending' } : o)),
       );
       const supabase = getSupabase();
       const { data, error: err } = await supabase.functions.invoke('send-operator-message', {
-        body: { conversation_id: conversationId, content: text, is_private_note: isPrivate },
+        body: {
+          conversation_id: conversationId,
+          content: text,
+          is_private_note: isPrivate,
+          reply_to_id: opts?.replyToId ?? undefined,
+          forwarded_from_id: opts?.forwardedFromId ?? undefined,
+        },
       });
       if (err || !data?.ok) {
         setOptimistic((prev) =>
@@ -186,7 +220,7 @@ export function useMessages(conversationId: string | null): UseMessagesResult {
   );
 
   const sendText = useCallback(
-    async (text: string, isPrivate: boolean): Promise<SendResult> => {
+    async (text: string, isPrivate: boolean, opts?: SendOptions): Promise<SendResult> => {
       const trimmed = text.trim();
       if (!conversationId || !trimmed) return { ok: false };
       const tempId = `temp-${crypto.randomUUID()}`;
@@ -204,12 +238,16 @@ export function useMessages(conversationId: string | null): UseMessagesResult {
         error_reason: null,
         is_private_note: isPrivate,
         created_at: new Date().toISOString(),
+        ...NEW_MESSAGE_DEFAULTS,
+        reply_to_id: opts?.replyToId ?? null,
+        forwarded: Boolean(opts?.forwardedFromId),
+        forwarded_from_id: opts?.forwardedFromId ?? null,
         _tempId: tempId,
         _state: 'pending',
-        _retry: { text: trimmed, isPrivate },
+        _retry: { text: trimmed, isPrivate, opts },
       };
       setOptimistic((prev) => [...prev, bubble]);
-      return doSend(tempId, trimmed, isPrivate);
+      return doSend(tempId, trimmed, isPrivate, opts);
     },
     [conversationId, userId, doSend],
   );
@@ -218,7 +256,7 @@ export function useMessages(conversationId: string | null): UseMessagesResult {
     async (tempId: string): Promise<SendResult> => {
       const bubble = optimistic.find((o) => o._tempId === tempId);
       if (!bubble?._retry) return { ok: false };
-      return doSend(tempId, bubble._retry.text, bubble._retry.isPrivate);
+      return doSend(tempId, bubble._retry.text, bubble._retry.isPrivate, bubble._retry.opts);
     },
     [optimistic, doSend],
   );
@@ -227,5 +265,48 @@ export function useMessages(conversationId: string | null): UseMessagesResult {
     setOptimistic((prev) => prev.filter((o) => o._tempId !== tempId));
   }, []);
 
-  return { messages, loading, error, reload, sendText, retry, dismissFailed };
+  // Reagir passa por Edge Function, não por UPDATE direto: a reação precisa
+  // chegar ao aparelho do paciente, e só o backend tem o token da Meta. A
+  // função grava a coluna depois de a Meta aceitar — um 👍 que existe só aqui
+  // seria mentira visual.
+  const react = useCallback(
+    async (messageId: string, emoji: string): Promise<{ ok: boolean; error?: string }> => {
+      const supabase = getSupabase();
+      const { data, error: err } = await supabase.functions.invoke('send-operator-reaction', {
+        body: { message_id: messageId, emoji },
+      });
+      if (err || !data?.ok) {
+        return { ok: false, error: (data?.error as string) ?? err?.message ?? 'Erro ao reagir.' };
+      }
+      return { ok: true };
+    },
+    [],
+  );
+
+  // Favoritar, fixar e apagar são LOCAIS do CRM — nada disso viaja para o
+  // WhatsApp do paciente — então vão por UPDATE direto, sem Edge Function.
+  const setStarred = useCallback(async (messageId: string, starred: boolean) => {
+    const supabase = getSupabase();
+    await supabase.from('messages').update({ starred }).eq('id', messageId);
+  }, []);
+
+  const setPinned = useCallback(async (messageId: string, pinned: boolean) => {
+    const supabase = getSupabase();
+    await supabase.from('messages').update({ pinned }).eq('id', messageId);
+  }, []);
+
+  // Apagar é lógico. A Meta não tem endpoint para apagar mensagem entregue: o
+  // paciente CONTINUA VENDO. Quem chama precisa dizer isso na tela.
+  const deleteMessage = useCallback(async (messageId: string) => {
+    const supabase = getSupabase();
+    await supabase
+      .from('messages')
+      .update({ deleted_at: new Date().toISOString(), deleted_by: userId })
+      .eq('id', messageId);
+  }, [userId]);
+
+  return {
+    messages, loading, error, reload, sendText, retry, dismissFailed,
+    react, setStarred, setPinned, deleteMessage,
+  };
 }
