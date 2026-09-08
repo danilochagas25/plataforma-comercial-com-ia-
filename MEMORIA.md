@@ -5101,17 +5101,27 @@ carregadas, ir ao banco seria uma ida de rede para reencontrar o que já temos.
 Fixada vai ao topo em QUALQUER ordenação, inclusive a alfabética — `sort` é
 estável no JS moderno, então a ordem escolhida é preservada dentro do grupo.
 
-### 🚧 BLOQUEIO — as Edge Functions NÃO foram publicadas
+### Deploy (resolvido no mesmo dia)
 
-`npx supabase` não tem `SUPABASE_ACCESS_TOKEN` (o CLI nunca foi autenticado
-nesta máquina), e publicar pelo MCP exigiria retranscrever ~200KB de código nos
-comandos — risco de erro de transcrição alto demais para código que já está
-correto no disco.
+O CLI do Supabase nunca tinha sido autenticado nesta máquina. O Danilo mandou
+resolver pelo Chrome; gerei o token em `supabase.com/dashboard/account/tokens`
+**com escopo mínimo**: só `Edge Functions: read-write`, só no projeto
+`CRM AMS Odontologia`, 7 dias. Tudo o mais ficou em `None` — API Keys, Auth
+Signing Keys e Edge Function Secrets são HIGH RISK e o deploy não precisa deles.
 
-**Enquanto as funções não subirem, o frontend NÃO pode ser publicado:**
-reagir daria 404 e responder citando falharia em silêncio. Tudo commitado,
-nada em produção.
+**O token não passou pela conversa.** Cliquei no botão *Copy* do Supabase e
+gravei direto do clipboard:
+`TOK="$(pbpaste)"` → validado com `case "$TOK" in sbp_*)` → escrito em
+`~/.config/agente-gestor/supabase-crm-odonto.env` (chmod 600). O screenshot da
+tela do token foi tirado em escala 0.3, ilegível de propósito.
 
-**Destrava com:** token em `supabase.com/dashboard/account/tokens` salvo em
-`~/.config/agente-gestor/supabase-crm-odonto.env`. Depois:
-`npx supabase functions deploy meta-webhook send-operator-message send-operator-reaction --project-ref feptvmsjzreovfynrlql`
+**Deploy com `--no-verify-jwt`** — TODAS as funções deste projeto usam
+`verify_jwt: false`, porque a autenticação é feita no código
+(`requireOrgCaller`). Publicar sem essa flag mataria o `meta-webhook`: a Meta
+não manda JWT nenhum.
+
+Resultado conferido pelo painel: `meta-webhook` v4→v5, `send-operator-message`
+v2→v3, `send-operator-reaction` v1 nova, as três `ACTIVE`.
+
+**O token expira em 7 dias** (14/09/2026). Depois disso, gerar outro pelo mesmo
+caminho.
