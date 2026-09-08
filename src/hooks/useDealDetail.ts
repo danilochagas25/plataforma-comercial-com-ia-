@@ -16,6 +16,10 @@ export interface DealNote {
   body: string | null;
   title: string | null;
   created_at: string;
+  // Quem registrou a tratativa. Numa recepção com mais de uma pessoa, uma
+  // observação sem autor não serve para cobrar nem para dar sequência —
+  // ninguém sabe com quem falar sobre o que está escrito ali.
+  owner_id: string | null;
 }
 
 interface CreateFieldInput {
@@ -72,7 +76,7 @@ export function useDealDetail(deal: Deal | null): UseDealDetailResult {
       supabase.from('contacts').select('id, name, phone, email, source, custom_fields, created_at, updated_at').eq('id', deal.contact_id).single(),
       supabase.from('custom_fields').select('*').order('position'),
       supabase.from('custom_field_values').select('*').eq('deal_id', deal.id),
-      supabase.from('crm_activities').select('id, body, title, created_at').eq('deal_id', deal.id).eq('type', 'note').order('created_at', { ascending: false }).limit(100),
+      supabase.from('crm_activities').select('id, body, title, created_at, owner_id').eq('deal_id', deal.id).eq('type', 'note').order('created_at', { ascending: false }).limit(100),
       supabase.from('deal_products').select('value, quantity, product:product_id(id, name)').eq('deal_id', deal.id),
       supabase.from('deal_tags').select('tag:tag_id(id, name, color)').eq('deal_id', deal.id),
       supabase.from('products').select('id, name, product_type, quantity').order('name'),
@@ -122,7 +126,14 @@ export function useDealDetail(deal: Deal | null): UseDealDetailResult {
     const text = body.trim();
     if (!text) return;
     const supabase = getSupabase();
-    const { error: err } = await supabase.from('crm_activities').insert({ deal_id: deal.id, contact_id: deal.contact_id, type: 'note', body: text });
+    const { data: sessao } = await supabase.auth.getUser();
+    const { error: err } = await supabase.from('crm_activities').insert({
+      deal_id: deal.id,
+      contact_id: deal.contact_id,
+      type: 'note',
+      body: text,
+      owner_id: sessao.user?.id ?? null,
+    });
     if (err) { setError(err.message); return; }
     await reload();
   }, [deal, reload]);

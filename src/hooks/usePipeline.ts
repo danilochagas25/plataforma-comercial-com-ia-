@@ -39,6 +39,10 @@ interface UsePipelineResult {
   deals: Deal[];
   // dealId → due_at da próxima ação pendente (badge de relógio no card).
   nextActionByDeal: Record<string, string>;
+  // dealId → quantas observações/tratativas já foram registradas. Vira o selo
+  // no card: dá para ver quem já foi trabalhado sem abrir orçamento por
+  // orçamento.
+  notesCountByDeal: Record<string, number>;
   // contactId → conversas do contato (canal + última interação) p/ os filtros.
   convByContact: Record<string, ContactConvInfo[]>;
   loading: boolean;
@@ -70,6 +74,7 @@ export function usePipeline(): UsePipelineResult {
   const [stages, setStages] = useState<Stage[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [nextActionByDeal, setNextActionByDeal] = useState<Record<string, string>>({});
+  const [notesCountByDeal, setNotesCountByDeal] = useState<Record<string, number>>({});
   const [convByContact, setConvByContact] = useState<Record<string, ContactConvInfo[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -171,8 +176,23 @@ export function usePipeline(): UsePipelineResult {
         if (a.deal_id && !map[a.deal_id]) map[a.deal_id] = a.due_at;
       }
       setNextActionByDeal(map);
+
+      // Contagem de observações por orçamento. Trazemos só a coluna deal_id e
+      // contamos aqui: o PostgREST não faz GROUP BY, e uma chamada por card
+      // seriam dezenas de idas de rede para exibir um número.
+      const { data: notas } = await supabase
+        .from('crm_activities')
+        .select('deal_id')
+        .in('deal_id', ids)
+        .eq('type', 'note');
+      const contagem: Record<string, number> = {};
+      for (const n of (notas ?? []) as Array<{ deal_id: string | null }>) {
+        if (n.deal_id) contagem[n.deal_id] = (contagem[n.deal_id] ?? 0) + 1;
+      }
+      setNotesCountByDeal(contagem);
     } else {
       setNextActionByDeal({});
+      setNotesCountByDeal({});
     }
 
     // Canal + última interação da conversa de cada contato (filtros do funil).
@@ -462,7 +482,7 @@ export function usePipeline(): UsePipelineResult {
   );
 
   return {
-    pipelines, selectedId, select, pipeline, stages, deals, nextActionByDeal, convByContact, loading, error, reload,
+    pipelines, selectedId, select, pipeline, stages, deals, nextActionByDeal, notesCountByDeal, convByContact, loading, error, reload,
     moveDeal, createDeal, archiveDeal, unarchiveDeal,
     inactivePipelines, setPipelineActive,
     createPipeline, renamePipeline, deletePipeline, setDefaultPipeline,

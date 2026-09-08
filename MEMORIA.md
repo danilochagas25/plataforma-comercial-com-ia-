@@ -5150,3 +5150,38 @@ primeira renderização (para ter altura mensurável), mas com
 `visibility: hidden` e fora da tela até o `useLayoutEffect` calcular a posição.
 
 Usado nos dois menus — o da mensagem e o da conversa.
+
+---
+
+## 07/09/2026 · 19h30 — Observações e tratativas no orçamento
+
+O Danilo pediu "uma área de observação em cada orçamento para o atendente
+colocar as tratativas". **A área já existia** — `crm_activities` com
+`type='note'` filtrado por `deal_id`, então já era por orçamento, não por
+paciente. O que faltava era o que a torna útil:
+
+1. **Não gravava quem escreveu.** `owner_id` existia na tabela e o `addNote`
+   simplesmente não preenchia. Numa recepção com mais de uma pessoa, observação
+   anônima não serve nem para cobrar nem para dar sequência.
+2. **Era um `<input>` de uma linha, com Enter enviando.** Uma tratativa real
+   ("liguei, ela pediu para retornar sexta, disse que o marido decide") tem mais
+   de uma frase; o Enter cortava a atendente no meio. Virou `textarea`, com
+   ⌘/Ctrl+Enter para salvar.
+3. **Ficava no rodapé do drawer**, depois de campos personalizados e produtos.
+   É a primeira coisa que a recepção quer ler ao abrir e a última que escreve
+   depois de ligar — subiu para logo abaixo do cabeçalho.
+4. **O card do funil não mostrava nada.** Saber se alguém já ligou exigia abrir
+   orçamento por orçamento, e com 81 abertos ninguém faz isso. O card agora tem
+   um selo com a contagem (zero não aparece: "0" em todo card viraria ruído).
+5. O rótulo dizia "Notas internas" e o campo "Anotar algo sobre este paciente" —
+   dava a entender que era do paciente. Virou **"Observações e tratativas"**.
+
+A contagem por card vem de uma consulta só, trazendo `deal_id` de todas as
+notas do board e contando no cliente: o PostgREST não faz `GROUP BY`, e uma
+chamada por card seriam dezenas de idas de rede para exibir um número.
+
+Notas gravadas antes desta mudança aparecem como **"Equipe"** em vez de um
+espaço vazio que pareceria falha de carregamento.
+
+Sem migration: `owner_id` e a policy `crm_activities_write` (ALL para
+admin/operator) já existiam.

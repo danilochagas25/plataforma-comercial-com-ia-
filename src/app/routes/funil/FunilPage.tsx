@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Archive, ArchiveRestore, ChevronDown, Clock, FileUp, GitBranchPlus, Plus, RefreshCw, Settings2, X } from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronDown, Clock, FileUp, GitBranchPlus, MessageSquare, Plus, RefreshCw, Settings2, X } from 'lucide-react';
 import { getSupabase } from '@/lib/supabase';
 import { usePipeline } from '@/hooks/usePipeline';
 import { useAppUser } from '@/app/providers/AppUserProvider';
@@ -29,7 +29,7 @@ const PAGE_SIZE = 20;
 export default function FunilPage() {
   const funil = usePipeline();
   const {
-    pipelines, selectedId, select, pipeline, stages, deals, nextActionByDeal, convByContact,
+    pipelines, selectedId, select, pipeline, stages, deals, nextActionByDeal, notesCountByDeal, convByContact,
     loading, error, reload, moveDeal, createDeal, archiveDeal, unarchiveDeal,
   } = funil;
   const { role } = useAppUser();
@@ -236,6 +236,7 @@ export default function FunilPage() {
                       key={deal.id}
                       deal={deal}
                       nextDue={nextActionByDeal[deal.id] ?? null}
+                      notesCount={notesCountByDeal[deal.id] ?? 0}
                       onDragStart={() => setDragId(deal.id)}
                       onOpen={() => setOpenDealId(deal.id)}
                       onArchive={() => void archiveDeal(deal.id)}
@@ -355,12 +356,14 @@ function ArchivedPanel({
 function DealCard({
   deal,
   nextDue,
+  notesCount,
   onDragStart,
   onOpen,
   onArchive,
 }: {
   deal: Deal;
   nextDue: string | null;
+  notesCount: number;
   onDragStart: () => void;
   onOpen: () => void;
   onArchive: () => void;
@@ -426,6 +429,21 @@ function DealCard({
       >
         <Archive className="h-3.5 w-3.5" />
       </button>
+      {/* Quantas tratativas já foram registradas. Sem isto, saber se alguém
+          já ligou para o paciente exige abrir orçamento por orçamento — e com
+          81 abertos ninguém faz isso. Zero não mostra nada: um "0" em cada
+          card viraria ruído em vez de informação. */}
+      {notesCount > 0 && (
+        <div className="mt-1.5 flex items-center">
+          <span
+            title={`${notesCount} ${notesCount === 1 ? 'observação registrada' : 'observações registradas'}`}
+            className="inline-flex items-center gap-1 rounded-md bg-[var(--color-accent-bg)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--accent-primary)]"
+          >
+            <MessageSquare className="h-2.5 w-2.5" />
+            {notesCount}
+          </span>
+        </div>
+      )}
       {/* Origem do lead (UTM): só o destaque (Meta Ads / Google Ads / Orgânico) */}
       {origin && (
         <div className="mt-1.5 flex items-center text-[10px]">

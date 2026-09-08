@@ -4,7 +4,7 @@ import { X, Phone, Mail, Building2, ChevronDown, Clock, MessageSquare, Plus, Che
 import { toast } from 'sonner';
 import { getSupabase } from '@/lib/supabase';
 import { ensureConversationForContact } from '@/lib/conversations';
-import { useDealDetail } from '@/hooks/useDealDetail';
+import { useDealDetail, type DealNote } from '@/hooks/useDealDetail';
 import { operatorLabel, useOperators } from '@/hooks/useOperators';
 import { VOCAB } from '@/config/vocab';
 import { ProximaAcao } from '@/components/crm/ProximaAcao';
@@ -48,6 +48,15 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
   const detail = useDealDetail(deal);
   const { contact, fields, values, notes, products, tags, productCatalog, tagCatalog, loading, error } = detail;
   const { operators } = useOperators();
+
+  // Nome de quem registrou a tratativa. As notas antigas — gravadas antes de
+  // passarmos a guardar o autor — aparecem como "Equipe" em vez de um espaço
+  // em branco que pareceria erro de carregamento.
+  const autorDaNota = (ownerId: string | null): string => {
+    if (!ownerId) return 'Equipe';
+    const op = operators.find((o) => o.user_id === ownerId);
+    return op ? operatorLabel(op) : 'Equipe';
+  };
   const [note, setNote] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [fieldModal, setFieldModal] = useState(false);
@@ -201,6 +210,19 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
                 </span>
               </div>
             )}
+            {/* Observações e tratativas — primeira coisa depois do cabeçalho.
+                É o que a recepção abre o orçamento para ler ("o que já foi
+                feito com este paciente?") e o que ela vem escrever depois de
+                ligar. Deixar no rodapé obrigava a rolar o drawer inteiro. */}
+            <Tratativas
+              notes={notes}
+              note={note}
+              setNote={setNote}
+              saving={savingNote}
+              onSubmit={submitNote}
+              autorDe={autorDaNota}
+            />
+
             {/* Valor + temperatura + tipo */}
             <section className="grid grid-cols-2 gap-3">
               <Field label="Valor">
@@ -426,28 +448,6 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
             {/* Próxima ação (follow-up manual) ancorada neste negócio */}
             <ProximaAcao dealId={deal.id} />
 
-            {/* Notas internas */}
-            <section className="space-y-3">
-              <div className="text-label">Notas internas</div>
-              <div className="flex gap-2">
-                <input value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void submitNote()} placeholder="Anotar algo sobre este paciente…" className={inputCls} />
-                <button onClick={submitNote} disabled={savingNote || !note.trim()} className="rounded-lg bg-gradient-to-br from-[var(--accent-secondary)] to-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60">
-                  {savingNote ? '…' : 'Anotar'}
-                </button>
-              </div>
-              <ol className="space-y-2">
-                {notes.length === 0 ? (
-                  <li className="text-sm text-[var(--color-text-label)]">Sem notas ainda.</li>
-                ) : (
-                  notes.map((n) => (
-                    <li key={n.id} className="glass-card p-3">
-                      <p className="whitespace-pre-wrap text-sm text-[var(--color-text-primary)]">{n.body ?? n.title}</p>
-                      <div className="mt-1 text-xs text-[var(--color-text-secondary)]">{fmtDate(n.created_at)}</div>
-                    </li>
-                  ))
-                )}
-              </ol>
-            </section>
           </div>
         )}
       </aside>
@@ -456,6 +456,110 @@ export function DealDrawer({ deal, stages, pipelines, isAdmin, onClose, onStageC
         <CustomFieldModal onClose={() => setFieldModal(false)} onCreate={async (input) => { const created = await detail.createField(input); if (created) setFieldModal(false); }} />
       )}
     </div>
+  );
+}
+
+// Observações e tratativas do orçamento.
+//
+// Histórico, não campo único: "o que já foi tentado com este paciente" é uma
+// sequência (liguei terça, ele pediu para retornar sexta, mandei o orçamento
+// por WhatsApp). Um campo que se sobrescreve apagaria justamente a informação
+// que faz a recuperação andar.
+//
+// Cada linha carrega QUEM escreveu. Numa recepção com mais de uma pessoa, uma
+// observação anônima não serve nem para cobrar nem para dar sequência.
+function Tratativas({
+  notes,
+  note,
+  setNote,
+  saving,
+  onSubmit,
+  autorDe,
+}: {
+  notes: DealNote[];
+  note: string;
+  setNote: (v: string) => void;
+  saving: boolean;
+  onSubmit: () => void | Promise<void>;
+  autorDe: (ownerId: string | null) => string;
+}) {
+  const [abertas, setAbertas] = useState(false);
+  // A recepção lê as últimas; o resto quase nunca. Mostrar 50 de cara empurra
+  // o resto do orçamento para fora da tela.
+  const VISIVEIS = 3;
+  const lista = abertas ? notes : notes.slice(0, VISIVEIS);
+
+  return (
+    <section className="space-y-2 rounded-xl border border-[var(--color-border-card)] bg-[var(--color-bg-subtle)] p-3">
+      <div className="flex items-center gap-2">
+        <MessageSquare className="h-3.5 w-3.5 text-[var(--accent-primary)]" />
+        <div className="text-label">Observações e tratativas</div>
+        {notes.length > 0 && (
+          <span className="ml-auto rounded-full bg-[var(--color-accent-bg)] px-2 py-0.5 text-[11px] font-bold text-[var(--accent-primary)]">
+            {notes.length}
+          </span>
+        )}
+      </div>
+
+      <textarea
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter quebra linha (uma tratativa costuma ter mais de uma frase);
+          // Ctrl/Cmd+Enter envia. O contrário fazia a atendente perder o texto
+          // no meio da frase.
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            void onSubmit();
+          }
+        }}
+        rows={2}
+        placeholder="O que foi feito: ligou, respondeu, pediu prazo, agendou…"
+        className="w-full resize-y rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--accent-primary)]"
+      />
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] text-[var(--color-text-muted)]">⌘/Ctrl + Enter para salvar</span>
+        <button
+          onClick={() => void onSubmit()}
+          disabled={saving || !note.trim()}
+          className="ml-auto rounded-lg bg-gradient-to-br from-[var(--accent-secondary)] to-[var(--accent-primary)] px-4 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+        >
+          {saving ? '…' : 'Registrar'}
+        </button>
+      </div>
+
+      {notes.length === 0 ? (
+        <p className="text-sm text-[var(--color-text-label)]">
+          Nada registrado ainda. A primeira observação costuma ser o resultado da
+          ligação de retorno.
+        </p>
+      ) : (
+        <>
+          <ol className="space-y-2">
+            {lista.map((n) => (
+              <li key={n.id} className="rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] p-2.5">
+                <p className="whitespace-pre-wrap break-words text-sm text-[var(--color-text-primary)]">
+                  {n.body ?? n.title}
+                </p>
+                <div className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--color-text-secondary)]">
+                  <span className="font-semibold">{autorDe(n.owner_id)}</span>
+                  <span>·</span>
+                  <span>{fmtDate(n.created_at)}</span>
+                </div>
+              </li>
+            ))}
+          </ol>
+          {notes.length > VISIVEIS && (
+            <button
+              onClick={() => setAbertas((v) => !v)}
+              className="text-xs font-medium text-[var(--accent-primary)] hover:underline"
+            >
+              {abertas ? 'Mostrar menos' : `Ver as outras ${notes.length - VISIVEIS}`}
+            </button>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
