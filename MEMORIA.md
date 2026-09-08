@@ -5329,3 +5329,31 @@ Não é falha de importação: `sync-template-status` copia `comp.text` verbatim
 
 **Bloqueia o disparo.** Correção = apagar o `1}}` no Gerenciador do WhatsApp e
 reenviar para aprovação (a Meta permite editar template aprovado).
+
+---
+
+## 08/09/2026 — Escolher a coluna do funil no disparo
+
+O Danilo pediu para "escolher qual coluna que irei fazer o disparo". **O recurso
+já existia** — o modo `funnel` do `CampaignWizard` filtra por etapa desde
+sempre. Ele não achou porque:
+
+1. estava **por último**, com o rótulo **"Por funil/etapa"** (jargão: ele fala
+   *coluna*, que é o que a tela do funil mostra);
+2. o modo **padrão era "Todos os contatos"** — quem abre o assistente já chega
+   apontando para a base inteira e não vê motivo para trocar.
+
+O segundo ponto também era um risco: a opção que dispara para todo mundo estava
+selecionada de fábrica, a um clique de distância de mandar mensagem para
+pacientes que nunca pediram orçamento.
+
+**Mudanças:** "Por coluna do funil" virou a **primeira** opção e o **padrão**;
+"Todos os pacientes" foi para o fim, com aviso em amarelo explicando que
+alcança quem já fechou tratamento e quem nunca pediu orçamento. Rótulos
+traduzidos ("Por etiqueta", "Por campo personalizado"). O contador passou a se
+chamar **"Pacientes que vão receber"** e, no modo coluna, diz explicitamente que
+**quem tem vários orçamentos recebe uma mensagem só** — a regra que o Danilo
+definiu e que precisa estar visível na hora de apertar o botão, não enterrada
+no código.
+
+Funil com um só pipeline pré-seleciona sozinho.

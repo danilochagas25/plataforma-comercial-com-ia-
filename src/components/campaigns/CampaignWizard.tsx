@@ -64,7 +64,11 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
     Array<{ id: string; label: string; phone: string | null }>
   >([]);
   const [channelId, setChannelId] = useState<string>('');
-  const [audienceMode, setAudienceMode] = useState<AudienceMode>('all');
+  // Começa em "coluna do funil", não em "todos os contatos". Dois motivos: é
+  // como a clínica realmente monta disparo (a coluna É o público), e um padrão
+  // que já vem apontando para a base inteira é um clique de distância de mandar
+  // mensagem para todo mundo.
+  const [audienceMode, setAudienceMode] = useState<AudienceMode>('funnel');
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const [customFieldKey, setCustomFieldKey] = useState('');
   const [customFieldValue, setCustomFieldValue] = useState('');
@@ -160,7 +164,11 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
         // Funil desativado não aparece em seletor (migração 20260907120000).
         .eq('is_active', true)
         .order('position');
-      if (!cancelled) setPipelines((data ?? []) as Pipeline[]);
+      if (cancelled) return;
+      const lista = (data ?? []) as Pipeline[];
+      setPipelines(lista);
+      // Um funil só: escolher qual é uma pergunta sem alternativa.
+      if (lista.length === 1) setFunnelPipelineId((prev) => prev || lista[0].id);
     })();
     return () => {
       cancelled = true;
@@ -503,7 +511,7 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
       {step === 1 && (
         <div className="space-y-5">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {(['all', 'tags', 'custom', 'funnel'] as AudienceMode[]).map((mode) => (
+            {(['funnel', 'tags', 'custom', 'all'] as AudienceMode[]).map((mode) => (
               <button
                 key={mode}
                 type="button"
@@ -515,10 +523,10 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
                     : 'border-[rgba(97,193,208,0.30)] bg-[#FAFDFD] text-[var(--color-text-secondary)]',
                 )}
               >
-                {mode === 'all' && 'Todos os contatos'}
-                {mode === 'tags' && 'Por tags'}
-                {mode === 'custom' && 'Por campo custom'}
-                {mode === 'funnel' && 'Por funil/etapa'}
+                {mode === 'funnel' && 'Por coluna do funil'}
+                {mode === 'tags' && 'Por etiqueta'}
+                {mode === 'custom' && 'Por campo personalizado'}
+                {mode === 'all' && 'Todos os pacientes'}
               </button>
             ))}
           </div>
@@ -586,7 +594,7 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
           {audienceMode === 'funnel' && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="c_funnel">Funil</Label>
+                <Label htmlFor="c_funnel">Qual funil</Label>
                 {pipelines.length === 0 ? (
                   <p className="text-sm text-[var(--color-text-secondary)] opacity-80">
                     Nenhum funil comercial encontrado. Crie um em Funil.
@@ -610,7 +618,7 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
 
               {funnelPipelineId && (
                 <div className="space-y-2">
-                  <Label>Etapas (deixe vazio p/ o funil inteiro)</Label>
+                  <Label>Quais colunas — o número é de pacientes, não de orçamentos</Label>
                   <div className="flex flex-wrap gap-2">
                     {stages.map((s) => {
                       const active = selectedStageIds.has(s.id);
@@ -655,14 +663,33 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
             </div>
           )}
 
+          {audienceMode === 'all' && (
+            <div className="rounded-lg border border-[rgba(154,74,7,0.28)] bg-[var(--color-warning-bg)] px-4 py-3 text-sm text-[var(--color-text-primary)]">
+              <span className="font-semibold text-[var(--color-warning)]">Atenção: </span>
+              isto envia para <strong>toda a base de pacientes</strong>, inclusive quem já
+              fechou tratamento e quem nunca pediu orçamento. Para a régua de recuperação,
+              use <strong>Por coluna do funil</strong>.
+            </div>
+          )}
+
           <div className="rounded-lg border border-[rgba(97,193,208,0.38)] bg-[rgba(97,193,208,0.06)] p-4 text-center">
-            <div className="text-label">Pessoas alcançadas</div>
+            <div className="text-label">Pacientes que vão receber</div>
             <div className="text-stat mt-1">{audienceCount ?? '…'}</div>
+            {audienceMode === 'funnel' && selectedStageIds.size > 0 && (
+              <div className="mt-1 text-xs text-[var(--color-text-secondary)]">
+                Uma mensagem por paciente — quem tem vários orçamentos recebe só uma.
+              </div>
+            )}
           </div>
 
           {audienceMode === 'tags' && selectedTagIds.size === 0 && (
             <p className="text-xs text-[#9A4A07] text-center">
-              Selecione pelo menos uma tag para continuar.
+              Selecione pelo menos uma etiqueta para continuar.
+            </p>
+          )}
+          {audienceMode === 'funnel' && !funnelPipelineId && (
+            <p className="text-xs text-[#9A4A07] text-center">
+              Escolha o funil para ver as colunas.
             </p>
           )}
           {audienceMode === 'custom' && !(customFieldKey.trim() && customFieldValue.trim()) && (
