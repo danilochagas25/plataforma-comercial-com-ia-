@@ -60,7 +60,7 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
   // Multi-número: canal (número oficial via Zernio) que dispara o broadcast.
   // Com um único canal ativo, ele é selecionado automaticamente e o seletor
   // fica oculto.
-  const [zernioChannels, setZernioChannels] = useState<
+  const [canaisAtivos, setCanaisAtivos] = useState<
     Array<{ id: string; label: string; phone: string | null }>
   >([]);
   const [channelId, setChannelId] = useState<string>('');
@@ -72,6 +72,8 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
   const [stages, setStages] = useState<Stage[]>([]);
   const [funnelPipelineId, setFunnelPipelineId] = useState<string>('');
   const [selectedStageIds, setSelectedStageIds] = useState<Set<string>>(new Set());
+  // stageId → quantos pacientes distintos ela alcança.
+  const [pacientesPorEtapa, setPacientesPorEtapa] = useState<Record<string, number>>({});
   const [audienceCount, setAudienceCount] = useState<number | null>(null);
   const [scheduleNow, setScheduleNow] = useState(true);
   const [scheduleAt, setScheduleAt] = useState(''); // datetime-local value
@@ -170,16 +172,37 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
     if (!funnelPipelineId) {
       setStages([]);
       setSelectedStageIds(new Set());
+      setPacientesPorEtapa({});
       return;
     }
     let cancelled = false;
     void (async () => {
-      const { data } = await getSupabase()
+      const supabase = getSupabase();
+      const { data } = await supabase
         .from('stages')
         .select('*')
         .eq('pipeline_id', funnelPipelineId)
         .order('position');
-      if (!cancelled) setStages((data ?? []) as Stage[]);
+      if (cancelled) return;
+      const lista = (data ?? []) as Stage[];
+      setStages(lista);
+
+      // Quantos PACIENTES cada etapa alcança. Sem este número, escolher a etapa
+      // é adivinhação: nomes parecidos ("Não aprovado" × "Orçamento
+      // apresentado") levam a marcar a errada, ver o total dar zero e não
+      // entender por quê.
+      const { data: linhas } = await supabase
+        .from('deals')
+        .select('stage_id, contact_id')
+        .eq('pipeline_id', funnelPipelineId);
+      if (cancelled) return;
+      const porEtapa: Record<string, Set<string>> = {};
+      for (const d of (linhas ?? []) as Array<{ stage_id: string; contact_id: string }>) {
+        (porEtapa[d.stage_id] ??= new Set()).add(d.contact_id);
+      }
+      const contagem: Record<string, number> = {};
+      for (const [sid, set] of Object.entries(porEtapa)) contagem[sid] = set.size;
+      setPacientesPorEtapa(contagem);
     })();
     setSelectedStageIds(new Set());
     return () => {
@@ -197,12 +220,13 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
         .schema('whatsapp_hub')
         .from('channels')
         .select('id, label, phone')
-        .eq('provider', 'zernio')
+        // Sem filtro de provider: a lista mostrava só canais Zernio, então numa
+        // instalação Meta ela vinha vazia e o seletor de número nunca aparecia.
         .eq('is_active', true)
         .order('created_at');
       if (cancelled) return;
       const rows = (data ?? []) as Array<{ id: string; label: string; phone: string | null }>;
-      setZernioChannels(rows);
+      setCanaisAtivos(rows);
       setChannelId((prev) => prev || (rows[0]?.id ?? ''));
     })();
     return () => {
@@ -328,7 +352,7 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
               disabled={submitting}
             />
           </div>
-          {zernioChannels.length > 1 && (
+          {canaisAtivos.length > 1 && (
             <div className="space-y-2">
               <Label htmlFor="c_channel">Número de disparo</Label>
               <select
@@ -338,7 +362,7 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
                 disabled={submitting}
                 className="h-11 w-full rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-4 text-sm text-[var(--color-text-primary)]"
               >
-                {zernioChannels.map((ch) => (
+                {canaisAtivos.map((ch) => (
                   <option key={ch.id} value={ch.id}>
                     {ch.label}{ch.phone ? ` · ${ch.phone}` : ''}
                   </option>
@@ -614,6 +638,14 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
                             style={{ backgroundColor: s.color ?? 'var(--accent-primary)' }}
                           />
                           {s.name}
+                          <span className={cn(
+                            'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
+                            (pacientesPorEtapa[s.id] ?? 0) > 0
+                              ? 'bg-[rgba(97,193,208,0.28)] text-[var(--color-text-primary)]'
+                              : 'bg-[#EDEDED] text-[var(--color-text-muted)]',
+                          )}>
+                            {pacientesPorEtapa[s.id] ?? 0}
+                          </span>
                         </button>
                       );
                     })}

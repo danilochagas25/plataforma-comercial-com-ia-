@@ -5248,3 +5248,43 @@ pendente) e por isso não foi tocada pelo deploy.
    *Sincronizar* em Disparos → Templates importa o que estiver aprovado na
    WABA; os `cdt_desfiliacao_*` NÃO servem (outra WABA, outro número).
 2. Teste com poucos antes dos 59.
+
+---
+
+## 07/09/2026 · 21h — Por que não dava para escolher "os não aprovados"
+
+O Danilo tentou montar a campanha e não conseguiu selecionar os não aprovados.
+Duas causas, e a principal **é uma escolha minha na importação**:
+
+### A etapa "Não aprovado" está vazia
+
+| Etapa (funil Odonto — Orçamentos) | Orçamentos | Pacientes |
+|---|---|---|
+| **Orçamento apresentado** | **81** | **59** |
+| Em negociação · Aguardando decisão | 0 | 0 |
+| Aprovado | 63 | 54 |
+| **Não aprovado** | **0** | **0** |
+
+Os "não aprovados" do relatório do WebDental foram para **"Orçamento
+apresentado"**, e a etapa chamada "Não aprovado" ficou reservada para outro
+sentido — paciente que **desistiu de vez**. Quem lê a tela clica no nome
+óbvio, vê o contador dar zero e não entende por quê. **Nomenclatura minha, não
+avisada.**
+
+### O seletor de número só listava canais Zernio
+
+`CampaignWizard` filtrava `.eq('provider', 'zernio')` ao carregar os canais.
+Numa instalação Meta a lista vinha vazia e o seletor nunca aparecia. Não
+bloqueava o disparo (sem `channel_id`, o `dispatch-campaign` cai no canal ativo
+mais antigo, que é o Meta), mas escondia da tela qual número vai enviar —
+informação que ninguém deveria ter que adivinhar antes de disparar.
+
+### Correções
+
+1. **Cada etapa agora mostra quantos pacientes alcança**, ao lado do nome. Com
+   "Orçamento apresentado 59" e "Não aprovado 0" lado a lado, a escolha certa
+   fica evidente sem precisar decorar a semântica das etapas.
+2. Seletor de canal passa a listar **todos** os provedores ativos.
+
+Fica em aberto para o Danilo decidir: renomear "Orçamento apresentado" para
+algo como "Orçado — não fechou", que é o que a etapa realmente contém.
