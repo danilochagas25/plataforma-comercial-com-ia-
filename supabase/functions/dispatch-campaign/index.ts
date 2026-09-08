@@ -39,11 +39,34 @@ import {
   type BroadcastVariableMapping,
   type ZernioContext,
 } from '../_shared/zernio.ts';
-import { getChannelById, loadOrgZernioContext } from '../_shared/channels.ts';
+import {
+  MetaCloudError,
+  metaContextFromChannel,
+  metaSendTemplate,
+  type MetaContext,
+} from '../_shared/meta-cloud.ts';
+import { getChannelById, listActiveChannels, loadOrgZernioContext, type ChannelRow } from '../_shared/channels.ts';
 
 // Teto de destinatarios processados por campanha por tick. O Zernio faz o
 // batching real; isto so limita o trabalho de um unico tick de 30s.
 const PER_TICK_LIMIT = 500;
+
+// ---------------------------------------------------------------------------
+// Ritmo do canal Meta
+// ---------------------------------------------------------------------------
+// A Meta não tem "broadcast": toda campanha é mensagem a mensagem. O limite
+// aqui NÃO é técnico (a API aguenta muito mais) — é de reputação. Número novo
+// que dispara em rajada é exatamente o padrão que fez a Meta restringir o
+// número de cobrança do Cartão de TODOS em 07/05/2026 (1.343 mensagens em dois
+// dias). Perder o número custa mais do que demorar.
+//
+// 10 por tick, um de cada vez, com 2s entre eles: ~20s de trabalho dentro do
+// tick de 30s do cron. Dá ~20 mensagens por minuto, ritmo de gente digitando
+// rápido — não de robô.
+const META_PER_TICK = 10;
+const META_PAUSA_MS = 2000;
+
+const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const RECIPIENTS_CHUNK = 100;
 
 interface CampaignRow {
@@ -357,6 +380,176 @@ async function recordCampaignInbox(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Envio pelo canal Meta (Cloud API direta)
+// ---------------------------------------------------------------------------
+// Uma mensagem por vez, com pausa. Não existe caminho de broadcast aqui: a
+// Cloud API só tem POST /{phone_number_id}/messages, um destinatário por
+// chamada. O que o Zernio chamava de "broadcast" era ele mesmo fazendo esse
+// laço do outro lado.
+//
+// Sequencial de propósito — sem `withConcurrency`. Quatro conexões paralelas
+// entregariam mais rápido e é justamente o que não queremos num número novo.
+async function enviarLoteMeta(args: {
+  admin: ReturnType<typeof getAdminClient>;
+  ctx: MetaContext;
+  orgId: string;
+  channelId: string | null;
+  campaignId: string;
+  template: TemplateRow;
+  rows: CampaignContactRow[];
+  phoneById: Map<string, string>;
+  nameById: Map<string, string>;
+  variableMapping: Record<string, VariableSource> | null;
+  dealByContact: Map<string, DealData>;
+}): Promise<{ sent: number; failed: number }> {
+  const {
+    admin, ctx, orgId, channelId, campaignId, template, rows,
+    phoneById, nameById, variableMapping, dealByContact,
+  } = args;
+
+  const varCount = countVariables(template.body);
+  let sent = 0;
+  let failed = 0;
+
+  // Conversas existentes: o disparo precisa aparecer na inbox, senão a
+  // atendente recebe a resposta do paciente sem saber o que foi mandado.
+  const contactIds = rows.map((r) => r.contact_id);
+  const { data: convRows } = await admin
+    .from('conversations')
+    .select('id, contact_id')
+    .eq('org_id', orgId)
+    .in('contact_id', contactIds);
+  const convByContact = new Map<string, string>();
+  for (const row of (convRows ?? []) as Array<{ id: string; contact_id: string }>) {
+    convByContact.set(row.contact_id, row.id);
+  }
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    // A pausa vem ANTES de cada envio a partir do segundo — assim o intervalo
+    // vale também entre o último deste tick e o primeiro do próximo.
+    if (i > 0) await dormir(META_PAUSA_MS);
+
+    const phone = phoneById.get(r.contact_id);
+    if (!phone) {
+      await admin.from('campaign_contacts')
+        .update({ status: 'failed', claimed_at: null, error_message: 'Contato sem telefone' })
+        .eq('id', r.id);
+      failed += 1;
+      continue;
+    }
+
+    // Resolve as variáveis deste destinatário. Variável em branco não é
+    // enviada: a Meta recusa com "Required template parameter is missing" e a
+    // mensagem sumiria sem ninguém saber.
+    const params: string[] = [];
+    const faltando: string[] = [];
+    for (let n = 1; n <= varCount; n++) {
+      const { value, missingLabel } = resolveDirectValue(
+        variableMapping?.[String(n)],
+        nameById.get(r.contact_id) ?? null,
+        dealByContact.get(r.contact_id),
+      );
+      if (value === null) faltando.push(`{{${n}}}: ${missingLabel}`);
+      else params.push(value);
+    }
+    if (faltando.length > 0) {
+      await admin.from('campaign_contacts')
+        .update({ status: 'failed', claimed_at: null, error_message: `Variáveis sem valor: ${faltando.join('; ')}` })
+        .eq('id', r.id);
+      failed += 1;
+      continue;
+    }
+
+    const components = params.length > 0
+      ? [{ type: 'body', parameters: params.map((text) => ({ type: 'text', text })) }]
+      : undefined;
+
+    try {
+      const enviado = await metaSendTemplate(ctx, {
+        phone,
+        templateName: template.name,
+        languageCode: template.language,
+        components,
+      });
+      const agora = new Date().toISOString();
+
+      await admin.from('campaign_contacts')
+        .update({
+          status: 'sent',
+          sent_at: agora,
+          claimed_at: null,
+          error_message: null,
+          zernio_message_id: enviado.messageId,
+        })
+        .eq('id', r.id);
+      sent += 1;
+
+      // Espelho na inbox. O texto guardado é o preview com as variáveis já
+      // trocadas — quem abrir a conversa amanhã precisa ler o que o paciente
+      // leu, não "{{1}}".
+      let convId = convByContact.get(r.contact_id);
+      if (!convId) {
+        const { data: nova } = await admin.from('conversations')
+          .insert({
+            org_id: orgId,
+            contact_id: r.contact_id,
+            status: 'ai_active',
+            channel: 'whatsapp',
+            channel_id: channelId,
+            provider: 'meta',
+            last_message_at: agora,
+          })
+          .select('id')
+          .single();
+        convId = (nova as { id: string } | null)?.id;
+        if (convId) convByContact.set(r.contact_id, convId);
+      }
+      if (convId) {
+        let preview = template.body;
+        params.forEach((v, idx) => {
+          preview = preview.replace(new RegExp(`\\{\\{\\s*${idx + 1}\\s*\\}\\}`, 'g'), v);
+        });
+        await admin.from('messages').insert({
+          org_id: orgId,
+          conversation_id: convId,
+          direction: 'outbound',
+          sender_type: 'system',
+          content_type: 'template',
+          content: preview,
+          meta_status: 'sent',
+          zernio_message_id: enviado.messageId,
+          campaign_contact_id: r.id,
+          is_private_note: false,
+        });
+        await admin.from('conversations').update({ last_message_at: agora }).eq('id', convId);
+      }
+    } catch (err) {
+      // 429 e 5xx são transitórios: a linha volta para `pending` e o próximo
+      // tick tenta de novo. Erro de template ou de número é definitivo —
+      // insistir só queima reputação.
+      const status = err instanceof MetaCloudError ? err.status : 0;
+      const retryable = status === 429 || status >= 500;
+      // MetaCloudError já chega traduzido: metaReadJson passa a resposta da
+      // Meta por metaFriendlyMessage antes de lançar.
+      const msg = err instanceof Error ? err.message : 'Erro no envio';
+      await admin.from('campaign_contacts')
+        .update(retryable
+          ? { status: 'pending', claimed_at: null, error_message: `Tentando novamente: ${msg}` }
+          : { status: 'failed', claimed_at: null, error_message: msg })
+        .eq('id', r.id);
+      if (!retryable) failed += 1;
+      console.log(JSON.stringify({
+        event: 'dispatch_meta_send_failed',
+        campaignId, contactId: r.contact_id, retryable, error: msg,
+      }));
+    }
+  }
+
+  return { sent, failed };
+}
+
 Deno.serve(async (req) => {
   const pre = preflight(req);
   if (pre) return pre;
@@ -437,23 +630,59 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    // Contexto Zernio da campanha (canal da campanha ou default da org).
-    let ctx: ZernioContext;
-    try {
-      ctx = await resolveCampaignCtx(c);
-    } catch (err) {
-      errors.push(`campaign ${c.id}: ${err instanceof Error ? err.message : 'ctx'}`);
-      continue;
+    // Qual provedor entrega esta campanha? O canal da campanha manda; sem
+    // canal carimbado, o canal ativo mais antigo da org decide. Isso precisa
+    // vir ANTES de qualquer coisa do Zernio: numa instalação só-Meta,
+    // resolveCampaignCtx lança por falta de API key e a campanha morreria sem
+    // nem tentar.
+    let canalDaCampanha: ChannelRow | null = null;
+    if (c.channel_id) {
+      canalDaCampanha = await getChannelById(admin, c.channel_id);
+    } else {
+      const ativos = await listActiveChannels(admin, c.org_id);
+      canalDaCampanha = ativos[0] ?? null;
     }
-    if (!ctx.profileId) {
-      errors.push(`campaign ${c.id}: profileId do Zernio ausente (necessario para broadcasts).`);
+    const provedor = canalDaCampanha?.provider ?? 'zernio';
+
+    // Contexto de envio: Meta usa o token do próprio canal; Zernio usa a chave
+    // da org. Um não serve para o outro.
+    // `profileId` entra no tipo como obrigatório: os broadcasts do Zernio o
+    // exigem, e sem isso o compilador reclamaria em cada uso lá embaixo — o
+    // estreitamento do `if` não sobrevive à saída do bloco.
+    let ctx: (ZernioContext & { profileId: string }) | null = null;
+    let metaCtx: MetaContext | null = null;
+    if (provedor === 'meta') {
+      try {
+        metaCtx = await metaContextFromChannel(canalDaCampanha!);
+      } catch (err) {
+        errors.push(`campaign ${c.id}: ${err instanceof Error ? err.message : 'canal Meta invalido'}`);
+        continue;
+      }
+    } else if (provedor === 'zernio') {
+      let resolvido: ZernioContext;
+      try {
+        resolvido = await resolveCampaignCtx(c);
+      } catch (err) {
+        errors.push(`campaign ${c.id}: ${err instanceof Error ? err.message : 'ctx'}`);
+        continue;
+      }
+      if (!resolvido.profileId) {
+        errors.push(`campaign ${c.id}: profileId do Zernio ausente (necessario para broadcasts).`);
+        continue;
+      }
+      ctx = { ...resolvido, profileId: resolvido.profileId };
+    } else {
+      errors.push(`campaign ${c.id}: disparo em massa nao suportado no canal ${provedor}.`);
       continue;
     }
 
     // Reserva atomica do lote pendente.
     const { data: pending, error: pErr } = await admin.rpc('claim_campaign_contacts', {
       p_campaign_id: c.id,
-      p_limit: PER_TICK_LIMIT,
+      // Na Meta o lote é pequeno de propósito (ver META_PER_TICK): cada
+      // mensagem é uma chamada com pausa, e reservar 500 linhas travaria o
+      // tick inteiro segurando o que não vai conseguir enviar.
+      p_limit: provedor === 'meta' ? META_PER_TICK : PER_TICK_LIMIT,
     });
     if (pErr) {
       errors.push(`campaign ${c.id}: ${pErr.message}`);
@@ -527,6 +756,37 @@ Deno.serve(async (req) => {
         errors.push(`campaign ${c.id}: template ${templateId} nao encontrado`);
         continue;
       }
+
+      // ---- Canal Meta: sempre 1:1, com pausa ------------------------------
+      // Vem antes dos dois caminhos do Zernio porque na Cloud API não existe a
+      // distinção entre "broadcast" e "direto" — é sempre uma chamada por
+      // destinatário, com ou sem variável de negócio.
+      if (provedor === 'meta' && metaCtx) {
+        const precisaDeal = usesDealFields(c.variable_mapping, countVariables(template.body));
+        const dealByContact = precisaDeal
+          ? await loadDealData(admin, c.org_id, groupRows.map((r) => r.contact_id))
+          : new Map<string, DealData>();
+        const res = await enviarLoteMeta({
+          admin,
+          ctx: metaCtx,
+          orgId: c.org_id,
+          channelId: canalDaCampanha?.id ?? null,
+          campaignId: c.id,
+          template,
+          rows: groupRows,
+          phoneById,
+          nameById,
+          variableMapping: c.variable_mapping,
+          dealByContact,
+        });
+        campaignSent += res.sent;
+        campaignFailed += res.failed;
+        continue;
+      }
+
+      // Daqui para baixo é Zernio. A guarda estreita o tipo para o compilador;
+      // na prática nunca dispara, porque provedor !== 'zernio' já saiu antes.
+      if (!ctx) continue;
 
       // ---- Caminho DIRETO (1:1) — variaveis de negocio por destinatario ----
       const directVarCount = countVariables(template.body);

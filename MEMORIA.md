@@ -5185,3 +5185,66 @@ espaço vazio que pareceria falha de carregamento.
 
 Sem migration: `owner_id` e a policy `crm_activities_write` (ALL para
 admin/operator) já existiam.
+
+---
+
+## 07/09/2026 · 20h — O disparo em massa não falava com a Meta
+
+Levantamento antes do primeiro disparo real (81 orçamentos parados = **59
+pacientes distintos**, todos com telefone válido). Três bloqueios; este era o
+que ninguém tinha visto:
+
+**`dispatch-campaign` só falava Zernio.** A migração Meta cobriu inbox,
+templates, webhook e envio individual, mas o motor de campanha continuou
+criando *Broadcasts* no Zernio. Numa instalação só-Meta ele nem chegava a
+tentar: `resolveCampaignCtx` lança por falta de `zernio_api_key` e a campanha
+morria com todos os contatos marcados `failed`.
+
+### O que mudou
+
+O laço agora resolve **o canal antes de tudo** — o `channel_id` da campanha, ou
+o canal ativo mais antigo da org — e desvia por provedor. Meta ganhou um
+caminho próprio (`enviarLoteMeta`), antes dos dois caminhos do Zernio, porque
+**na Cloud API não existe a distinção entre "broadcast" e "direto"**: é sempre
+`POST /{phone_number_id}/messages`, um destinatário por chamada. O que o Zernio
+chamava de broadcast era ele fazendo esse laço do outro lado.
+
+**O ritmo é a parte que importa.** `META_PER_TICK = 10`, sequencial, 2s entre
+mensagens — ~20s de trabalho dentro do tick de 30s do cron, dando ~20
+mensagens/minuto. Não é limite técnico (a API aguenta muito mais): é
+reputação. Número novo disparando em rajada é exatamente o padrão que fez a
+Meta **restringir o número de cobrança do CDT em 07/05/2026** (1.343 mensagens
+em dois dias). Sequencial de propósito, sem `withConcurrency`.
+
+O lote reservado no `claim_campaign_contacts` também caiu para 10 no caminho
+Meta: reservar 500 travaria o tick segurando o que não vai conseguir enviar.
+
+Erro 429/5xx devolve a linha para `pending` (o próximo tick tenta); erro de
+template ou de número marca `failed` — insistir só queima reputação.
+
+Cada envio espelha na inbox com o **preview já com as variáveis trocadas**:
+quem abrir a conversa amanhã precisa ler o que o paciente leu, não `{{1}}`.
+
+### Detalhe de tipagem que custou tempo
+
+`ctx` virou `ZernioContext | null` e o caminho Zernio abaixo assumia não-nulo.
+Resolvido declarando `(ZernioContext & { profileId: string }) | null` e
+montando o objeto depois da checagem — o estreitamento do `if` não sobrevive à
+saída do bloco. Também tentei usar `metaFriendlyMessage(err)`: ela recebe
+`(code, subcode, raw)`, e o `MetaCloudError` **já chega traduzido**, porque
+`metaReadJson` aplica a tradução antes de lançar.
+
+### ⚠️ O cron dispara sozinho
+
+`wh-dispatch-campaigns` roda **a cada 30 segundos**. Campanha que entrar em
+`status='sending'` começa a enviar em até meio minuto — não existe segunda
+confirmação. A campanha "Teste" que existe no banco está `paused` (1 contato
+pendente) e por isso não foi tocada pelo deploy.
+
+### Ainda pendente para o disparo real
+
+1. **Nenhum template de odonto aprovado no banco** — só `teste_conexao` (en).
+   Os 6 textos aprovados pelo Danilo nunca foram submetidos. O botão
+   *Sincronizar* em Disparos → Templates importa o que estiver aprovado na
+   WABA; os `cdt_desfiliacao_*` NÃO servem (outra WABA, outro número).
+2. Teste com poucos antes dos 59.
