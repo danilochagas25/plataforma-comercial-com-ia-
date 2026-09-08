@@ -24,6 +24,10 @@ export interface NavItem {
   // Itens superAdminOnly só aparecem para o super admin da instância
   // (JWT is_super_admin). Ex.: console de Organizações (/admin).
   superAdminOnly?: boolean;
+  // Mostra o selo com o número de conversas esperando resposta, como no
+  // WhatsApp. Fica aqui e não fixo no Sidebar para que a regra "qual item usa
+  // selo" viva junto com o resto da definição do menu.
+  unreadBadge?: boolean;
 }
 
 // Single source of truth for both the Sidebar and the router. Adding a new
@@ -33,7 +37,7 @@ export interface NavItem {
 // aba dentro de /campaigns (Módulo 1).
 export const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard', label: VOCAB.dashboard, icon: LayoutDashboard, adminOnly: true },
-  { to: '/inbox', label: VOCAB.inbox, icon: Inbox },
+  { to: '/inbox', label: VOCAB.inbox, icon: Inbox, unreadBadge: true },
   { to: '/funil', label: VOCAB.funnel, icon: KanbanSquare, adminOnly: true },
   { to: '/vendas', label: VOCAB.sales, icon: TrendingUp, adminOnly: true },
   { to: '/contacts', label: VOCAB.contacts, icon: Users },

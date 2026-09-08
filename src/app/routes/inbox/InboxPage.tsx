@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Inbox as InboxIcon, Info, PanelRightClose, PanelRightOpen, Pin, X } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
@@ -124,7 +124,14 @@ export default function InboxPage() {
     setPinnedNote,
     setArchived,
     markRead,
+    markUnread,
   } = useConversations();
+
+  // Conversa que o operador acabou de marcar como nao lida. No desktop a
+  // auto-selecao reabriria justamente ela (a ordenacao poe as nao lidas no
+  // topo) e o efeito de leitura desfaria a marcacao. Guardamos o id para
+  // pular essa conversa ate ele escolher outra.
+  const skipAutoSelect = useRef<string | null>(null);
 
   const visibleConversations = useMemo(() => {
     const now = Date.now();
@@ -178,7 +185,9 @@ export default function InboxPage() {
       return;
     }
     if (searchParams.get('contact')) return; // deixa o deep-link por contato decidir
-    const firstOpen = visibleConversations.find((c) => !isLocked(c));
+    const firstOpen = visibleConversations.find(
+      (c) => !isLocked(c) && c.id !== skipAutoSelect.current,
+    );
     if (!selectedId && firstOpen) {
       setSelectedId(firstOpen.id);
     }
@@ -246,11 +255,24 @@ export default function InboxPage() {
               conversations={visibleConversations}
               loading={loadingConvs}
               selectedId={selectedId}
-              onSelect={setSelectedId}
+              onSelect={(id) => { skipAutoSelect.current = null; setSelectedId(id); }}
               aiEnabledForChannel={aiEnabledForChannel}
               operatorName={operatorName}
               isLocked={isLocked}
               providerOf={providerOf}
+              onMarkUnread={(c) => {
+                // Fechar a conversa é parte da ação, não um efeito colateral:
+                // com ela aberta, o efeito que zera o contador (logo acima)
+                // desfaria a marcação no mesmo instante.
+                skipAutoSelect.current = c.id;
+                if (selectedId === c.id) setSelectedId(null);
+                void markUnread(c.id);
+              }}
+              onMarkRead={(c) => { void markRead(c.id); }}
+              onArchive={(c, archived) => {
+                if (archived && selectedId === c.id) setSelectedId(null);
+                void setArchived(c.id, archived);
+              }}
             />
           </div>
         </div>

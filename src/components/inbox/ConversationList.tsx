@@ -1,4 +1,18 @@
-import { Bot, Inbox, Instagram, Lock, MessageCircle, Pause, User } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Archive,
+  ArchiveRestore,
+  Bot,
+  Inbox,
+  Instagram,
+  Lock,
+  Mail,
+  MailOpen,
+  MessageCircle,
+  MoreVertical,
+  Pause,
+  User,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Avatar } from '@/components/ui/Avatar';
 import type { WhatsappProvider } from '@/hooks/useWhatsappProvider';
@@ -29,6 +43,10 @@ interface ConversationListProps {
   isLocked?: (conv: ConversationWithContact) => boolean;
   // Provedor da conversa (WhatsApp Meta × UAZAPI × Instagram) p/ o badge.
   providerOf?: (conv: ConversationWithContact) => WhatsappProvider;
+  // Ações do menu "⋮" de cada conversa. Ausentes → o menu não aparece.
+  onMarkUnread?: (conv: ConversationWithContact) => void;
+  onMarkRead?: (conv: ConversationWithContact) => void;
+  onArchive?: (conv: ConversationWithContact, archived: boolean) => void;
 }
 
 function statusBadge(
@@ -69,7 +87,32 @@ export function ConversationList({
   operatorName,
   isLocked,
   providerOf,
+  onMarkUnread,
+  onMarkRead,
+  onArchive,
 }: ConversationListProps) {
+  // Id da conversa cujo menu "⋮" está aberto (um por vez).
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  // Clicar fora ou apertar Esc fecha o menu. Os hooks ficam antes dos returns
+  // antecipados de loading/vazio — a ordem das chamadas não pode variar.
+  useEffect(() => {
+    if (!menuFor) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuFor(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuFor(null); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuFor]);
+
+  const hasMenu = Boolean(onMarkUnread || onMarkRead || onArchive);
+
   if (loading) {
     return (
       <div className="p-6 text-center text-label">Carregando...</div>
@@ -100,8 +143,9 @@ export function ConversationList({
         const isActive = c.id === selectedId;
         const contact = c.contact;
         const displayName = contact?.name?.trim() || contact?.phone || '-';
+        const menuOpen = menuFor === c.id;
         return (
-          <li key={c.id}>
+          <li key={c.id} className="group relative">
             <button
               type="button"
               onClick={() => { if (!locked) onSelect(c.id); }}
@@ -167,9 +211,85 @@ export function ConversationList({
                 </div>
               </div>
             </button>
+
+            {/* O item inteiro é um <button>, e botão não pode conter botão —
+                por isso o menu vive fora dele, posicionado por cima. Some
+                quando a conversa está travada por outro operador. */}
+            {hasMenu && !locked && (
+              <div ref={menuOpen ? menuRef : undefined} className="absolute right-1.5 top-2.5">
+                <button
+                  type="button"
+                  aria-label="Ações da conversa"
+                  aria-expanded={menuOpen}
+                  onClick={() => setMenuFor(menuOpen ? null : c.id)}
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-secondary)] transition-opacity',
+                    'hover:bg-[var(--color-bg-subtle)] hover:text-[var(--color-text-primary)]',
+                    // No toque não existe hover: em tela pequena o botão fica
+                    // sempre visível, no desktop aparece ao passar o mouse.
+                    'opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100',
+                    menuOpen && 'md:opacity-100 bg-[var(--color-bg-subtle)]',
+                  )}
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </button>
+
+                {menuOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-8 z-30 w-56 overflow-hidden rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-surface)] py-1 shadow-lg"
+                  >
+                    {c.unread_count > 0
+                      ? onMarkRead && (
+                          <MenuItem
+                            icon={MailOpen}
+                            label="Marcar como lida"
+                            onClick={() => { setMenuFor(null); onMarkRead(c); }}
+                          />
+                        )
+                      : onMarkUnread && (
+                          <MenuItem
+                            icon={Mail}
+                            label="Marcar como não lida"
+                            onClick={() => { setMenuFor(null); onMarkUnread(c); }}
+                          />
+                        )}
+                    {onArchive && (
+                      <MenuItem
+                        icon={c.archived ? ArchiveRestore : Archive}
+                        label={c.archived ? 'Desarquivar' : 'Arquivar'}
+                        onClick={() => { setMenuFor(null); onArchive(c, !c.archived); }}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </li>
         );
       })}
     </ul>
+  );
+}
+
+function MenuItem({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: typeof Mail;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-subtle)]"
+    >
+      <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--color-text-secondary)]" />
+      {label}
+    </button>
   );
 }

@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from './nav-config';
 import { useAppUser } from '@/app/providers/AppUserProvider';
+import { useUnreadConversations } from '@/hooks/useUnreadConversations';
 import { BRAND } from '@/config/brand';
 
 interface MobileNavProps {
@@ -14,6 +15,7 @@ interface MobileNavProps {
 // (`hidden md:flex`) deixava o app sem NENHUMA navegação no mobile.
 export function MobileNav({ open, onClose }: MobileNavProps) {
   const { role, isSuperAdmin } = useAppUser();
+  const unread = useUnreadConversations();
   const items = NAV_ITEMS.filter((item) => {
     if (item.superAdminOnly) return isSuperAdmin;
     if (item.adminOnly) return role === 'admin';
@@ -61,6 +63,7 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
           {items.map((item) => {
             const Icon = item.icon;
+            const badge = item.unreadBadge && unread > 0 ? unread : 0;
             return (
               <NavLink
                 key={item.to}
@@ -77,6 +80,14 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
               >
                 <Icon className="h-4.5 w-4.5 shrink-0" />
                 {item.label}
+                {badge > 0 && (
+                  <span
+                    aria-label={`${badge} ${badge === 1 ? 'conversa não lida' : 'conversas não lidas'}`}
+                    className="ml-auto shrink-0 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[var(--color-brand-red)] px-1.5 text-[11px] font-bold leading-none text-white"
+                  >
+                    {badge > 99 ? '99+' : badge}
+                  </span>
+                )}
               </NavLink>
             );
           })}

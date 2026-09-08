@@ -15,6 +15,7 @@ interface UseConversationsResult {
   setPinnedNote: (id: string, note: string | null) => Promise<void>;
   setArchived: (id: string, archived: boolean) => Promise<void>;
   markRead: (id: string) => Promise<void>;
+  markUnread: (id: string) => Promise<void>;
 }
 
 interface ContactRow {
@@ -284,7 +285,20 @@ export function useConversations(): UseConversationsResult {
     if (error) throw new Error(translateDbError(error.message));
   };
 
-  return { conversations, loading, error, reload, setStatus, setAiPaused, setAssigned, setActiveDeal, setPinnedNote, setArchived, markRead };
+  // Devolve a conversa para a fila de "esperando resposta". Gravamos 1, não o
+  // número que havia antes: quem marca como não lida está deixando um lembrete
+  // para si mesmo ("volto nesta"), e quantas mensagens tinham chegado já não é
+  // a informação relevante — some da tela assim que ele reabrir.
+  //
+  // Quem chama precisa FECHAR a conversa em seguida: com ela aberta, o efeito
+  // da InboxPage que zera o contador desfaria a marcação no mesmo instante.
+  const markUnread: UseConversationsResult['markUnread'] = async (id) => {
+    const supabase = getSupabase();
+    const { error } = await supabase.schema('whatsapp_hub').from('conversations').update({ unread_count: 1 }).eq('id', id);
+    if (error) throw new Error(translateDbError(error.message));
+  };
+
+  return { conversations, loading, error, reload, setStatus, setAiPaused, setAssigned, setActiveDeal, setPinnedNote, setArchived, markRead, markUnread };
 }
 
 // Maps the most common Postgres/PostgREST errors to actionable pt-BR messages.

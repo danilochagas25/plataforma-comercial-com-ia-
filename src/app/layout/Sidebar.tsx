@@ -5,9 +5,11 @@ import { cn } from '@/lib/utils';
 import { BRAND } from '@/config/brand';
 import { NAV_ITEMS } from './nav-config';
 import { useAppUser } from '@/app/providers/AppUserProvider';
+import { useUnreadConversations } from '@/hooks/useUnreadConversations';
 
 export function Sidebar() {
   const { role, isSuperAdmin } = useAppUser();
+  const unread = useUnreadConversations();
   // Preferência de recolhimento persiste entre navegações/sessões.
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem('sidebar_collapsed') === '1',
@@ -58,6 +60,8 @@ export function Sidebar() {
       <nav className={cn('flex-1 overflow-y-auto py-4 space-y-1', collapsed ? 'px-2' : 'px-3')}>
         {items.map((item) => {
           const Icon = item.icon;
+          const badge = item.unreadBadge && unread > 0 ? unread : 0;
+          const badgeLabel = badge > 99 ? '99+' : String(badge);
           return (
             <NavLink
               key={item.to}
@@ -65,7 +69,7 @@ export function Sidebar() {
               title={collapsed ? item.label : undefined}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center rounded-lg py-2.5 text-sm font-medium transition-all',
+                  'relative flex items-center rounded-lg py-2.5 text-sm font-medium transition-all',
                   collapsed ? 'justify-center px-0' : 'gap-3 px-3',
                   'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[#EEF6F7]',
                   isActive &&
@@ -75,6 +79,21 @@ export function Sidebar() {
             >
               <Icon className="h-4 w-4 shrink-0" />
               {!collapsed && <span className="truncate">{item.label}</span>}
+              {/* Recolhido, o selo cola no canto do ícone; aberto, encosta na
+                  borda direita — nos dois casos sem empurrar o rótulo. */}
+              {badge > 0 && (
+                <span
+                  aria-label={`${badge} ${badge === 1 ? 'conversa não lida' : 'conversas não lidas'}`}
+                  className={cn(
+                    'flex items-center justify-center rounded-full bg-[var(--color-brand-red)] font-bold text-white',
+                    collapsed
+                      ? 'absolute top-1 right-1.5 min-w-[16px] h-4 px-1 text-[9px] leading-none ring-2 ring-[#FFFFFF]'
+                      : 'ml-auto shrink-0 min-w-[20px] h-5 px-1.5 text-[11px] leading-none',
+                  )}
+                >
+                  {badgeLabel}
+                </span>
+              )}
             </NavLink>
           );
         })}

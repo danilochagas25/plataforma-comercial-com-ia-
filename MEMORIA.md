@@ -4988,3 +4988,58 @@ Segue valendo a recomendação de remover a fila: o texto do template
 ("seu estoque de {{2}} está acabando") é de varejo e não faz sentido nenhum para
 odontologia. Enquanto a função existir, ela é um disparo a um `UPDATE` de
 distância.
+
+---
+
+## 07/09/2026 · 17h — Inbox: selo de não lidas e "marcar como não lida"
+
+Dois pedidos do Danilo, no mesmo dia da reimportação. Frente de **configuração**,
+tocando em `src/app/layout/*` que é **território da frente de design** — só o
+selo, sem mexer em cor, espaçamento ou estrutura.
+
+### O selo ao lado de "Conversas"
+
+`src/hooks/useUnreadConversations.ts` (novo). Conta **conversas**, não mensagens:
+para quem atende, "3 pessoas esperando" é acionável; "17 mensagens" pode ser um
+paciente só mandando áudios seguidos. Arquivadas não entram.
+
+`count: 'exact', head: true` — só o número volta do Postgres, nenhuma linha. O
+hook vive no menu, montado em toda tela; trazer as conversas ali seria caro à
+toa. Assina o mesmo canal de realtime da inbox, com debounce de 400ms para
+rajada de mensagens não virar N recontagens, e reconta no `visibilitychange`
+(aba em segundo plano por horas perde eventos).
+
+Falha de rede **não zera** o selo — some o "não tem ninguém esperando" falso.
+
+### "Marcar como não lida"
+
+`markUnread` grava `unread_count = 1`, não o número anterior: quem marca está
+deixando um lembrete para si mesmo, e quantas mensagens havia já não importa.
+
+**A armadilha que custou a maior parte do trabalho.** Dois efeitos da InboxPage
+conspiram contra a marcação:
+
+1. o que zera `unread_count` da conversa **aberta** — marcar sem fechar seria
+   desfeito no mesmo instante;
+2. o que **auto-seleciona a primeira** conversa no desktop quando nada está
+   selecionado — e `sortConversations` põe as não lidas no topo. Fechar a
+   conversa faria o app reabrir *exatamente a que acabou de ser marcada*.
+
+Solução: o handler fecha a conversa **e** arma `skipAutoSelect` (um `useRef`
+com o id), que a auto-seleção pula até o operador clicar em outra. Sem as duas
+coisas juntas, o botão não funciona — e falha de um jeito que parece "não
+salvou".
+
+O menu "⋮" fica **fora** do `<button>` do item, posicionado por cima: botão não
+pode conter botão. Visível sempre no toque, no hover no desktop.
+
+### Estado do WhatsApp no CRM, levantado de propósito
+
+**Tem:** anexo (25MB), gravar e enviar áudio, nota privada, arquivar, marcar
+lida/não lida, filtro por nome/e-mail/telefone/período/tag/atendente, avatar,
+selo de canal, janela de 24h, transcrição de áudio recebido.
+
+**Não tem:** responder citando, encaminhar, reagir com emoji, apagar mensagem,
+fixar conversa no topo, silenciar, buscar dentro das mensagens, favoritar,
+marcar várias de uma vez. Nenhum deles tem coluna no banco — todos exigem
+migração.
