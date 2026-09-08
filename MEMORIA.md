@@ -5288,3 +5288,33 @@ informação que ninguém deveria ter que adivinhar antes de disparar.
 
 Fica em aberto para o Danilo decidir: renomear "Orçamento apresentado" para
 algo como "Orçado — não fechou", que é o que a etapa realmente contém.
+
+---
+
+## 08/09/2026 — DECISÃO DO DONO: os nomes das etapas ficam como estão
+
+Propus renomear "Orçamento apresentado" para "Não aprovado", já que é onde
+estão os 81 orçamentos que não fecharam. **O Danilo decidiu manter os nomes.**
+
+> "pode manter os nomes, porque os orçamentos não aprovados que estão na coluna
+> orçamentos apresentado"
+
+**Não reverter isso.** A etapa "Não aprovado" continua vazia por opção, e
+"Orçamento apresentado" continua sendo o alvo dos disparos de recuperação. Quem
+for montar campanha usa a contagem de pacientes que aparece ao lado de cada
+etapa (publicada em `ece3061`) para não errar.
+
+### Defeito dos templates — confirmado NA META, não é do CRM
+
+Abri o Gerenciador do WhatsApp na WABA da odonto (`1500039648549092`): os três
+templates aparecem com **`Olá, {{1}}1}}`** no próprio preview da Meta. Também
+confirmado por contagem no banco: **1 abre-chaves e 2 fecha-chaves** em cada um.
+
+O paciente receberia **"Olá, Maria1}}!"** — o `1}}` sobra logo depois do nome,
+a primeira coisa que ele lê.
+
+Não é falha de importação: `sync-template-status` copia `comp.text` verbatim e
+`submit-template` manda `row.body` verbatim. O texto foi aprovado assim.
+
+**Bloqueia o disparo.** Correção = apagar o `1}}` no Gerenciador do WhatsApp e
+reenviar para aprovação (a Meta permite editar template aprovado).
