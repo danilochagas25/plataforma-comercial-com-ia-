@@ -38,7 +38,13 @@ async function resolveAudienceIds(filter: AudienceFilter): Promise<string[]> {
   const hasCustom = cfEntries.length > 0;
   const hasPipeline = typeof filter.pipeline_id === 'string' && filter.pipeline_id.length > 0;
   const hasStages = Array.isArray(filter.stage_ids) && filter.stage_ids.length > 0;
-  const hasDeals = hasPipeline || hasStages;
+  // Período do orçamento: 'YYYY-MM-DD' vira o instante de abertura/fechamento
+  // do dia NO FUSO DE QUEM MONTA o disparo (a recepção escolhe "ontem" pensando
+  // no dia dela, não em UTC).
+  const dealFrom = typeof filter.deal_from === 'string' && filter.deal_from ? filter.deal_from : null;
+  const dealTo = typeof filter.deal_to === 'string' && filter.deal_to ? filter.deal_to : null;
+  const hasPeriod = Boolean(dealFrom || dealTo);
+  const hasDeals = hasPipeline || hasStages || hasPeriod;
 
   // SEGURANÇA: só dispara para TODA a base quando o filtro é explicitamente
   // `{ all: true }`. Um filtro de tags/custom/funil vazio (ex.: modo "tags"
@@ -69,6 +75,12 @@ async function resolveAudienceIds(filter: AudienceFilter): Promise<string[]> {
     let dealsQuery = supabase.schema('whatsapp_hub').from('deals').select('contact_id');
     if (hasStages) dealsQuery = dealsQuery.in('stage_id', filter.stage_ids as string[]);
     else if (hasPipeline) dealsQuery = dealsQuery.eq('pipeline_id', filter.pipeline_id as string);
+    // `stage_entered_at` é a data do orçamento carimbada pela importação do
+    // WebDental (ver src/lib/diasParado.ts). O relógio reinicia se alguém
+    // arrastar o card de coluna — para a régua diária, que só olha cards
+    // recém-importados, isso não acontece.
+    if (dealFrom) dealsQuery = dealsQuery.gte('stage_entered_at', new Date(`${dealFrom}T00:00:00`).toISOString());
+    if (dealTo) dealsQuery = dealsQuery.lte('stage_entered_at', new Date(`${dealTo}T23:59:59.999`).toISOString());
     const { data: dealRows, error: dealsErr } = await dealsQuery;
     if (dealsErr) throw new Error(dealsErr.message);
     const dealContactIds = Array.from(
@@ -95,7 +107,26 @@ async function resolveAudienceIds(filter: AudienceFilter): Promise<string[]> {
         return cfEntries.every(([k, v]) => String(fields[k] ?? '') === v);
       });
 
-  return filtered.map((r) => r.id);
+  const ids = filtered.map((r) => r.id);
+
+  // Trava anti-repetição. Buscamos QUEM recebeu no período (poucas linhas) em
+  // vez de filtrar pela lista de candidatos: um `.in()` com a base inteira
+  // estoura o tamanho da URL do PostgREST.
+  const excludeDays = filter.exclude_messaged_days;
+  if (typeof excludeDays === 'number' && excludeDays > 0 && ids.length > 0) {
+    const desde = new Date(Date.now() - excludeDays * 24 * 60 * 60 * 1000).toISOString();
+    const { data: recentes, error: recentesErr } = await supabase
+      .from('campaign_contacts')
+      .select('contact_id')
+      .gte('sent_at', desde);
+    if (recentesErr) throw new Error(recentesErr.message);
+    const jaRecebeu = new Set(
+      ((recentes ?? []) as Array<{ contact_id: string }>).map((r) => r.contact_id),
+    );
+    return ids.filter((id) => !jaRecebeu.has(id));
+  }
+
+  return ids;
 }
 
 export function useCampaigns(): UseCampaignsResult {

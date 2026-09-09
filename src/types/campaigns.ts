@@ -34,6 +34,16 @@ export interface AudienceFilter {
   // tags/custom, os filtros são interseccionados (AND).
   pipeline_id?: string;
   stage_ids?: string[];
+  // Período do orçamento, em 'YYYY-MM-DD' (dia local de quem monta o disparo).
+  // Restringe aos contatos cujo orçamento entrou na etapa dentro da janela —
+  // é o que separa o lote importado hoje dos que já receberam ontem. Sozinho
+  // (sem pipeline/etapa) já implica olhar o funil.
+  deal_from?: string;
+  deal_to?: string;
+  // Trava anti-repetição: descarta quem recebeu disparo nos últimos N dias.
+  // Existe para proteger o número na Meta — paciente que recebe a mesma
+  // cobrança dois dias seguidos bloqueia, e bloqueio derruba a qualidade.
+  exclude_messaged_days?: number;
 }
 
 export interface Campaign {

@@ -21,6 +21,23 @@ interface CampaignWizardProps {
 
 type AudienceMode = 'all' | 'tags' | 'custom' | 'funnel';
 
+// Recorte por data do orçamento no passo de público.
+type PeriodoPreset = 'todos' | 'hoje' | 'ontem' | '7dias' | 'personalizado';
+
+// Quantos dias a trava anti-repetição olha para trás.
+const DIAS_SEM_REPETIR = 7;
+
+// Dia local em 'YYYY-MM-DD' (deslocamento em dias). Não dá para usar
+// toISOString() aqui: em Itabuna (UTC-3) ele devolve o dia seguinte a partir
+// das 21h, e o disparo da manhã sairia com a janela errada.
+function diaLocal(offset: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const dia = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mes}-${dia}`;
+}
+
 // Fontes de preenchimento por variável. Nome/valor fixo vão pelo broadcast do
 // Zernio; os campos do negócio (deal) forçam envio 1:1 no dispatcher, com o
 // valor resolvido por destinatário a partir do deal mais recente do contato.
@@ -78,6 +95,14 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
   const [selectedStageIds, setSelectedStageIds] = useState<Set<string>>(new Set());
   // stageId → quantos pacientes distintos ela alcança.
   const [pacientesPorEtapa, setPacientesPorEtapa] = useState<Record<string, number>>({});
+  // Recorte por data do orçamento. Sem ele, a coluna do funil mistura o lote
+  // importado hoje com os que já receberam nos dias anteriores.
+  const [periodoPreset, setPeriodoPreset] = useState<PeriodoPreset>('todos');
+  const [periodoFrom, setPeriodoFrom] = useState('');
+  const [periodoTo, setPeriodoTo] = useState('');
+  // Ligada por padrão: mandar a mesma cobrança dois dias seguidos faz o
+  // paciente bloquear, e bloqueio derruba a qualidade do número na Meta.
+  const [naoRepetir, setNaoRepetir] = useState(true);
   const [audienceCount, setAudienceCount] = useState<number | null>(null);
   const [scheduleNow, setScheduleNow] = useState(true);
   const [scheduleAt, setScheduleAt] = useState(''); // datetime-local value
@@ -242,20 +267,47 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
     };
   }, [open]);
 
+  // Janela de datas em dia local ('YYYY-MM-DD'), derivada do atalho escolhido.
+  const periodo = useMemo((): { from?: string; to?: string } => {
+    if (periodoPreset === 'hoje') return { from: diaLocal(0), to: diaLocal(0) };
+    if (periodoPreset === 'ontem') return { from: diaLocal(-1), to: diaLocal(-1) };
+    if (periodoPreset === '7dias') return { from: diaLocal(-6), to: diaLocal(0) };
+    if (periodoPreset === 'personalizado') {
+      return { from: periodoFrom || undefined, to: periodoTo || undefined };
+    }
+    return {};
+  }, [periodoPreset, periodoFrom, periodoTo]);
+
   const currentFilter: AudienceFilter = useMemo(() => {
-    if (audienceMode === 'all') return { all: true };
-    if (audienceMode === 'tags') return { tag_ids: Array.from(selectedTagIds) };
+    // A trava anti-repetição vale para qualquer forma de montar o público.
+    const trava: AudienceFilter = naoRepetir ? { exclude_messaged_days: DIAS_SEM_REPETIR } : {};
+
+    if (audienceMode === 'all') return { ...trava, all: true };
+    if (audienceMode === 'tags') return { ...trava, tag_ids: Array.from(selectedTagIds) };
     if (audienceMode === 'custom' && customFieldKey.trim() && customFieldValue.trim()) {
-      return { custom_fields: { [customFieldKey.trim()]: customFieldValue.trim() } };
+      return { ...trava, custom_fields: { [customFieldKey.trim()]: customFieldValue.trim() } };
     }
     if (audienceMode === 'funnel' && funnelPipelineId) {
       // Sem etapas marcadas = funil inteiro; com etapas = só as escolhidas.
-      return selectedStageIds.size > 0
-        ? { pipeline_id: funnelPipelineId, stage_ids: Array.from(selectedStageIds) }
-        : { pipeline_id: funnelPipelineId };
+      return {
+        ...trava,
+        pipeline_id: funnelPipelineId,
+        ...(selectedStageIds.size > 0 ? { stage_ids: Array.from(selectedStageIds) } : {}),
+        ...(periodo.from ? { deal_from: periodo.from } : {}),
+        ...(periodo.to ? { deal_to: periodo.to } : {}),
+      };
     }
     return {};
-  }, [audienceMode, selectedTagIds, customFieldKey, customFieldValue, funnelPipelineId, selectedStageIds]);
+  }, [
+    audienceMode,
+    selectedTagIds,
+    customFieldKey,
+    customFieldValue,
+    funnelPipelineId,
+    selectedStageIds,
+    periodo,
+    naoRepetir,
+  ]);
 
   const refreshPreview = async () => {
     try {
@@ -276,7 +328,17 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, audienceMode, selectedTagIds, customFieldKey, customFieldValue, funnelPipelineId, selectedStageIds]);
+  }, [
+    step,
+    audienceMode,
+    selectedTagIds,
+    customFieldKey,
+    customFieldValue,
+    funnelPipelineId,
+    selectedStageIds,
+    periodo,
+    naoRepetir,
+  ]);
 
   // Agendamento no passado dispararia imediatamente (o cron promove
   // scheduled→sending quando scheduled_at <= now), o que surpreende o usuário.
@@ -660,6 +722,58 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
                   </div>
                 </div>
               )}
+
+              {funnelPipelineId && (
+                <div className="space-y-2">
+                  <Label>De quando é o orçamento</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      ['todos', 'Qualquer data'],
+                      ['hoje', 'Hoje'],
+                      ['ontem', 'Ontem'],
+                      ['7dias', 'Últimos 7 dias'],
+                      ['personalizado', 'Escolher datas'],
+                    ] as Array<[PeriodoPreset, string]>).map(([valor, rotulo]) => (
+                      <button
+                        key={valor}
+                        type="button"
+                        onClick={() => setPeriodoPreset(valor)}
+                        className={cn(
+                          'rounded-full px-3 py-1 text-xs',
+                          periodoPreset === valor
+                            ? 'bg-[#E4F5F8] text-[var(--color-text-primary)]'
+                            : 'bg-[#F7FBFC] text-[var(--color-text-secondary)]',
+                        )}
+                      >
+                        {rotulo}
+                      </button>
+                    ))}
+                  </div>
+
+                  {periodoPreset === 'personalizado' && (
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <input
+                        type="date"
+                        value={periodoFrom}
+                        onChange={(e) => setPeriodoFrom(e.target.value)}
+                        className="h-10 rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-3 text-sm text-[var(--color-text-primary)]"
+                      />
+                      <span className="text-xs text-[var(--color-text-secondary)]">até</span>
+                      <input
+                        type="date"
+                        value={periodoTo}
+                        onChange={(e) => setPeriodoTo(e.target.value)}
+                        className="h-10 rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-3 text-sm text-[var(--color-text-primary)]"
+                      />
+                    </div>
+                  )}
+
+                  <p className="text-xs text-[var(--color-text-secondary)]">
+                    Para a régua da manhã: coluna <strong>Orçamento sob avaliação</strong> +{' '}
+                    <strong>Ontem</strong> alcança só o lote importado hoje.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -671,6 +785,22 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
               use <strong>Por coluna do funil</strong>.
             </div>
           )}
+
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg bg-[#F7FBFC] px-4 py-3 text-sm text-[var(--color-text-primary)]">
+            <input
+              type="checkbox"
+              checked={naoRepetir}
+              onChange={(e) => setNaoRepetir(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-[#0A7787]"
+            />
+            <span>
+              Não enviar para quem já recebeu disparo nos últimos {DIAS_SEM_REPETIR} dias
+              <span className="block text-xs text-[var(--color-text-secondary)]">
+                Paciente que recebe a mesma cobrança dois dias seguidos bloqueia o número, e
+                bloqueio derruba a qualidade dele na Meta.
+              </span>
+            </span>
+          </label>
 
           <div className="rounded-lg border border-[rgba(97,193,208,0.38)] bg-[rgba(97,193,208,0.06)] p-4 text-center">
             <div className="text-label">Pacientes que vão receber</div>
