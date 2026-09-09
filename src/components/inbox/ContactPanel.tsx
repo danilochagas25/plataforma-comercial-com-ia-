@@ -26,6 +26,15 @@ interface OpenDeal {
   stage_entered_at: string | null;
 }
 
+// Etapa do funil do orçamento em foco, para o seletor do painel.
+interface EtapaFunil {
+  id: string;
+  name: string;
+  is_won: boolean;
+  is_lost: boolean;
+  position: number;
+}
+
 interface ContactPanelProps {
   conversation: ConversationWithContact;
   withinWindow: boolean;
@@ -198,54 +207,91 @@ export function ContactPanel({
   const activeDeal = openDeals.find((d) => d.id === conversation.active_deal_id);
   const targetDeal = activeDeal?.status === 'open' ? activeDeal : openDeals.find((d) => d.status === 'open');
 
-  // Mesma semântica do arrastar para a coluna Ganho/Perdido no funil
-  // (usePipeline.moveDeal): muda status + temperatura, move para a etapa
-  // is_won/is_lost do funil do deal e registra em lead_stage_history. Os
+  // Etapas do funil do orçamento em foco. Carregadas aqui para a atendente
+  // mover o card SEM sair da conversa — antes só existiam os botões Ganho e
+  // Perdido, e todo estado do meio do caminho ("em negociação", "paciente
+  // marcado") exigia abrir o funil numa outra tela.
+  const [etapas, setEtapas] = useState<EtapaFunil[]>([]);
+  // Etapa escolhida que ainda espera o motivo da perda antes de gravar.
+  const [etapaPendente, setEtapaPendente] = useState<string | null>(null);
+
+  useEffect(() => {
+    const pipelineId = targetDeal?.pipeline_id;
+    if (!pipelineId) {
+      setEtapas([]);
+      return;
+    }
+    let cancelado = false;
+    void (async () => {
+      const { data } = await getSupabase()
+        .from('stages')
+        .select('id, name, is_won, is_lost, position')
+        .eq('pipeline_id', pipelineId)
+        .order('position');
+      if (!cancelado) setEtapas((data ?? []) as EtapaFunil[]);
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [targetDeal?.pipeline_id]);
+
+  // Mesma semântica do arrastar o card entre colunas no funil
+  // (usePipeline.moveDeal): muda a etapa e, quando ela é de ganho ou de perda,
+  // ajusta status + temperatura junto. Registra em lead_stage_history. Os
   // timestamps won_at/lost_at são preenchidos por trigger no UPDATE de status.
-  const markOutcome = async (outcome: 'won' | 'lost') => {
-    if (!targetDeal) return;
+  const moverParaEtapa = async (stageId: string) => {
+    if (!targetDeal || stageId === targetDeal.stage_id) return;
+    const etapa = etapas.find((e) => e.id === stageId);
+    if (!etapa) return;
+
+    // Perda pede motivo antes de gravar — é o dado que alimenta o relatório de
+    // objeções. Guarda a escolha e espera a confirmação.
+    if (etapa.is_lost && etapaPendente !== stageId) {
+      setEtapaPendente(stageId);
+      setLostReasonOpen(true);
+      return;
+    }
+
     setSavingOutcome(true);
     try {
       const supabase = getSupabase();
-      const patch: Record<string, unknown> =
-        outcome === 'won'
-          ? { status: 'won', temperature: 'Morno', lead_type: 'Cliente' }
-          : { status: 'lost', temperature: 'Frio', lead_type: 'Lead', lost_reason: lostReason.trim() || null };
-      let toStageId: string | null = null;
-      if (targetDeal.pipeline_id) {
-        const { data: st } = await supabase
-          .from('stages')
-          .select('id, is_won, is_lost')
-          .eq('pipeline_id', targetDeal.pipeline_id);
-        const stage = (st ?? []).find((s: { is_won: boolean; is_lost: boolean }) =>
-          outcome === 'won' ? s.is_won : s.is_lost,
-        ) as { id: string } | undefined;
-        if (stage && stage.id !== targetDeal.stage_id) {
-          patch.stage_id = stage.id;
-          toStageId = stage.id;
-        }
+      const patch: Record<string, unknown> = { stage_id: stageId };
+      if (etapa.is_won) {
+        Object.assign(patch, { status: 'won', temperature: 'Morno', lead_type: 'Cliente' });
+      } else if (etapa.is_lost) {
+        Object.assign(patch, {
+          status: 'lost',
+          temperature: 'Frio',
+          lead_type: 'Lead',
+          lost_reason: lostReason.trim() || null,
+        });
+      } else {
+        // Voltou para o meio do funil: o orçamento está aberto de novo.
+        Object.assign(patch, { status: 'open', lost_reason: null });
       }
+
       const { error: err } = await supabase.from('deals').update(patch).eq('id', targetDeal.id);
       if (err) throw new Error(err.message);
-      if (toStageId) {
-        const { data: u } = await supabase.auth.getUser();
-        await supabase.from('lead_stage_history').insert({
-          deal_id: targetDeal.id,
-          from_stage_id: targetDeal.stage_id,
-          to_stage_id: toStageId,
-          moved_by: 'humano',
-          actor_id: u?.user?.id ?? null,
-        });
-      }
-      // Deal perdido sai do seletor de negócio ativo — limpa a referência.
-      if (outcome === 'lost' && conversation.active_deal_id === targetDeal.id) {
+
+      const { data: u } = await supabase.auth.getUser();
+      await supabase.from('lead_stage_history').insert({
+        deal_id: targetDeal.id,
+        from_stage_id: targetDeal.stage_id,
+        to_stage_id: stageId,
+        moved_by: 'humano',
+        actor_id: u?.user?.id ?? null,
+      });
+
+      // Orçamento perdido sai do seletor de negócio ativo — limpa a referência.
+      if (etapa.is_lost && conversation.active_deal_id === targetDeal.id) {
         await onSetActiveDeal(null);
       }
       setLostReasonOpen(false);
       setLostReason('');
+      setEtapaPendente(null);
       setDealsVersion((v) => v + 1);
       onContactRefresh?.();
-      toast.success(outcome === 'won' ? 'Orçamento fechado.' : 'Orçamento marcado como não fechou.');
+      toast.success(`Orçamento movido para "${etapa.name}".`);
     } catch (err) {
       toast.error('Falha', { description: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -439,48 +485,57 @@ export function ContactPanel({
         )}
       </div>
 
-      {/* Ganho / Perdido — mesmo comportamento do card do lead no funil */}
-      {targetDeal && (
+      {/* Etapa do funil — a atendente move o orçamento sem sair da conversa */}
+      {targetDeal && etapas.length > 0 && (
         <div className="space-y-2">
-          <div className="text-label">Situação</div>
+          <div className="text-label">Etapa do orçamento</div>
           {openDeals.filter((d) => d.status === 'open').length > 1 && (
             <p className="text-[11px] text-[var(--color-text-label)] truncate">
               Aplica-se a: {targetDeal.title}
             </p>
           )}
-          <div className="flex gap-2">
-            <button
-              onClick={() => void markOutcome('won')}
-              disabled={savingOutcome}
-              className="flex-1 rounded-lg border border-[rgba(15,122,85,0.35)] bg-[var(--color-success-bg)] py-2 text-sm font-semibold text-[var(--color-success)] transition hover:bg-[var(--color-success-bg)] disabled:opacity-50"
-            >
-              Ganho
-            </button>
-            <button
-              onClick={() => setLostReasonOpen((v) => !v)}
-              disabled={savingOutcome}
-              className="flex-1 rounded-lg border border-[rgba(176,45,38,0.35)] bg-[var(--color-error-bg)] py-2 text-sm font-semibold text-[var(--color-error)] transition hover:bg-[var(--color-error-bg)] disabled:opacity-50"
-            >
-              Perdido
-            </button>
-          </div>
-          {lostReasonOpen && (
+          <select
+            value={etapaPendente ?? targetDeal.stage_id ?? ''}
+            onChange={(e) => void moverParaEtapa(e.target.value)}
+            disabled={savingOutcome}
+            className="h-11 w-full rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-primary)] px-3 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--accent-primary)] disabled:opacity-50"
+          >
+            {etapas.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name}
+              </option>
+            ))}
+          </select>
+          {lostReasonOpen && etapaPendente && (
             <div className="space-y-2 rounded-lg border border-[rgba(176,45,38,0.28)] bg-[var(--color-error-bg)] p-3">
               <input
                 value={lostReason}
                 onChange={(e) => setLostReason(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && void markOutcome('lost')}
-                placeholder="Motivo da perda (opcional)"
+                onKeyDown={(e) => e.key === 'Enter' && void moverParaEtapa(etapaPendente)}
+                placeholder="Motivo (opcional) — ex.: achou caro, vai pensar"
                 className="h-11 w-full rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-primary)] px-3 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--accent-primary)]"
                 autoFocus
               />
-              <button
-                onClick={() => void markOutcome('lost')}
-                disabled={savingOutcome}
-                className="w-full rounded-lg bg-[var(--color-error)] py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
-              >
-                Confirmar perda
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => void moverParaEtapa(etapaPendente)}
+                  disabled={savingOutcome}
+                  className="flex-1 rounded-lg bg-[var(--color-error)] py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                >
+                  Confirmar
+                </button>
+                <button
+                  onClick={() => {
+                    setEtapaPendente(null);
+                    setLostReasonOpen(false);
+                    setLostReason('');
+                  }}
+                  disabled={savingOutcome}
+                  className="rounded-lg border border-[var(--color-border-card)] px-3 py-2 text-sm text-[var(--color-text-secondary)] transition hover:bg-[var(--color-bg-subtle)] disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
             </div>
           )}
         </div>
