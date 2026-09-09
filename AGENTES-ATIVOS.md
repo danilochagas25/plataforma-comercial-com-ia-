@@ -16,7 +16,36 @@
 | WhatsApp/IA | 07/09 15:20 | `supabase/functions/copilot-suggest/` (nova) · `src/components/inbox/CopilotPanel.tsx` (novo) · `src/components/inbox/MessageInput.tsx` · `src/app/routes/inbox/InboxPage.tsx` | **concluído** — copiloto do atendente. Edge Function publicada (v3, sha conferido). **Frontend NÃO publicado**, aguarda o "pode" do Danilo |
 | configuração | 07/09 16:40 | `src/hooks/useUnreadConversations.ts` (novo) · `src/app/layout/nav-config.ts` · `Sidebar.tsx` · `MobileNav.tsx` · `ConversationList.tsx` · `InboxPage.tsx` · `useConversations.ts` (**território da frente de design** — só o selo de não lidas, pedido direto do Danilo; nenhuma cor, espaçamento ou estrutura alterada) | **concluído** — selo de não lidas + menu "marcar como não lida"/arquivar na lista |
 | configuração | 07/09 17:30 | `_shared/meta-cloud.ts` · `_shared/inbox-delivery.ts` · `send-operator-message` · `send-operator-reaction` (nova) · `meta-webhook` · migration · `MessageThread.tsx` · `MessageActions.tsx` (novo) · `ForwardDialog.tsx` (novo) · `MessageInfoDialog.tsx` (novo) · `ConversationList.tsx` · `MessageInput.tsx` · `InboxPage.tsx` · `inbox-filters.ts` · `useMessages.ts` · `useConversations.ts` · `lib/conversationExport.ts` (novo) | **concluído** — recursos do WhatsApp na inbox. Migration aplicada, 3 Edge Functions publicadas (v5/v3/v1), frontend publicado |
-| comercial | — | textos e templates | não declarou |
+| configuração | 09/09 08:00 | `src/components/campaigns/CampaignWizard.tsx` · `src/hooks/useCampaigns.ts` · `src/types/campaigns.ts` | **em curso** — filtro de período do orçamento + trava anti-repetição no disparo. **NÃO publicado**, aguarda o "pode" do Danilo |
+| configuração | 09/09 08:00 | `supabase/functions/meta-webhook/index.ts` (a fazer) | **pendente** — evento `system` da Meta vira conversa fantasma: abre janela 24h falsa e aciona a IA, que leva erro. Ver conversas `58602ef0` e `728560e7` |
+| comercial | 09/09 11:40 | **templates de WhatsApp** — `whatsapp_hub.templates` no Supabase `feptvmsjzreovfynrlql` | **em curso** — bifurcação aberta pelo Danilo só para os templates |
+
+---
+
+## ⚠️ Recado da frente de configuração para a frente comercial (09/09)
+
+**Antes de criar template novo, olhe o que já está lá.** Deixei **6 rascunhos**
+em `whatsapp_hub.templates` (org do CRM AMS Odontologia), todos com uma única
+variável `{{1}}` = nome do paciente e 3 botões de resposta rápida:
+
+`odonto_orcamento_d1_v2` · `odonto_condicoes_pagamento` ·
+`odonto_orcamento_lembrete_d3` · `odonto_orcamento_ultima_chamada` ·
+`odonto_orcamento_validade` · `odonto_condicao_este_mes`
+
+Nenhum foi enviado à Meta ainda — a submissão é um clique do Danilo em
+Disparos → Modelos ("Enviar para aprovação"), porque a Edge Function exige a
+sessão dele.
+
+**🔴 Os 3 templates APROVADOS da régua estão com defeito de texto:**
+`odonto_orcamento_d1`, `_d3` e `_d7` têm `Olá, {{1}}1}}` — sobrou um `1}}`
+depois da variável. Só o `_d1` chegou a ser disparado (50 pacientes receberam
+"Olá, Fulano1}}"). Os rascunhos acima são os substitutos. Quando os novos forem
+aprovados, os três velhos devem ser apagados para ninguém escolher errado.
+
+**O que a frente comercial NÃO deve tocar:** o `CampaignWizard.tsx` e o
+`useCampaigns.ts` (filtro de público, em curso aqui) e a etiqueta
+`Orçamentos 08/09`, criada nesta sessão marcando 10 pacientes para o disparo de
+hoje.
 
 ---
 
