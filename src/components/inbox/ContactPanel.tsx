@@ -33,6 +33,7 @@ interface EtapaFunil {
   is_won: boolean;
   is_lost: boolean;
   position: number;
+  color: string | null;
 }
 
 interface ContactPanelProps {
@@ -225,7 +226,7 @@ export function ContactPanel({
     void (async () => {
       const { data } = await getSupabase()
         .from('stages')
-        .select('id, name, is_won, is_lost, position')
+        .select('id, name, is_won, is_lost, position, color')
         .eq('pipeline_id', pipelineId)
         .order('position');
       if (!cancelado) setEtapas((data ?? []) as EtapaFunil[]);
@@ -494,18 +495,40 @@ export function ContactPanel({
               Aplica-se a: {targetDeal.title}
             </p>
           )}
-          <select
-            value={etapaPendente ?? targetDeal.stage_id ?? ''}
-            onChange={(e) => void moverParaEtapa(e.target.value)}
-            disabled={savingOutcome}
-            className="h-11 w-full rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-primary)] px-3 text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--accent-primary)] disabled:opacity-50"
-          >
-            {etapas.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-              </option>
-            ))}
-          </select>
+          {/* Um botão por etapa: mover é UM clique. Num dropdown seriam dois, e
+              a atendente faz isso dezenas de vezes por dia. A etapa atual fica
+              preenchida com a cor da coluna do funil — a mesma que ela vê no
+              quadro, para não precisar traduzir de uma tela para a outra. */}
+          <div className="flex flex-wrap gap-1.5">
+            {etapas.map((e) => {
+              const atual = e.id === targetDeal.stage_id;
+              const cor = e.color ?? 'var(--accent-primary)';
+              return (
+                <button
+                  key={e.id}
+                  onClick={() => void moverParaEtapa(e.id)}
+                  disabled={savingOutcome || atual}
+                  title={atual ? 'Etapa atual' : `Mover para "${e.name}"`}
+                  className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition hover:brightness-95 disabled:cursor-default"
+                  style={
+                    atual
+                      ? { backgroundColor: cor, borderColor: cor, color: '#FFFFFF' }
+                      : {
+                          backgroundColor: 'var(--color-bg-primary)',
+                          borderColor: 'var(--color-border-card)',
+                          color: 'var(--color-text-secondary)',
+                        }
+                  }
+                >
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: atual ? '#FFFFFF' : cor }}
+                  />
+                  {e.name}
+                </button>
+              );
+            })}
+          </div>
           {lostReasonOpen && etapaPendente && (
             <div className="space-y-2 rounded-lg border border-[rgba(176,45,38,0.28)] bg-[var(--color-error-bg)] p-3">
               <input
