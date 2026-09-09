@@ -97,6 +97,10 @@ export interface ConversationWithContact extends Conversation {
   // Timestamp da última mensagem do CONTATO (inbound) — deriva a janela de 24h
   // da Meta sem coluna dedicada.
   lastInboundAt: string | null;
+  // A última mensagem da conversa é do PACIENTE — ou seja, ele respondeu e
+  // ninguém retornou ainda. É o que coloca a conversa no topo da lista.
+  // Notas privadas não contam: são bilhete interno, não resposta ao paciente.
+  aguardandoResposta: boolean;
   // Contato tem algum deal como Cliente (filtro Lead/Cliente do inbox).
   isCliente: boolean;
 }

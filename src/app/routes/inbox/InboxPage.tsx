@@ -41,7 +41,9 @@ export default function InboxPage() {
   const [selectedId, setSelectedId] = useState<string | null>(
     searchParams.get('conversation'),
   );
-  const [sort, setSort] = useState<InboxSort>('recente');
+  // Abre em "Quem respondeu primeiro": a atendente entra na tela já vendo os
+  // pacientes que estão esperando, sem precisar escolher nada.
+  const [sort, setSort] = useState<InboxSort>('aguardando');
   // Ponte copiloto → caixa de mensagem. O botão "Usar" empurra o texto para o
   // MessageInput e PARA ALI: quem envia continua sendo a atendente, no botão
   // Enviar. O `token` cresce a cada clique para o efeito do input saber que é
@@ -242,13 +244,34 @@ export default function InboxPage() {
     setFocoMensagem(null);
   }, [selectedId]);
 
+  // Modo supervisão: abrir a conversa NÃO tira o selo de não lida.
+  //
+  // Por que existe: `unread_count` é da CONVERSA, não de cada pessoa — quem
+  // abre zera para todo mundo. Quando o dono passa os olhos na inbox para
+  // acompanhar o atendimento, ele apaga do painel da recepção exatamente as
+  // conversas que ainda ninguém respondeu. Com o modo ligado ele lê à vontade
+  // e o selo continua lá para quem vai atender.
+  //
+  // Fica no navegador de quem liga (não é config da clínica): é uma preferência
+  // de quem está olhando, e cada pessoa decide a sua.
+  const [modoSupervisao, setModoSupervisao] = useState(
+    () => localStorage.getItem('inbox_modo_supervisao') === '1',
+  );
+  const alternarSupervisao = () => {
+    setModoSupervisao((v) => {
+      localStorage.setItem('inbox_modo_supervisao', v ? '0' : '1');
+      return !v;
+    });
+  };
+
   // Clear unread count when a conversation is open AND visible.
   useEffect(() => {
+    if (modoSupervisao) return;
     if (selected && selected.unread_count > 0) {
       void markRead(selected.id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, selected?.unread_count]);
+  }, [selectedId, selected?.unread_count, modoSupervisao]);
 
   const nomePaciente = selected?.contact?.name?.trim() || selected?.contact?.phone || '-';
 
@@ -358,7 +381,19 @@ export default function InboxPage() {
               operators={operators}
               tags={tags}
             />
-            <div className="flex justify-end">
+            <div className="flex items-center justify-between gap-2">
+              <label
+                className="flex cursor-pointer items-center gap-1.5 text-[11px] text-[var(--color-text-secondary)]"
+                title="Ler as conversas sem tirar o selo de não lida de quem vai atender"
+              >
+                <input
+                  type="checkbox"
+                  checked={modoSupervisao}
+                  onChange={alternarSupervisao}
+                  className="h-3.5 w-3.5 accent-[#0A7787]"
+                />
+                Só acompanhar (não marcar como lida)
+              </label>
               <span className="text-[11px] text-[var(--color-text-secondary)] whitespace-nowrap">
                 {visibleConversations.length} conversa{visibleConversations.length !== 1 ? 's' : ''}
               </span>

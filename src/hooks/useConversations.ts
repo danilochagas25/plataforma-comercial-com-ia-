@@ -140,6 +140,9 @@ export function useConversations(): UseConversationsResult {
     // = última mensagem do contato (janela de 24h).
     const latestByConv = new Map<string, string>();
     const lastInboundByConv = new Map<string, string>();
+    // Direção da última mensagem visível da conversa. 'inbound' = o paciente
+    // falou por último e ninguém respondeu — é o que sobe a conversa no topo.
+    const lastDirByConv = new Map<string, 'inbound' | 'outbound'>();
     for (const m of (lastMsgsQ.data ?? []) as Array<{
       conversation_id: string;
       content: string | null;
@@ -151,6 +154,7 @@ export function useConversations(): UseConversationsResult {
       if (!latestByConv.has(m.conversation_id) && !m.is_private_note) {
         const preview = m.content ?? (m.content_type === 'text' ? '' : `[${m.content_type}]`);
         latestByConv.set(m.conversation_id, preview);
+        lastDirByConv.set(m.conversation_id, m.direction);
       }
       if (m.direction === 'inbound' && !lastInboundByConv.has(m.conversation_id)) {
         lastInboundByConv.set(m.conversation_id, m.created_at);
@@ -167,6 +171,7 @@ export function useConversations(): UseConversationsResult {
       lastMessagePreview: latestByConv.get(c.id) ?? null,
       tagIds: tagsByContact.get(c.contact_id) ?? [],
       lastInboundAt: lastInboundByConv.get(c.id) ?? null,
+      aguardandoResposta: lastDirByConv.get(c.id) === 'inbound',
       isCliente: clienteSet.has(c.contact_id),
     }));
 

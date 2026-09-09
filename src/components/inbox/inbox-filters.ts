@@ -157,9 +157,10 @@ export function activeFilterCount(f: InboxFilterState): number {
 
 // ---- Ordenação --------------------------------------------------------------
 
-export type InboxSort = 'recente' | 'antiga' | 'nao_lidas' | 'alfabetica';
+export type InboxSort = 'aguardando' | 'recente' | 'antiga' | 'nao_lidas' | 'alfabetica';
 
 export const INBOX_SORT_LABEL: Record<InboxSort, string> = {
+  aguardando: 'Quem respondeu primeiro',
   recente: 'Mais recentes',
   antiga: 'Mais antigas',
   nao_lidas: 'Não lidas primeiro',
@@ -168,6 +169,12 @@ export const INBOX_SORT_LABEL: Record<InboxSort, string> = {
 
 function lastAt(c: ConversationWithContact): number {
   return c.last_message_at ? new Date(c.last_message_at).getTime() : 0;
+}
+
+// Hora da última fala do paciente. Usada para ordenar o bloco de quem está
+// esperando: quem respondeu agora vem antes de quem respondeu de manhã.
+function lastInbound(c: ConversationWithContact): number {
+  return c.lastInboundAt ? new Date(c.lastInboundAt).getTime() : 0;
 }
 
 function convDisplayName(c: ConversationWithContact): string {
@@ -181,6 +188,20 @@ export function sortConversations(
   const arr = [...list];
   const ordenado = (() => {
     switch (sort) {
+      // Padrão da clínica: quem respondeu e está esperando vem primeiro.
+      // Sem isso, um disparo recém-enviado ocupa o topo da lista igual a um
+      // paciente que acabou de perguntar o preço — e a atendente perde a
+      // resposta no meio do movimento. Dentro de cada bloco, o mais recente
+      // primeiro: no bloco de cima pela hora da resposta do paciente, no de
+      // baixo pela última mensagem, seja de quem for.
+      case 'aguardando':
+        return arr.sort(
+          (a, b) =>
+            Number(b.aguardandoResposta) - Number(a.aguardandoResposta) ||
+            (a.aguardandoResposta
+              ? lastInbound(b) - lastInbound(a)
+              : lastAt(b) - lastAt(a)),
+        );
       case 'antiga':
         return arr.sort((a, b) => lastAt(a) - lastAt(b));
       case 'nao_lidas':
@@ -195,12 +216,20 @@ export function sortConversations(
     }
   })();
 
+  // Não lida sobe em QUALQUER ordenação (decisão do dono, 09/09). O selo é o
+  // que diz "ninguém olhou isto ainda"; se a ordenação escolhida empurra a
+  // conversa para o meio da lista, o selo vira enfeite. Só a fixada passa na
+  // frente. Dentro do bloco, a ordem escolhida acima é preservada.
+  const naoLidasNoTopo = ordenado.sort(
+    (a, b) => Number(b.unread_count > 0) - Number(a.unread_count > 0),
+  );
+
   // Fixada vai para o topo em QUALQUER ordenação — inclusive na alfabética.
   // Fixar é a atendente dizendo "esta eu não posso perder de vista"; uma
   // ordenação que a empurrasse para baixo tornaria o recurso inútil.
   // `sort` é estável no JS moderno, então a ordem escolhida acima é preservada
   // dentro de cada grupo.
-  return ordenado.sort((a, b) => Number(b.pinned) - Number(a.pinned));
+  return naoLidasNoTopo.sort((a, b) => Number(b.pinned) - Number(a.pinned));
 }
 
 // ---- Persistência em querystring ------------------------------------------
