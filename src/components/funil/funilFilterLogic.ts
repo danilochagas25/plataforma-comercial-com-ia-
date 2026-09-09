@@ -131,7 +131,15 @@ export function applyFunilFilters(
 
   return deals.filter((d) => {
     const c = d.contact;
-    if (nome && !(c?.name ?? '').toLowerCase().includes(nome)) return false;
+    // Nome do paciente: procura no TÍTULO do orçamento além do nome do contato.
+    // Na odonto o contato é o TELEFONE (um número atende a família inteira, ver
+    // src/lib/odontoImport.ts) e o nome de quem foi atendido vive no título do
+    // orçamento — "Fulano — Clínica Geral · 08/09/2026". Buscar só no contato
+    // não achava o paciente que a recepção tem na mão.
+    if (nome) {
+      const alvo = `${c?.name ?? ''} ${d.title ?? ''}`.toLowerCase();
+      if (!alvo.includes(nome)) return false;
+    }
     if (email && !(c?.email ?? '').toLowerCase().includes(email)) return false;
     if (fone && !(c?.phone ?? '').replace(/\D/g, '').includes(fone)) return false;
     if (empresa) {
