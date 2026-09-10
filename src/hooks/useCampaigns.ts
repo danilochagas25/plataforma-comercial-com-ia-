@@ -48,7 +48,12 @@ async function aplicarTravaDeRepeticao(
   const { data: recentes, error } = await getSupabase()
     .from('campaign_contacts')
     .select('contact_id')
-    .gte('sent_at', desde);
+    .gte('sent_at', desde)
+    // `sent_at` marca a TENTATIVA, e a Meta pode recusar depois. Quem ficou em
+    // 'failed' não recebeu nada — segurar essa pessoa é o contrário do que a
+    // trava existe para fazer: ela protege quem JÁ foi alcançado, não quem o
+    // envio não alcançou.
+    .neq('status', 'failed');
   if (error) throw new Error(error.message);
   const jaRecebeu = new Set(
     ((recentes ?? []) as Array<{ contact_id: string }>).map((r) => r.contact_id),
