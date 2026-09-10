@@ -12,6 +12,13 @@ interface CreateCampaignInput {
   scheduled_at: string | null; // ISO; null = start immediately
   // Número (canal Zernio) que dispara o broadcast; null = default da org.
   channel_id: string | null;
+  /**
+   * Público explícito, em vez de resolver `audience_filter`. Usado pelo disparo
+   * que sai da própria importação: ali já sabemos exatamente quem entrou no
+   * lote, e reconsultar por filtro pegaria também quem chegou em dias
+   * anteriores. A trava anti-repetição continua valendo sobre esta lista.
+   */
+  contact_ids?: string[];
 }
 
 interface UseCampaignsResult {
@@ -26,6 +33,27 @@ interface UseCampaignsResult {
   resume: (id: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
   previewAudience: (filter: AudienceFilter) => Promise<number>;
+}
+
+// Tira da lista quem já recebeu disparo nos últimos N dias. Buscamos QUEM
+// recebeu no período (poucas linhas) em vez de filtrar pela lista de
+// candidatos: um `.in()` com a base inteira estoura o tamanho da URL do
+// PostgREST.
+async function aplicarTravaDeRepeticao(
+  ids: string[],
+  dias: number | undefined,
+): Promise<string[]> {
+  if (!(typeof dias === 'number' && dias > 0) || ids.length === 0) return ids;
+  const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString();
+  const { data: recentes, error } = await getSupabase()
+    .from('campaign_contacts')
+    .select('contact_id')
+    .gte('sent_at', desde);
+  if (error) throw new Error(error.message);
+  const jaRecebeu = new Set(
+    ((recentes ?? []) as Array<{ contact_id: string }>).map((r) => r.contact_id),
+  );
+  return ids.filter((id) => !jaRecebeu.has(id));
 }
 
 async function resolveAudienceIds(filter: AudienceFilter): Promise<string[]> {
@@ -107,26 +135,7 @@ async function resolveAudienceIds(filter: AudienceFilter): Promise<string[]> {
         return cfEntries.every(([k, v]) => String(fields[k] ?? '') === v);
       });
 
-  const ids = filtered.map((r) => r.id);
-
-  // Trava anti-repetição. Buscamos QUEM recebeu no período (poucas linhas) em
-  // vez de filtrar pela lista de candidatos: um `.in()` com a base inteira
-  // estoura o tamanho da URL do PostgREST.
-  const excludeDays = filter.exclude_messaged_days;
-  if (typeof excludeDays === 'number' && excludeDays > 0 && ids.length > 0) {
-    const desde = new Date(Date.now() - excludeDays * 24 * 60 * 60 * 1000).toISOString();
-    const { data: recentes, error: recentesErr } = await supabase
-      .from('campaign_contacts')
-      .select('contact_id')
-      .gte('sent_at', desde);
-    if (recentesErr) throw new Error(recentesErr.message);
-    const jaRecebeu = new Set(
-      ((recentes ?? []) as Array<{ contact_id: string }>).map((r) => r.contact_id),
-    );
-    return ids.filter((id) => !jaRecebeu.has(id));
-  }
-
-  return ids;
+  return await aplicarTravaDeRepeticao(filtered.map((r) => r.id), filter.exclude_messaged_days);
 }
 
 export function useCampaigns(): UseCampaignsResult {
@@ -191,7 +200,13 @@ export function useCampaigns(): UseCampaignsResult {
     if (!userId) return null;
     const supabase = getSupabase();
 
-    const contactIds = await resolveAudienceIds(input.audience_filter);
+    // Lista explícita (disparo que sai da importação) ou resolução por filtro.
+    // Mesmo com lista pronta, a trava anti-repetição é aplicada: um paciente
+    // que já recebeu ontem não pode ser cobrado de novo só porque um orçamento
+    // novo dele entrou hoje.
+    const contactIds = input.contact_ids?.length
+      ? await aplicarTravaDeRepeticao(input.contact_ids, input.audience_filter.exclude_messaged_days)
+      : await resolveAudienceIds(input.audience_filter);
     if (contactIds.length === 0) {
       throw new Error('Nenhum contato corresponde aos filtros da audiência.');
     }

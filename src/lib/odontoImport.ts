@@ -206,6 +206,13 @@ export interface ResultadoImportacao {
   sinalizadosParaConferencia: number;
   procedimentosCriados: number;
   erros: string[];
+  /**
+   * Contatos dos orçamentos NÃO aprovados que entraram nesta importação — o
+   * público exato da régua do dia seguinte. É a lista real de quem chegou
+   * agora, não um filtro por data: paciente que já estava no CRM de ontem não
+   * entra aqui e por isso não é cobrado duas vezes.
+   */
+  contatosParaDisparo: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -899,6 +906,7 @@ export async function aplicarImportacao(
     sinalizadosParaConferencia: 0,
     procedimentosCriados: 0,
     erros: [],
+    contatosParaDisparo: [],
   };
   const passo = (pct: number, etapa: string) => onProgresso?.(pct, etapa);
 
@@ -1034,6 +1042,9 @@ export async function aplicarImportacao(
   const refsAtualizar = new Set(plano.atualizados.map((n) => n.externalRef));
   const porRef = new Map(leitura.orcamentos.map((o) => [o.externalRef, o]));
 
+  // Um paciente pode ter vários orçamentos novos no mesmo arquivo; o disparo é
+  // por pessoa, então o Set garante uma mensagem só.
+  const contatosDoLote = new Set<string>();
   const inserir: Array<Record<string, unknown>> = [];
   for (const ref of refsNovos) {
     const orc = porRef.get(ref);
@@ -1074,6 +1085,11 @@ export async function aplicarImportacao(
     for (const d of (data ?? []) as DealExistente[]) {
       ctx.dealsPorRef.set(d.external_ref, d);
       res.dealsCriados++;
+      // Só os NÃO aprovados entram na régua: quem já fechou não é cobrado.
+      if (!porRef.get(d.external_ref)?.aprovado && !contatosDoLote.has(d.contact_id)) {
+        contatosDoLote.add(d.contact_id);
+        res.contatosParaDisparo.push(d.contact_id);
+      }
     }
   }
 

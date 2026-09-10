@@ -20,7 +20,7 @@
 //    o número de pacientes que aparece no cabeçalho do relatório.
 // ============================================================================
 
-import { useCallback, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import {
   AlertTriangle,
@@ -42,6 +42,8 @@ import {
   type LeituraCombinada,
   type ParseWebdentalResult,
 } from '@/lib/webdental';
+import { getSupabase } from '@/lib/supabase';
+import { useCampaigns } from '@/hooks/useCampaigns';
 import {
   aplicarImportacao,
   planejarImportacao,
@@ -76,6 +78,59 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
   const [progresso, setProgresso] = useState({ pct: 0, etapa: '' });
   const [sinalizarSumicos, setSinalizarSumicos] = useState(true);
   const [encerrarVencidos, setEncerrarVencidos] = useState(true);
+  // Disparo que sai da própria importação (régua do dia seguinte).
+  const [templatesAprovados, setTemplatesAprovados] = useState<Array<{ id: string; name: string }>>([]);
+  const [templateDisparo, setTemplateDisparo] = useState('');
+  const [disparando, setDisparando] = useState(false);
+  const { createAndQueue } = useCampaigns();
+
+  // Modelos aprovados pela Meta — só eles podem iniciar conversa.
+  useEffect(() => {
+    if (!open) return;
+    let vivo = true;
+    void getSupabase()
+      .from('templates')
+      .select('id, name')
+      .eq('status', 'approved')
+      .order('name')
+      .then(({ data }) => {
+        if (vivo) setTemplatesAprovados((data ?? []) as Array<{ id: string; name: string }>);
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [open]);
+
+  // Cria a campanha com o público EXATO do lote recém-importado.
+  const dispararLote = async () => {
+    if (!resultado || !templateDisparo) return;
+    setDisparando(true);
+    try {
+      const modelo = templatesAprovados.find((t) => t.id === templateDisparo);
+      const hoje = new Date().toLocaleDateString('pt-BR');
+      const r = await createAndQueue({
+        name: `Não aprovados · importação ${hoje}`,
+        template_id: templateDisparo,
+        // Variável 1 = nome do paciente, que é o padrão dos modelos da régua.
+        variable_mapping: { '1': { source: 'contact_field', field: 'name' } },
+        audience_filter: { exclude_messaged_days: 7 },
+        contact_ids: resultado.contatosParaDisparo,
+        scheduled_at: null,
+        channel_id: null,
+      });
+      if (r) {
+        toast.success(`Disparo criado: ${r.queued} paciente(s) na fila.`, {
+          description: `Modelo ${modelo?.name ?? ''}. Acompanhe em Disparos.`,
+        });
+      }
+    } catch (err) {
+      toast.error('Não consegui criar o disparo', {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setDisparando(false);
+    }
+  };
 
   const reset = useCallback(() => {
     setPasso('arquivo');
@@ -615,6 +670,47 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
                 ))}
               </ul>
             </Aviso>
+          )}
+
+          {/* Régua do dia seguinte: dispara para quem ACABOU de entrar, sem
+              passar pelo montador de campanha. O público é a lista real do
+              lote — não um filtro por data — então paciente que já estava no
+              CRM de ontem não é cobrado de novo. */}
+          {resultado.contatosParaDisparo.length > 0 && (
+            <div className="space-y-3 rounded-lg border border-[rgba(97,193,208,0.45)] bg-[rgba(97,193,208,0.06)] p-4">
+              <div className="text-sm font-semibold text-[var(--color-text-primary)]">
+                Disparar para os {resultado.contatosParaDisparo.length} pacientes que entraram agora
+              </div>
+              <p className="text-xs text-[var(--color-text-secondary)]">
+                Só os orçamentos não aprovados deste arquivo. Quem já recebeu disparo nos últimos
+                7 dias fica de fora automaticamente.
+              </p>
+
+              {templatesAprovados.length === 0 ? (
+                <p className="text-xs text-[#9A4A07]">
+                  Nenhum modelo aprovado pela Meta ainda. Aprove um em Disparos → Modelos.
+                </p>
+              ) : (
+                <>
+                  <select
+                    value={templateDisparo}
+                    onChange={(e) => setTemplateDisparo(e.target.value)}
+                    disabled={disparando}
+                    className="h-11 w-full rounded-lg border border-[var(--color-border-card)] bg-[var(--color-bg-primary)] px-3 text-sm text-[var(--color-text-primary)]"
+                  >
+                    <option value="">(escolha o modelo da mensagem)</option>
+                    {templatesAprovados.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
+                  </select>
+                  <Button onClick={() => void dispararLote()} disabled={!templateDisparo || disparando}>
+                    {disparando ? 'Criando disparo…' : 'Criar disparo agora'}
+                  </Button>
+                </>
+              )}
+            </div>
           )}
 
           <div className="flex justify-end gap-2">
