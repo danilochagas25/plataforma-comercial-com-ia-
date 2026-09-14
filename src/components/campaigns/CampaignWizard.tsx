@@ -8,6 +8,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { useTemplates } from '@/hooks/useTemplates';
 import { useTags } from '@/hooks/useTags';
 import { useCampaigns } from '@/hooks/useCampaigns';
+import { TemplatePreviewCard } from '@/components/campaigns/TemplatePreviewCard';
 import { getSupabase } from '@/lib/supabase';
 import { cn } from '@/lib/utils';
 import type { AudienceFilter, VariableSource } from '@/types/campaigns';
@@ -114,6 +115,18 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
     () => approvedTemplates.find((t) => t.id === templateId) ?? null,
     [approvedTemplates, templateId],
   );
+
+  // O que a prévia mostra no lugar de cada {{n}}: a origem escolhida no mapeamento
+  // de variáveis, para quem monta o disparo ler a frase como o paciente vai ler.
+  const rotulosVariaveis = useMemo(() => {
+    const out: Record<string, string | null> = {};
+    for (const [pos, c] of Object.entries(varChoices)) {
+      if (c.kind === 'name') out[pos] = 'Nome do paciente';
+      else if (c.kind === 'literal') out[pos] = c.value.trim() || 'valor fixo';
+      else out[pos] = DEAL_FIELD_OPTIONS.find((o) => o.field === c.field)?.label ?? 'campo do orçamento';
+    }
+    return out;
+  }, [varChoices]);
 
   const varCount = useMemo(
     () => (selectedTemplate ? countTemplateVariables(selectedTemplate.body) : 0),
@@ -464,9 +477,7 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
             )}
           </div>
           {selectedTemplate && (
-            <div className="rounded-lg border border-[rgba(97,193,208,0.30)] bg-[#FAFDFD] p-3 text-xs font-mono text-[var(--color-text-secondary)] whitespace-pre-wrap">
-              {selectedTemplate.body}
-            </div>
+            <TemplatePreviewCard template={selectedTemplate} rotulosVariaveis={rotulosVariaveis} />
           )}
 
           {varCount > 0 && (
