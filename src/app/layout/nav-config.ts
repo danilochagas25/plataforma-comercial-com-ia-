@@ -9,6 +9,7 @@ import {
   TrendingUp,
   Zap,
   Building2,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
 import { VOCAB } from '@/config/vocab';
@@ -43,6 +44,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/contacts', label: VOCAB.contacts, icon: Users },
   { to: '/campaigns', label: VOCAB.campaigns, icon: Megaphone },
   { to: '/automations', label: VOCAB.automations, icon: Zap, adminOnly: true },
+  { to: '/qualidade', label: 'Qualidade', icon: ShieldCheck },
   { to: '/ai-agent', label: VOCAB.aiAgent, icon: Bot, adminOnly: true },
   { to: '/settings/profile', label: VOCAB.settings, icon: Settings },
   { to: '/admin', label: VOCAB.orgs, icon: Building2, superAdminOnly: true },

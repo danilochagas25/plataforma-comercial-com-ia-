@@ -19,6 +19,7 @@
 | configuração | 09/09 08:00 | `src/components/campaigns/CampaignWizard.tsx` · `src/hooks/useCampaigns.ts` · `src/types/campaigns.ts` | **em curso** — filtro de período do orçamento + trava anti-repetição no disparo. **NÃO publicado**, aguarda o "pode" do Danilo |
 | configuração | 09/09 08:00 | `supabase/functions/meta-webhook/index.ts` (a fazer) | **pendente** — evento `system` da Meta vira conversa fantasma: abre janela 24h falsa e aciona a IA, que leva erro. Ver conversas `58602ef0` e `728560e7` |
 | comercial | 09/09 11:40 | **templates de WhatsApp** — `whatsapp_hub.templates` no Supabase `feptvmsjzreovfynrlql` | **em curso** — bifurcação aberta pelo Danilo só para os templates |
+| configuração | 14/09 09:30 | `supabase/functions/avaliar-atendimentos/` (nova) · migration `avaliacao_atendimentos` (tabela + RLS + cron) · `src/app/routes/qualidade/` (nova) · `src/hooks/useAvaliacoes.ts` (novo) · `src/app/router.tsx` + `src/app/layout/nav-config.ts` (**só a entrada da rota e do menu**) | **concluído** — IA avalia os atendimentos de cada operadora pela régua do `BASE-CONHECIMENTO-ODONTO.md`. Migration aplicada (tabela + RLS + cron `wh-avaliar-atendimentos` 06h/06h10/06h20 Itabuna), Edge Function **v3 publicada** e testada com o dia 11/09. **Frontend NÃO publicado**, aguarda o "pode" do Danilo. Usa `_shared/llm.ts` **sem alterar** (o diff pendente nele é da frente WhatsApp/IA). Não mexe em `InboxPage`/`ContactPanel` |
 
 ---
 

@@ -25,6 +25,7 @@ const AIAgentPage = lazy(() => import('./routes/ai-agent/AIAgentPage'));
 const AutomationsPage = lazy(() => import('./routes/automations/AutomationsPage'));
 const SettingsPage = lazy(() => import('./routes/settings/SettingsPage'));
 const AdminPage = lazy(() => import('./routes/admin/AdminPage'));
+const QualidadePage = lazy(() => import('./routes/qualidade/QualidadePage'));
 
 function PageFallback() {
   return (
@@ -177,6 +178,8 @@ export function AppRouter() {
           <Route path="/educacao" element={<Navigate to="/funil" replace />} />
           <Route path="/ai-agent" element={<AIAgentPage />} />
           <Route path="/automations" element={<AdminOnly><AutomationsPage /></AdminOnly>} />
+          {/* Aberta aos dois papéis: a RLS entrega à operadora só as avaliações dela. */}
+          <Route path="/qualidade" element={<QualidadePage />} />
           {/* Rotas antigas → agora abas dentro de /ai-agent */}
           <Route path="/knowledge" element={<Navigate to="/ai-agent" replace />} />
           <Route path="/follow-ups" element={<Navigate to="/automations?tab=followups" replace />} />
