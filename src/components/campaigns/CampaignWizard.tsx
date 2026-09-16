@@ -105,6 +105,8 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
   // paciente bloquear, e bloqueio derruba a qualidade do número na Meta.
   const [naoRepetir, setNaoRepetir] = useState(true);
   const [audienceCount, setAudienceCount] = useState<number | null>(null);
+  // Quantos saíram do público por só terem orçamento aprovado.
+  const [removidosAprovado, setRemovidosAprovado] = useState(0);
   const [scheduleNow, setScheduleNow] = useState(true);
   const [scheduleAt, setScheduleAt] = useState(''); // datetime-local value
   const [submitting, setSubmitting] = useState(false);
@@ -185,6 +187,7 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
     setSelectedStageIds(new Set());
     setStages([]);
     setAudienceCount(null);
+    setRemovidosAprovado(0);
     setScheduleNow(true);
     setScheduleAt('');
     setVarChoices({});
@@ -237,13 +240,17 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
       // é adivinhação: nomes parecidos ("Não aprovado" × "Orçamento
       // apresentado") levam a marcar a errada, ver o total dar zero e não
       // entender por quê.
+      // Orçamento aprovado não recebe disparo, então não entra na contagem:
+      // a coluna "Aprovado" mostra 0 e bate com o total lá embaixo.
+      const etapasAprovado = new Set(lista.filter((st) => st.is_won).map((st) => st.id));
       const { data: linhas } = await supabase
         .from('deals')
-        .select('stage_id, contact_id')
+        .select('stage_id, contact_id, status')
         .eq('pipeline_id', funnelPipelineId);
       if (cancelled) return;
       const porEtapa: Record<string, Set<string>> = {};
-      for (const d of (linhas ?? []) as Array<{ stage_id: string; contact_id: string }>) {
+      for (const d of (linhas ?? []) as Array<{ stage_id: string; contact_id: string; status: string }>) {
+        if (d.status === 'won' || etapasAprovado.has(d.stage_id)) continue;
         (porEtapa[d.stage_id] ??= new Set()).add(d.contact_id);
       }
       const contagem: Record<string, number> = {};
@@ -324,8 +331,9 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
 
   const refreshPreview = async () => {
     try {
-      const count = await previewAudience(currentFilter);
-      setAudienceCount(count);
+      const preview = await previewAudience(currentFilter);
+      setAudienceCount(preview.total);
+      setRemovidosAprovado(preview.removidosAprovado);
     } catch (err) {
       toast.error('Falha ao calcular audiência', {
         description: err instanceof Error ? err.message : String(err),
@@ -378,7 +386,11 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
         channel_id: channelId || null,
       });
       if (result) {
-        toast.success(`Campanha criada com ${result.queued} destinatário${result.queued === 1 ? '' : 's'}.`);
+        toast.success(`Campanha criada com ${result.queued} destinatário${result.queued === 1 ? '' : 's'}.`, {
+          description: result.removidosAprovado > 0
+            ? `${result.removidosAprovado} paciente${result.removidosAprovado === 1 ? '' : 's'} com orçamento aprovado ficaram de fora.`
+            : undefined,
+        });
         onSaved?.();
         onClose();
       }
@@ -819,6 +831,13 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
             {audienceMode === 'funnel' && selectedStageIds.size > 0 && (
               <div className="mt-1 text-xs text-[var(--color-text-secondary)]">
                 Uma mensagem por paciente — quem tem vários orçamentos recebe só uma.
+              </div>
+            )}
+            {removidosAprovado > 0 && (
+              <div className="mt-1 text-xs text-[var(--color-text-secondary)]">
+                {removidosAprovado} paciente{removidosAprovado === 1 ? '' : 's'} com orçamento
+                aprovado {removidosAprovado === 1 ? 'ficou' : 'ficaram'} de fora. Quem aprovou um
+                orçamento mas tem outro em aberto continua recebendo.
               </div>
             )}
           </div>

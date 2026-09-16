@@ -120,7 +120,11 @@ export function ImportOrcamentosDialog({ open, onClose, onDone }: Props) {
       });
       if (r) {
         toast.success(`Disparo criado: ${r.queued} paciente(s) na fila.`, {
-          description: `Modelo ${modelo?.name ?? ''}. Acompanhe em Disparos.`,
+          description: `Modelo ${modelo?.name ?? ''}. Acompanhe em Disparos.${
+            r.removidosAprovado > 0
+              ? ` ${r.removidosAprovado} com orçamento aprovado ficaram de fora.`
+              : ''
+          }`,
         });
       }
     } catch (err) {

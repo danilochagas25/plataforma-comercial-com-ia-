@@ -28,11 +28,79 @@ interface UseCampaignsResult {
   reload: () => Promise<void>;
   createAndQueue: (
     input: CreateCampaignInput,
-  ) => Promise<{ campaign: Campaign; queued: number } | null>;
+  ) => Promise<{ campaign: Campaign; queued: number; removidosAprovado: number } | null>;
   pause: (id: string) => Promise<void>;
   resume: (id: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
-  previewAudience: (filter: AudienceFilter) => Promise<number>;
+  previewAudience: (filter: AudienceFilter) => Promise<AudiencePreview>;
+}
+
+export interface AudiencePreview {
+  total: number;
+  /** Tirados porque só têm orçamento aprovado (regra de 16/09/2026). */
+  removidosAprovado: number;
+}
+
+interface OrcamentoLinha {
+  contact_id: string;
+  status: string | null;
+  stage_id: string | null;
+  archived_at: string | null;
+}
+
+// Etapas marcadas como "ganho" (hoje só "Aprovado"). O deal aprovado pode estar
+// na etapa e ainda com status 'open' — a importação só vira o status depois —,
+// por isso a regra olha as duas coisas.
+async function carregarEtapasAprovado(): Promise<Set<string>> {
+  const { data, error } = await getSupabase().from('stages').select('id').eq('is_won', true);
+  if (error) throw new Error(error.message);
+  return new Set(((data ?? []) as Array<{ id: string }>).map((s) => s.id));
+}
+
+function ehAprovado(d: Pick<OrcamentoLinha, 'status' | 'stage_id'>, etapasAprovado: Set<string>): boolean {
+  return d.status === 'won' || (d.stage_id !== null && etapasAprovado.has(d.stage_id));
+}
+
+// Lê todos os orçamentos em páginas: o PostgREST devolve no máximo 1000 linhas
+// por consulta, e a base já passa de 600.
+async function carregarTodosOsOrcamentos(): Promise<OrcamentoLinha[]> {
+  const PAGINA = 1000;
+  const out: OrcamentoLinha[] = [];
+  for (let de = 0; ; de += PAGINA) {
+    const { data, error } = await getSupabase()
+      .from('deals')
+      .select('contact_id, status, stage_id, archived_at')
+      .order('id')
+      .range(de, de + PAGINA - 1);
+    if (error) throw new Error(error.message);
+    const linhas = (data ?? []) as OrcamentoLinha[];
+    out.push(...linhas);
+    if (linhas.length < PAGINA) break;
+  }
+  return out;
+}
+
+// Regra do Danilo (16/09/2026): disparo é para quem tem orçamento NÃO aprovado.
+// Sai quem tem orçamento aprovado e nenhum outro em aberto. Quem aprovou um e
+// tem outro ainda não aprovado (aprovou a limpeza, não o implante) continua
+// recebendo — é o orçamento caro que a clínica perde. Paciente sem orçamento
+// nenhum (etiqueta, base toda) não é afetado.
+async function removerQuemSoTemAprovado(
+  ids: string[],
+): Promise<{ ids: string[]; removidos: number }> {
+  if (ids.length === 0) return { ids, removidos: 0 };
+  const [etapasAprovado, orcamentos] = await Promise.all([
+    carregarEtapasAprovado(),
+    carregarTodosOsOrcamentos(),
+  ]);
+  const comAprovado = new Set<string>();
+  const comOutroEmAberto = new Set<string>();
+  for (const d of orcamentos) {
+    if (ehAprovado(d, etapasAprovado)) comAprovado.add(d.contact_id);
+    else if (!d.archived_at) comOutroEmAberto.add(d.contact_id);
+  }
+  const ficam = ids.filter((id) => !comAprovado.has(id) || comOutroEmAberto.has(id));
+  return { ids: ficam, removidos: ids.length - ficam.length };
 }
 
 // Tira da lista quem já recebeu disparo nos últimos N dias. Buscamos QUEM
@@ -61,7 +129,23 @@ async function aplicarTravaDeRepeticao(
   return ids.filter((id) => !jaRecebeu.has(id));
 }
 
-async function resolveAudienceIds(filter: AudienceFilter): Promise<string[]> {
+// Última etapa de toda montagem de público, com filtro ou com lista pronta:
+// primeiro a regra do aprovado, depois a trava anti-repetição.
+async function aplicarTravasDoDisparo(
+  ids: string[],
+  dias: number | undefined,
+): Promise<{ ids: string[]; removidosAprovado: number }> {
+  const semAprovado = await removerQuemSoTemAprovado(ids);
+  return {
+    ids: await aplicarTravaDeRepeticao(semAprovado.ids, dias),
+    removidosAprovado: semAprovado.removidos,
+  };
+}
+
+async function resolveAudienceIds(
+  filter: AudienceFilter,
+): Promise<{ ids: string[]; removidosAprovado: number }> {
+  const vazio = { ids: [] as string[], removidosAprovado: 0 };
   const supabase = getSupabase();
 
   const hasTags = Array.isArray(filter.tag_ids) && filter.tag_ids.length > 0;
@@ -83,7 +167,7 @@ async function resolveAudienceIds(filter: AudienceFilter): Promise<string[]> {
   // `{ all: true }`. Um filtro de tags/custom/funil vazio (ex.: modo "tags"
   // selecionado mas nenhuma tag marcada) resolve para ZERO — nunca para todos
   // — para evitar disparo em massa acidental contra a base inteira.
-  if (!filter.all && !hasTags && !hasCustom && !hasDeals) return [];
+  if (!filter.all && !hasTags && !hasCustom && !hasDeals) return vazio;
 
   // Interseção (AND) entre conjuntos de candidatos; null = "sem restrição ainda".
   const intersect = (a: string[] | null, b: string[]): string[] =>
@@ -99,13 +183,13 @@ async function resolveAudienceIds(filter: AudienceFilter): Promise<string[]> {
     candidateIds = Array.from(
       new Set(((links ?? []) as Array<{ contact_id: string }>).map((l) => l.contact_id)),
     );
-    if (candidateIds.length === 0) return [];
+    if (candidateIds.length === 0) return vazio;
   }
 
   // Restringe pelos contatos que têm ao menos um deal no funil/etapas escolhidos.
   // Filtrar por stage_id já implica o funil; sem etapas, considera o funil todo.
   if (hasDeals) {
-    let dealsQuery = supabase.schema('whatsapp_hub').from('deals').select('contact_id');
+    let dealsQuery = supabase.schema('whatsapp_hub').from('deals').select('contact_id, status, stage_id');
     if (hasStages) dealsQuery = dealsQuery.in('stage_id', filter.stage_ids as string[]);
     else if (hasPipeline) dealsQuery = dealsQuery.eq('pipeline_id', filter.pipeline_id as string);
     // `stage_entered_at` é a data do orçamento carimbada pela importação do
@@ -116,12 +200,19 @@ async function resolveAudienceIds(filter: AudienceFilter): Promise<string[]> {
     if (dealTo) dealsQuery = dealsQuery.lte('stage_entered_at', new Date(`${dealTo}T23:59:59.999`).toISOString());
     const { data: dealRows, error: dealsErr } = await dealsQuery;
     if (dealsErr) throw new Error(dealsErr.message);
+    // Orçamento aprovado não conta como motivo para receber: escolher a coluna
+    // "Aprovado" não alcança ninguém, e o período vale sobre o orçamento em aberto.
+    const etapasAprovado = await carregarEtapasAprovado();
     const dealContactIds = Array.from(
-      new Set(((dealRows ?? []) as Array<{ contact_id: string }>).map((d) => d.contact_id)),
+      new Set(
+        ((dealRows ?? []) as Array<Pick<OrcamentoLinha, 'contact_id' | 'status' | 'stage_id'>>)
+          .filter((d) => !ehAprovado(d, etapasAprovado))
+          .map((d) => d.contact_id),
+      ),
     );
-    if (dealContactIds.length === 0) return [];
+    if (dealContactIds.length === 0) return vazio;
     candidateIds = intersect(candidateIds, dealContactIds);
-    if (candidateIds.length === 0) return [];
+    if (candidateIds.length === 0) return vazio;
   }
 
   let query = supabase.schema('whatsapp_hub').from('contacts').select('id, custom_fields');
@@ -140,7 +231,7 @@ async function resolveAudienceIds(filter: AudienceFilter): Promise<string[]> {
         return cfEntries.every(([k, v]) => String(fields[k] ?? '') === v);
       });
 
-  return await aplicarTravaDeRepeticao(filtered.map((r) => r.id), filter.exclude_messaged_days);
+  return await aplicarTravasDoDisparo(filtered.map((r) => r.id), filter.exclude_messaged_days);
 }
 
 export function useCampaigns(): UseCampaignsResult {
@@ -195,10 +286,10 @@ export function useCampaigns(): UseCampaignsResult {
     };
   }, [userId, reload]);
 
-  const previewAudience = async (filter: AudienceFilter): Promise<number> => {
-    if (!userId) return 0;
-    const ids = await resolveAudienceIds(filter);
-    return ids.length;
+  const previewAudience = async (filter: AudienceFilter): Promise<AudiencePreview> => {
+    if (!userId) return { total: 0, removidosAprovado: 0 };
+    const r = await resolveAudienceIds(filter);
+    return { total: r.ids.length, removidosAprovado: r.removidosAprovado };
   };
 
   const createAndQueue: UseCampaignsResult['createAndQueue'] = async (input) => {
@@ -206,12 +297,13 @@ export function useCampaigns(): UseCampaignsResult {
     const supabase = getSupabase();
 
     // Lista explícita (disparo que sai da importação) ou resolução por filtro.
-    // Mesmo com lista pronta, a trava anti-repetição é aplicada: um paciente
-    // que já recebeu ontem não pode ser cobrado de novo só porque um orçamento
-    // novo dele entrou hoje.
-    const contactIds = input.contact_ids?.length
-      ? await aplicarTravaDeRepeticao(input.contact_ids, input.audience_filter.exclude_messaged_days)
+    // Mesmo com lista pronta, as travas valem: um paciente que já recebeu ontem
+    // não pode ser cobrado de novo só porque um orçamento novo dele entrou hoje,
+    // e quem só tem orçamento aprovado não recebe.
+    const publico = input.contact_ids?.length
+      ? await aplicarTravasDoDisparo(input.contact_ids, input.audience_filter.exclude_messaged_days)
       : await resolveAudienceIds(input.audience_filter);
+    const contactIds = publico.ids;
     if (contactIds.length === 0) {
       throw new Error('Nenhum contato corresponde aos filtros da audiência.');
     }
@@ -251,7 +343,7 @@ export function useCampaigns(): UseCampaignsResult {
     }
 
     await reload();
-    return { campaign: created, queued: contactIds.length };
+    return { campaign: created, queued: contactIds.length, removidosAprovado: publico.removidosAprovado };
   };
 
   const pause: UseCampaignsResult['pause'] = async (id) => {

@@ -133,7 +133,58 @@ interface DealData {
   products: string[];
 }
 
-// Deal mais recente por contato + nomes dos produtos dele.
+// Etapas "ganho" da org (hoje só "Aprovado"). O deal aprovado pode estar na
+// etapa com status ainda 'open' — a importação só vira o status depois.
+async function loadEtapasAprovado(
+  admin: ReturnType<typeof getAdminClient>,
+  orgId: string,
+): Promise<Set<string>> {
+  const { data, error } = await admin.from('stages').select('id').eq('org_id', orgId).eq('is_won', true);
+  if (error) throw new Error(`stages: ${error.message}`);
+  return new Set(((data ?? []) as Array<{ id: string }>).map((s) => s.id));
+}
+
+function dealAprovado(d: { status: string | null; stage_id: string | null }, etapas: Set<string>): boolean {
+  return d.status === 'won' || (d.stage_id !== null && etapas.has(d.stage_id));
+}
+
+// Regra do Danilo (16/09/2026): disparo é para quem tem orçamento NÃO aprovado.
+// Devolve os contatos que têm orçamento aprovado e nenhum outro em aberto — esses
+// não recebem. Quem aprovou um e tem outro ainda não aprovado continua recebendo.
+// A tela já tira essa gente ao montar o público; aqui é a segunda trava, para
+// quem aprovou entre a montagem e o envio (campanha agendada, follow-up).
+async function contatosSoComAprovado(
+  admin: ReturnType<typeof getAdminClient>,
+  orgId: string,
+  contactIds: string[],
+): Promise<Set<string>> {
+  const saem = new Set<string>();
+  if (contactIds.length === 0) return saem;
+  const etapas = await loadEtapasAprovado(admin, orgId);
+  const comAprovado = new Set<string>();
+  const comOutroEmAberto = new Set<string>();
+  // Em pedaços: 500 ids num `.in()` estouram o tamanho da URL do PostgREST.
+  for (let i = 0; i < contactIds.length; i += 100) {
+    const { data, error } = await admin
+      .from('deals')
+      .select('contact_id, status, stage_id, archived_at')
+      .eq('org_id', orgId)
+      .in('contact_id', contactIds.slice(i, i + 100));
+    if (error) throw new Error(`deals: ${error.message}`);
+    for (const d of (data ?? []) as Array<{
+      contact_id: string; status: string | null; stage_id: string | null; archived_at: string | null;
+    }>) {
+      if (dealAprovado(d, etapas)) comAprovado.add(d.contact_id);
+      else if (!d.archived_at) comOutroEmAberto.add(d.contact_id);
+    }
+  }
+  for (const id of comAprovado) if (!comOutroEmAberto.has(id)) saem.add(id);
+  return saem;
+}
+
+// Deal por contato + nomes dos produtos dele. Prefere o orçamento mais recente
+// AINDA NÃO APROVADO: o disparo fala do que está em aberto, não do que o
+// paciente já fechou. Sem nenhum em aberto, cai no mais recente.
 async function loadDealData(
   admin: ReturnType<typeof getAdminClient>,
   orgId: string,
@@ -141,18 +192,23 @@ async function loadDealData(
 ): Promise<Map<string, DealData>> {
   const out = new Map<string, DealData>();
   if (contactIds.length === 0) return out;
+  const etapas = await loadEtapasAprovado(admin, orgId);
   const { data: deals } = await admin
     .from('deals')
-    .select('id, contact_id, title, value, last_purchase_at, won_at, created_at')
+    .select('id, contact_id, title, value, last_purchase_at, won_at, created_at, status, stage_id, archived_at')
     .eq('org_id', orgId)
     .in('contact_id', contactIds)
     .order('created_at', { ascending: false });
-  const dealIdByContact = new Map<string, string>();
-  for (const row of (deals ?? []) as Array<{
+  type DealRow = {
     id: string; contact_id: string; title: string | null; value: number | null;
     last_purchase_at: string | null; won_at: string | null;
-  }>) {
-    if (out.has(row.contact_id)) continue; // ordenado desc → primeiro = mais recente
+    status: string | null; stage_id: string | null; archived_at: string | null;
+  };
+  const linhas = (deals ?? []) as DealRow[];
+  const emAberto = linhas.filter((r) => !dealAprovado(r, etapas) && !r.archived_at);
+  const dealIdByContact = new Map<string, string>();
+  for (const row of [...emAberto, ...linhas]) {
+    if (out.has(row.contact_id)) continue; // em aberto primeiro, cada grupo do mais recente
     out.set(row.contact_id, {
       title: row.title,
       value: row.value != null ? Number(row.value) : null,
@@ -688,8 +744,8 @@ Deno.serve(async (req) => {
       errors.push(`campaign ${c.id}: ${pErr.message}`);
       continue;
     }
-    const queue = (pending ?? []) as CampaignContactRow[];
-    if (queue.length === 0) {
+    const reservados = (pending ?? []) as CampaignContactRow[];
+    if (reservados.length === 0) {
       // Nada reservavel: conclui a campanha se nao ha mais nada pendente.
       const { count: pendingLeft } = await admin
         .from('campaign_contacts')
@@ -704,6 +760,37 @@ Deno.serve(async (req) => {
       }
       continue;
     }
+
+    // Segunda trava da regra do aprovado. Sem conseguir conferir, NÃO envia:
+    // devolve a reserva e tenta no próximo tick — mandar cobrança para quem já
+    // fechou é pior do que atrasar um minuto.
+    let soAprovado: Set<string>;
+    try {
+      soAprovado = await contatosSoComAprovado(admin, c.org_id, reservados.map((q) => q.contact_id));
+    } catch (err) {
+      await admin
+        .from('campaign_contacts')
+        .update({ claimed_at: null })
+        .in('id', reservados.map((q) => q.id));
+      errors.push(`campaign ${c.id}: conferencia de aprovado falhou: ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
+    const barrados = reservados.filter((q) => soAprovado.has(q.contact_id));
+    if (barrados.length > 0) {
+      await admin
+        .from('campaign_contacts')
+        .update({
+          status: 'failed',
+          claimed_at: null,
+          error_message: 'Paciente com orçamento aprovado — não recebe disparo',
+        })
+        .in('id', barrados.map((q) => q.id));
+      await admin.rpc('bump_campaign_counter', { p_campaign_id: c.id, p_column: 'failed', p_delta: barrados.length });
+      totalFailed += barrados.length;
+    }
+    const queue = reservados.filter((q) => !soAprovado.has(q.contact_id));
+    // Lote todo barrado: o próximo tick reserva o resto ou conclui a campanha.
+    if (queue.length === 0) continue;
 
     // Telefone + nome dos contatos do lote (nome alimenta a variavel { field:'name' }).
     const contactIds = queue.map((q) => q.contact_id);
