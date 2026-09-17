@@ -5436,3 +5436,16 @@ Funil com um só pipeline pré-seleciona sozinho.
 - **Pergunta aberta ao Danilo:** paciente em "Paciente marcado" (9) continua recebendo disparo — confirmar se deve.
 - **Próximo:** "pode" para publicar a Edge Function `dispatch-campaign` e o frontend (push leva também o commit `c6eacf4`, que é só migration + registros).
 
+### 2026-09-17 · configuração · Painel abre sempre no mês corrente
+
+- **Pedido (Danilo, 17/09):** "na parte do painel, preciso que sempre conste as informações do mês vigente". **Decisão A:** todos os quadros seguem o mês, inclusive "Parado". Foi apresentada a opção B (parado sempre total) e recusada.
+- **Antes:** o Painel abria em "Tudo" (desde agosto); "Este mês" existia, mas era o penúltimo botão e não ficava gravado.
+- **Feito (código, não publicado):**
+  - `src/app/routes/dashboard/DashboardPage.tsx`: período padrão `this_month`. Quem abre `/dashboard` sem `?period=` cai no mês corrente, que vira sozinho no dia 1º (a conta é feita na hora de abrir a tela).
+  - `src/lib/dashboard.ts`: "Este mês" virou o **primeiro** botão; nova função `periodLabel` escreve o recorte ao lado dos botões ("Setembro/2026 · 01/09 a 17/09"; em "Tudo", "Tudo · até 17/09").
+  - Os outros períodos continuam disponíveis, inclusive "Tudo" e "Mês anterior".
+- **Efeito nos números (aprox., por `stage_entered_at`, em 17/09):** o quadro "Parado" cai de ~474 orçamentos para ~201 (R$ 184 mil). Os ~273 parados de antes de setembro (R$ 362 mil) só aparecem em "Tudo".
+- **Validação:** `npx tsc -b` e `npx vite build` ok. Tela **não** vista no navegador: o servidor local cai no `/setup` (sem as envs do build), e o `/setup` não pode ser rodado.
+- **Consulta do mesmo dia (só leitura, nada gravado):** disparo para os não aprovados de setembro = 148 pacientes (colunas Sob avaliação + Aguardando decisão + Não aprovado, 01 a 30/09), **84** com a trava de 7 dias. 69 dos 84 já receberam disparo antes (56 pelo `odonto_orcamento_d1` em 08/09). Recomendado: reimportar os dois relatórios do WebDental de 01/09 até hoje **com "Encerrar como Não aprovado quem passou de 7 dias" DESMARCADO** (marcado moveria 128 orçamentos / 94 pacientes para Não aprovado; nunca foi usado: 0 encerrados por prazo) e não usar os templates `_d1*` ("ontem"), `_d3`/`_d7` (defeito `1}}`) nem `ultima_chamada` ("uma semana"). Última importação: 16/09 09:27 (lote de 15/09).
+- **Próximo:** "pode" para publicar (commit só dos 2 arquivos do Painel + registros; o diff de `_shared/llm.ts` e `process-ai-message` é de outra frente e não vai junto).
+

@@ -10,6 +10,7 @@ import {
   PERIOD_PRESETS,
   WIDGETS,
   brl,
+  periodLabel,
   periodRange,
   type PeriodKey,
   type WidgetKey,
@@ -46,9 +47,10 @@ function isPeriodKey(v: string | null): v is PeriodKey {
 
 export default function DashboardPage() {
   const [params, setParams] = useSearchParams();
-  // Default "Tudo": a base importada tem orçamento de maio ainda em aberto, e
-  // uma janela de 30 dias esconderia parte do que está parado.
-  const periodKey: PeriodKey = isPeriodKey(params.get('period')) ? (params.get('period') as PeriodKey) : 'all';
+  // Padrão "Este mês" (Danilo, 17/09/2026): o Painel abre sempre no mês
+  // corrente e vira sozinho no dia 1º. Todos os quadros seguem o mês,
+  // inclusive "Parado" — o parado dos meses anteriores aparece em "Tudo".
+  const periodKey: PeriodKey = isPeriodKey(params.get('period')) ? (params.get('period') as PeriodKey) : 'this_month';
   const customFrom = params.get('from') ?? '';
   const customTo = params.get('to') ?? '';
   const [customizeOpen, setCustomizeOpen] = useState(false);
@@ -196,7 +198,8 @@ export default function DashboardPage() {
           </div>
         )}
         <span className="text-xs text-[var(--color-text-secondary)]">
-          Período contado pela <strong className="font-semibold">data do orçamento</strong>
+          <strong className="font-semibold text-[var(--color-text-primary)]">{periodLabel(periodKey, range)}</strong>
+          {' · '}contado pela <strong className="font-semibold">data do orçamento</strong>
         </span>
       </div>
 

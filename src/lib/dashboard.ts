@@ -72,6 +72,8 @@ export const WIDGET_LABEL: Record<WidgetKey, string> = Object.fromEntries(
 export type PeriodKey = 'all' | 'today' | 'yesterday' | 'this_week' | 'last_week' | '1d' | '7d' | '15d' | '30d' | '60d' | '90d' | 'this_month' | 'last_month' | 'custom';
 
 export const PERIOD_PRESETS: { key: Exclude<PeriodKey, 'custom'>; label: string; days: number }[] = [
+  // "Este mês" é o padrão do Painel (Danilo, 17/09/2026) e por isso vem primeiro.
+  { key: 'this_month', label: 'Este mês', days: 0 },
   // "Tudo" existe porque a base veio de uma importação: há orçamento de maio
   // ainda em aberto. Sem esta opção o total do painel nunca bate com o total
   // do funil, e o dono acha que sumiu dinheiro.
@@ -86,9 +88,21 @@ export const PERIOD_PRESETS: { key: Exclude<PeriodKey, 'custom'>; label: string;
   { key: '30d', label: '30d', days: 30 },
   { key: '60d', label: '60d', days: 60 },
   { key: '90d', label: '90d', days: 90 },
-  { key: 'this_month', label: 'Este mês', days: 0 },
   { key: 'last_month', label: 'Mês anterior', days: 0 },
 ];
+
+// Rótulo do período em linguagem de dono: "Setembro/2026 · 01/09 a 17/09".
+// Mês cheio ganha o nome do mês; qualquer outro recorte mostra só as datas.
+export function periodLabel(key: PeriodKey, r: PeriodRange): string {
+  const dia = (d: Date) => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  const datas = `${dia(r.from)} a ${dia(r.to)}`;
+  if (key === 'all') return `Tudo · até ${dia(r.to)}`;
+  if (key === 'this_month' || key === 'last_month') {
+    const mes = r.from.toLocaleDateString('pt-BR', { month: 'long' });
+    return `${mes.charAt(0).toUpperCase()}${mes.slice(1)}/${r.from.getFullYear()} · ${datas}`;
+  }
+  return datas;
+}
 
 export interface PeriodRange {
   from: Date;
