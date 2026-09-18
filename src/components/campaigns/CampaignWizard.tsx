@@ -20,10 +20,10 @@ interface CampaignWizardProps {
   onSaved?: () => void;
 }
 
-type AudienceMode = 'all' | 'tags' | 'custom' | 'funnel';
+type AudienceMode = 'all' | 'tags' | 'custom' | 'funnel' | 'nao_aprovados';
 
 // Recorte por data do orçamento no passo de público.
-type PeriodoPreset = 'todos' | 'hoje' | 'ontem' | '7dias' | 'personalizado';
+type PeriodoPreset = 'todos' | 'hoje' | 'ontem' | '7dias' | 'mes' | 'personalizado';
 
 // Quantos dias a trava anti-repetição olha para trás.
 const DIAS_SEM_REPETIR = 7;
@@ -37,6 +37,12 @@ function diaLocal(offset: number): string {
   const mes = String(d.getMonth() + 1).padStart(2, '0');
   const dia = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${mes}-${dia}`;
+}
+
+// Primeiro dia do mês corrente, em dia local ('YYYY-MM-DD').
+function primeiroDiaDoMes(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
 }
 
 // Fontes de preenchimento por variável. Nome/valor fixo vão pelo broadcast do
@@ -86,7 +92,7 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
   // como a clínica realmente monta disparo (a coluna É o público), e um padrão
   // que já vem apontando para a base inteira é um clique de distância de mandar
   // mensagem para todo mundo.
-  const [audienceMode, setAudienceMode] = useState<AudienceMode>('funnel');
+  const [audienceMode, setAudienceMode] = useState<AudienceMode>('nao_aprovados');
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const [customFieldKey, setCustomFieldKey] = useState('');
   const [customFieldValue, setCustomFieldValue] = useState('');
@@ -179,7 +185,14 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
     setStep(0);
     setName('');
     setTemplateId('');
-    setAudienceMode('all');
+    // 🔴 Este reset mandava para 'all' (a base inteira) toda vez que o
+    // assistente abria, desfazendo na prática a decisão de 08/09/2026 de não
+    // abrir apontando para todo mundo. O padrão seguro é o público da clínica:
+    // quem não aprovou.
+    setAudienceMode('nao_aprovados');
+    setPeriodoPreset('todos');
+    setPeriodoFrom('');
+    setPeriodoTo('');
     setSelectedTagIds(new Set());
     setCustomFieldKey('');
     setCustomFieldValue('');
@@ -292,6 +305,7 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
     if (periodoPreset === 'hoje') return { from: diaLocal(0), to: diaLocal(0) };
     if (periodoPreset === 'ontem') return { from: diaLocal(-1), to: diaLocal(-1) };
     if (periodoPreset === '7dias') return { from: diaLocal(-6), to: diaLocal(0) };
+    if (periodoPreset === 'mes') return { from: primeiroDiaDoMes(), to: diaLocal(0) };
     if (periodoPreset === 'personalizado') {
       return { from: periodoFrom || undefined, to: periodoTo || undefined };
     }
@@ -302,6 +316,16 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
     // A trava anti-repetição vale para qualquer forma de montar o público.
     const trava: AudienceFilter = naoRepetir ? { exclude_messaged_days: DIAS_SEM_REPETIR } : {};
 
+    // "Quem não aprovou": não olha coluna nenhuma — olha o orçamento. E o
+    // período é o da DATA DO ORÇAMENTO, não o da entrada na coluna.
+    if (audienceMode === 'nao_aprovados') {
+      return {
+        ...trava,
+        nao_aprovados: true,
+        ...(periodo.from ? { orcamento_from: periodo.from } : {}),
+        ...(periodo.to ? { orcamento_to: periodo.to } : {}),
+      };
+    }
     if (audienceMode === 'all') return { ...trava, all: true };
     if (audienceMode === 'tags') return { ...trava, tag_ids: Array.from(selectedTagIds) };
     if (audienceMode === 'custom' && customFieldKey.trim() && customFieldValue.trim()) {
@@ -595,8 +619,8 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
       {/* Step 2 — Audiência */}
       {step === 1 && (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {(['funnel', 'tags', 'custom', 'all'] as AudienceMode[]).map((mode) => (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            {(['nao_aprovados', 'funnel', 'tags', 'custom', 'all'] as AudienceMode[]).map((mode) => (
               <button
                 key={mode}
                 type="button"
@@ -608,6 +632,7 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
                     : 'border-[rgba(97,193,208,0.30)] bg-[#FAFDFD] text-[var(--color-text-secondary)]',
                 )}
               >
+                {mode === 'nao_aprovados' && 'Quem não aprovou'}
                 {mode === 'funnel' && 'Por coluna do funil'}
                 {mode === 'tags' && 'Por etiqueta'}
                 {mode === 'custom' && 'Por campo personalizado'}
@@ -615,6 +640,68 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
               </button>
             ))}
           </div>
+
+          {audienceMode === 'nao_aprovados' && (
+            <div className="space-y-3 rounded-lg border border-[rgba(97,193,208,0.30)] bg-[#FAFDFD] px-4 py-3">
+              <p className="text-sm text-[var(--color-text-primary)]">
+                Alcança todo paciente com <strong>orçamento não aprovado</strong>, esteja o card em
+                qual coluna estiver — inclusive os <strong>encerrados por prazo</strong>, que são a
+                maior parte de quem parou de ser cobrado.
+              </p>
+
+              <div className="space-y-2">
+                <Label>Data do orçamento</Label>
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    ['todos', 'Qualquer data'],
+                    ['hoje', 'Hoje'],
+                    ['ontem', 'Ontem'],
+                    ['7dias', 'Últimos 7 dias'],
+                    ['mes', 'Este mês'],
+                    ['personalizado', 'Escolher datas'],
+                  ] as Array<[PeriodoPreset, string]>).map(([valor, rotulo]) => (
+                    <button
+                      key={valor}
+                      type="button"
+                      onClick={() => setPeriodoPreset(valor)}
+                      className={cn(
+                        'rounded-full px-3 py-1 text-xs',
+                        periodoPreset === valor
+                          ? 'bg-[#E4F5F8] text-[var(--color-text-primary)]'
+                          : 'bg-[#F7FBFC] text-[var(--color-text-secondary)]',
+                      )}
+                    >
+                      {rotulo}
+                    </button>
+                  ))}
+                </div>
+
+                {periodoPreset === 'personalizado' && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <input
+                      type="date"
+                      value={periodoFrom}
+                      onChange={(e) => setPeriodoFrom(e.target.value)}
+                      className="h-10 rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-3 text-sm text-[var(--color-text-primary)]"
+                    />
+                    <span className="text-xs text-[var(--color-text-secondary)]">até</span>
+                    <input
+                      type="date"
+                      value={periodoTo}
+                      onChange={(e) => setPeriodoTo(e.target.value)}
+                      className="h-10 rounded-lg border border-[rgba(97,193,208,0.45)] bg-[#F7FBFC] px-3 text-sm text-[var(--color-text-primary)]"
+                    />
+                  </div>
+                )}
+
+                <p className="text-xs text-[var(--color-text-secondary)]">
+                  Aqui a data é a <strong>do orçamento</strong>, a que o WebDental imprime — ela não
+                  muda quando o card é movido ou encerrado. Por coluna do funil, a data é a da
+                  entrada na coluna, que é outra coisa.
+                </p>
+              </div>
+            </div>
+          )}
 
           {audienceMode === 'tags' && (
             <div className="space-y-2">

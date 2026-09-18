@@ -42,6 +42,7 @@ export interface AudiencePreview {
 }
 
 interface OrcamentoLinha {
+  id: string;
   contact_id: string;
   status: string | null;
   stage_id: string | null;
@@ -69,7 +70,7 @@ async function carregarTodosOsOrcamentos(): Promise<OrcamentoLinha[]> {
   for (let de = 0; ; de += PAGINA) {
     const { data, error } = await getSupabase()
       .from('deals')
-      .select('contact_id, status, stage_id, archived_at')
+      .select('id, contact_id, status, stage_id, archived_at')
       .order('id')
       .range(de, de + PAGINA - 1);
     if (error) throw new Error(error.message);
@@ -78,6 +79,81 @@ async function carregarTodosOsOrcamentos(): Promise<OrcamentoLinha[]> {
     if (linhas.length < PAGINA) break;
   }
   return out;
+}
+
+// Dia seguinte de 'YYYY-MM-DD', para comparar a data do orçamento com `lt` e
+// pegar também os valores gravados com hora.
+function diaSeguinte(dia: string): string {
+  const d = new Date(`${dia}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+// `dt_orcamento` é campo personalizado do orçamento (a data que o WebDental
+// imprime), guardado como texto 'YYYY-MM-DD'. É a ÚNICA data que não se move
+// quando alguém arrasta o card ou quando a importação encerra o orçamento.
+async function idDoCampoDataDoOrcamento(): Promise<string | null> {
+  const { data, error } = await getSupabase()
+    .from('custom_fields')
+    .select('id')
+    .eq('key', 'dt_orcamento')
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const linha = (data ?? [])[0] as { id: string } | undefined;
+  return linha?.id ?? null;
+}
+
+// Orçamentos cuja DATA DO ORÇAMENTO cai na janela. `null` = sem recorte de data.
+async function orcamentosNoPeriodo(
+  de: string | null,
+  ate: string | null,
+): Promise<Set<string> | null> {
+  if (!de && !ate) return null;
+  const campo = await idDoCampoDataDoOrcamento();
+  if (!campo) {
+    throw new Error(
+      'Não encontrei o campo "dt_orcamento" nos orçamentos. Sem ele não dá para ' +
+        'filtrar pela data do orçamento — use o período por coluna do funil.',
+    );
+  }
+  const PAGINA = 1000;
+  const out = new Set<string>();
+  for (let inicio = 0; ; inicio += PAGINA) {
+    let q = getSupabase()
+      .from('custom_field_values')
+      .select('deal_id, value')
+      .eq('custom_field_id', campo)
+      .order('deal_id')
+      .range(inicio, inicio + PAGINA - 1);
+    if (de) q = q.gte('value', de);
+    if (ate) q = q.lt('value', diaSeguinte(ate));
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    const linhas = (data ?? []) as Array<{ deal_id: string | null }>;
+    for (const l of linhas) if (l.deal_id) out.add(l.deal_id);
+    if (linhas.length < PAGINA) break;
+  }
+  return out;
+}
+
+// Público "quem não aprovou" (pedido do Danilo, 18/09/2026): todo contato com
+// pelo menos um orçamento não aprovado e não arquivado, EM QUALQUER COLUNA —
+// inclusive os encerrados como "Não aprovado", que são a maior parte de quem a
+// clínica quer recuperar e ficavam de fora do recorte por coluna.
+async function contatosQueNaoAprovaram(de: string | null, ate: string | null): Promise<string[]> {
+  const [etapasAprovado, orcamentos, noPeriodo] = await Promise.all([
+    carregarEtapasAprovado(),
+    carregarTodosOsOrcamentos(),
+    orcamentosNoPeriodo(de, ate),
+  ]);
+  const ids = new Set<string>();
+  for (const d of orcamentos) {
+    if (ehAprovado(d, etapasAprovado)) continue;
+    if (d.archived_at) continue;
+    if (noPeriodo && !noPeriodo.has(d.id)) continue;
+    ids.add(d.contact_id);
+  }
+  return Array.from(ids);
 }
 
 // Regra do Danilo (16/09/2026): disparo é para quem tem orçamento NÃO aprovado.
@@ -162,12 +238,20 @@ async function resolveAudienceIds(
   const dealTo = typeof filter.deal_to === 'string' && filter.deal_to ? filter.deal_to : null;
   const hasPeriod = Boolean(dealFrom || dealTo);
   const hasDeals = hasPipeline || hasStages || hasPeriod;
+  // Público "quem não aprovou", com recorte pela data do orçamento.
+  const querNaoAprovados = filter.nao_aprovados === true;
+  const orcFrom =
+    typeof filter.orcamento_from === 'string' && filter.orcamento_from
+      ? filter.orcamento_from
+      : null;
+  const orcTo =
+    typeof filter.orcamento_to === 'string' && filter.orcamento_to ? filter.orcamento_to : null;
 
   // SEGURANÇA: só dispara para TODA a base quando o filtro é explicitamente
   // `{ all: true }`. Um filtro de tags/custom/funil vazio (ex.: modo "tags"
   // selecionado mas nenhuma tag marcada) resolve para ZERO — nunca para todos
   // — para evitar disparo em massa acidental contra a base inteira.
-  if (!filter.all && !hasTags && !hasCustom && !hasDeals) return vazio;
+  if (!filter.all && !hasTags && !hasCustom && !hasDeals && !querNaoAprovados) return vazio;
 
   // Interseção (AND) entre conjuntos de candidatos; null = "sem restrição ainda".
   const intersect = (a: string[] | null, b: string[]): string[] =>
@@ -175,6 +259,13 @@ async function resolveAudienceIds(
 
   // Start with the set of contact IDs matching tag filters, if any.
   let candidateIds: string[] | null = null;
+
+  if (querNaoAprovados) {
+    const naoAprovaram = await contatosQueNaoAprovaram(orcFrom, orcTo);
+    if (naoAprovaram.length === 0) return vazio;
+    candidateIds = intersect(candidateIds, naoAprovaram);
+    if (candidateIds.length === 0) return vazio;
+  }
   if (hasTags) {
     const { data: links } = await supabase
       .from('contact_tags')

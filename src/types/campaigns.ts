@@ -40,6 +40,21 @@ export interface AudienceFilter {
   // (sem pipeline/etapa) já implica olhar o funil.
   deal_from?: string;
   deal_to?: string;
+  // Público "quem não aprovou": contato com pelo menos um orçamento que NÃO
+  // está aprovado, em QUALQUER coluna do funil — inclusive os já encerrados
+  // como "Não aprovado". Existe porque o recorte por coluna deixava metade do
+  // público de fora: o orçamento encerrado por prazo sai de "Sob avaliação" e
+  // vira invisível para o filtro, mesmo sendo exatamente quem a clínica quer
+  // recuperar.
+  nao_aprovados?: boolean;
+  // Período da DATA DO ORÇAMENTO ('YYYY-MM-DD'), do campo `dt_orcamento` que a
+  // importação do WebDental grava. 🔴 NÃO confundir com `deal_from`/`deal_to`,
+  // que olham `stage_entered_at` — a data em que o card entrou na coluna ATUAL.
+  // Para quem foi movido (encerrado, aprovado, arrastado), essa data é a da
+  // movimentação, não a do orçamento: foi o que fez um recorte de "17/09"
+  // alcançar 84 pacientes em vez de 14, em 18/09/2026.
+  orcamento_from?: string;
+  orcamento_to?: string;
   // Trava anti-repetição: descarta quem recebeu disparo nos últimos N dias.
   // Existe para proteger o número na Meta — paciente que recebe a mesma
   // cobrança dois dias seguidos bloqueia, e bloqueio derruba a qualidade.
