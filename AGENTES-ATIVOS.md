@@ -26,6 +26,9 @@
 | configuração | 17/09 14:00 | banco: `whatsapp_hub.ai_agent_config.system_prompt` (só texto; nenhum código, **não** toca o diff pendente de `process-ai-message`/`_shared/llm.ts`) | **concluído** — IA manda o contato da área médica. Aplicado em 17/09 12:49 UTC (md5 `64d2d8fa…`); reversão no `MEMORIA.md` |
 | configuração | 17/09 13:20 | banco: `whatsapp_hub.ai_agent_config.system_prompt` (seção "Como encerrar") | **concluído** — IA usa `[HANDOFF]` e para depois de chamar a recepção. Aplicado 17/09 13:24 UTC (md5 `7f088283…`); reversão no `MEMORIA.md`. ⚠️ Frente WhatsApp/IA: `extractHandoff` só reconhece a marcação em linha própria |
 | configuração | 18/09 11:45 | `src/types/campaigns.ts` · `src/hooks/useCampaigns.ts` · `src/components/campaigns/CampaignWizard.tsx` | **concluído** — público "Quem não aprovou" com recorte pela DATA DO ORÇAMENTO (`dt_orcamento`), não pela data em que o card entrou na coluna. Inclui a correção do assistente que abria em "Todos os pacientes". Publicado com o "pode" do Danilo em 18/09 |
+| comercial | 21/09 · sessão atual | **texto de template** — `whatsapp_hub.templates` (só a linha nova `odonto_retomada_condicao`) | **concluído** — template `odonto_retomada_condicao` gravado como rascunho (id `897e7287`) com o "pode" do Danilo, texto conferido no banco. **Falta só o clique dele** em Disparos → aba Templates → "Submeter" (a Edge Function exige a sessão). Não toca código nem migração |
+
+| configuração | 21/09 10:00 | `src/components/inbox/TemplateRestartDialog.tsx` (só ele) | **em curso** — reiniciar conversa falhava com `#131008` da Meta quando a variável ia em branco. Campo passa a vir preenchido com o nome do cadastro + botão bloqueado com campo vazio. **NÃO publicado**, aguarda o "pode" do Danilo |
 
 ---
 
@@ -71,3 +74,9 @@ hoje.
 3. **Build quebrado em arquivo alheio: relate, não conserte.**
 4. **Registre no `MEMORIA.md` identificando a frente.**
 5. **Nunca reverta trabalho de outra frente.**
+
+## Frente aberta em 06/10 (bifurcação da conversa do Danilo)
+
+| Frente | Desde | Mexendo em | Status |
+|---|---|---|---|
+| configuração (bifurcação 06/10) | 06/10 | **banco:** migration nova `20261006120000_reabrir_conversa_fechada.sql` (trigger em `messages`) · UPDATE de dado em `conversations` (reabrir fechadas com paciente esperando; passar as de Nathaly/Andressa para Millena/Larah) · **código:** `src/components/campaigns/CampaignWizard.tsx` (só o aviso de capacidade no passo de audiência) | **parado, aguarda o Danilo** — migration escrita e testada em transação desfeita, **NÃO aplicada** (trava de permissões bloqueou); acertos de dado em `scripts/20261006_acertos_conversas.sql`, **NÃO aplicados**; aviso de capacidade no `CampaignWizard.tsx` pronto, `tsc` e `vite build` ok, **NÃO publicado**. Pedido direto do Danilo ("faça todas correções"). ⚠️ A conversa original pode estar montando o disparo dos 20 pacientes de 01–02/10 no Chrome: esta frente **não** dispara nada e **não** toca em `campaigns`/`campaign_contacts` |

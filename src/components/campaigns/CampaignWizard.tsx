@@ -28,6 +28,14 @@ type PeriodoPreset = 'todos' | 'hoje' | 'ontem' | '7dias' | 'mes' | 'personaliza
 // Quantos dias a trava anti-repetição olha para trás.
 const DIAS_SEM_REPETIR = 7;
 
+// Capacidade de resposta da equipe. Medido nos disparos de setembro/2026:
+// 31% de quem recebe responde, quase tudo no mesmo dia, e com uma atendente no
+// CRM o que passa de ~25 respostas extras fica sem retorno (18/09: 36 conversas,
+// 19 respondidas; 30/09: 59 conversas, 37 respondidas). Acima deste tamanho o
+// assistente avisa e pede confirmação — não bloqueia.
+const LIMITE_DISPARO_DIA = 80;
+const TAXA_RESPOSTA_MEDIDA = 0.31;
+
 // Dia local em 'YYYY-MM-DD' (deslocamento em dias). Não dá para usar
 // toISOString() aqui: em Itabuna (UTC-3) ele devolve o dia seguinte a partir
 // das 21h, e o disparo da manhã sairia com a janela errada.
@@ -113,6 +121,8 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
   const [audienceCount, setAudienceCount] = useState<number | null>(null);
   // Quantos saíram do público por só terem orçamento aprovado.
   const [removidosAprovado, setRemovidosAprovado] = useState(0);
+  // Disparo maior que a equipe consegue responder no dia: exige confirmação.
+  const [cienteCapacidade, setCienteCapacidade] = useState(false);
   const [scheduleNow, setScheduleNow] = useState(true);
   const [scheduleAt, setScheduleAt] = useState(''); // datetime-local value
   const [submitting, setSubmitting] = useState(false);
@@ -183,6 +193,7 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
     if (!open) return;
     // Fresh state every time the wizard is opened.
     setStep(0);
+    setCienteCapacidade(false);
     setName('');
     setTemplateId('');
     // 🔴 Este reset mandava para 'all' (a base inteira) toda vez que o
@@ -358,6 +369,8 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
       const preview = await previewAudience(currentFilter);
       setAudienceCount(preview.total);
       setRemovidosAprovado(preview.removidosAprovado);
+      // Público mudou: a confirmação anterior não vale para o número novo.
+      setCienteCapacidade(false);
     } catch (err) {
       toast.error('Falha ao calcular audiência', {
         description: err instanceof Error ? err.message : String(err),
@@ -389,9 +402,12 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
   // scheduled→sending quando scheduled_at <= now), o que surpreende o usuário.
   const scheduleInPast = !scheduleNow && !!scheduleAt && new Date(scheduleAt).getTime() <= Date.now();
 
+  const acimaDaCapacidade = (audienceCount ?? 0) > LIMITE_DISPARO_DIA;
+  const respostasEsperadas = Math.round((audienceCount ?? 0) * TAXA_RESPOSTA_MEDIDA);
+
   const canNext =
     (step === 0 && name.trim() && templateId && varsOk) ||
-    (step === 1 && (audienceCount ?? 0) > 0);
+    (step === 1 && (audienceCount ?? 0) > 0 && (!acimaDaCapacidade || cienteCapacidade));
 
   const nextStep = () => setStep((s) => Math.min(STEPS.length - 1, s + 1));
   const prevStep = () => setStep((s) => Math.max(0, s - 1));
@@ -928,6 +944,30 @@ export function CampaignWizard({ open, onClose, onSaved }: CampaignWizardProps) 
               </div>
             )}
           </div>
+
+          {acimaDaCapacidade && (
+            <div className="rounded-lg border border-[#9A4A07] p-3 text-sm space-y-2">
+              <p className="font-medium text-[#9A4A07]">
+                Disparo maior do que a equipe consegue responder em um dia
+              </p>
+              <p className="text-xs text-[var(--color-text-secondary)]">
+                Cerca de {respostasEsperadas} pacientes devem responder, quase todos hoje. Nos
+                disparos grandes de setembro, 1 em cada 4 respostas ficou sem retorno de
+                atendente. O recomendado é dividir em lotes de até {LIMITE_DISPARO_DIA} por dia,
+                usando a data do orçamento para separar.
+              </p>
+              <label className="flex items-start gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={cienteCapacidade}
+                  onChange={(e) => setCienteCapacidade(e.target.checked)}
+                  disabled={submitting}
+                />
+                <span>Combinei com a equipe e quero enviar para os {audienceCount} mesmo assim.</span>
+              </label>
+            </div>
+          )}
 
           {audienceMode === 'tags' && selectedTagIds.size === 0 && (
             <p className="text-xs text-[#9A4A07] text-center">

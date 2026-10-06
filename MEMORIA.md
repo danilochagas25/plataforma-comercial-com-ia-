@@ -5541,3 +5541,158 @@ Funil com um só pipeline pré-seleciona sozinho.
 - **Conferido contra os dados reais (mesma regra em SQL):** Este mês (01–18/09) **158 pacientes → 98 recebem**; Qualquer data 367 → 307; Últimos 7 dias 57 → 7. A trava anti-repetição de 7 dias continua valendo por cima.
 - **Validação:** `npx tsc -b` e `npx vite build` ok. Tela não vista no navegador (o servidor local cai no `/setup`).
 - **Falta:** o "pode" do Danilo para publicar.
+
+### 2026-09-18 · configuração · Disparo "Captação setembro" e nascimento da skill da odonto
+
+- **Filtro novo publicado** (commit `3548b0a`, conferido no bundle servido pela Vercel): público **"Quem não aprovou"** + **data do orçamento**. Na tela: "Qualquer data" alcançou **307**, "Este mês" **98** — os mesmos números que o SQL dava, o que valida a implementação ponta a ponta.
+- **Danilo mandou tirar a trava de 7 dias** → público foi a **158**. Alertado que isso traz de volta **12 pacientes que já tinham recebido na mesma manhã** e 20 nas últimas 48h. Decisão dele, registrada.
+- **Orçamentos-fantasma: conferência linha a linha contra o relatório, não por suspeita.** 13 cards tinham a assinatura (mesmo paciente/dia/tratamento, um aprovado e outro aberto). Confrontados com o `SETEMBRO_01-16_UNIFICADO.xls`: **11 confirmados** (sumiram do relatório de não aprovados = foram aprovados por valor renegociado) e **2 do Bento Medeiros seguiam EM ABERTO no relatório** — orçamento real de R$ 932 que teria sido arquivado por suspeita. **Arquivar fantasma só com a prova documental.**
+- **11 cards arquivados** (`archived_at = 2026-09-18 15:10:00+00`): Adrizza `1ec905b5`, Alineci `934815f0`, Edson `a9b76aa5` (duplicata de valor idêntico), Emanuele `984af788` e `aeab7704`, Henrique Miguel `77991e4f`, João Batista `5f9be745` e `fe9f4450`, Maria de Fátima `45d12f01`, Maria Julia `7a41d2eb`, Ranyele `d3e5c78f`. **Reverter:** `update deals set archived_at = null where archived_at = '2026-09-18 15:10:00+00'`. Efeito no público: 158 → **153** (saem os 5 cujo único card aberto era fantasma; Adrizza, Edson, Emanuele e Henrique ficam porque têm orçamento real em aberto).
+- **Campanha "Captação setembro"** criada 18/09 15:07 UTC: `odonto_condicao_este_mes`, `{{1}}` = nome do contato, **153 destinatários**, sem trava. Fila escoou em **7min30** (15:07:35 → 15:15:11).
+- **Resultado a ~10 min:** 137 enviados · 135 entregues · 95 lidos (70%) · **21 respostas (15,6% sobre entregues)** · **16 falhas (10,5%)**.
+  - Falhas: 12 `Message undeliverable`, 3 `User's number is part of an experiment`, **1 `This message was not delivered to maintain healthy ecosystem engagement`** — 🔴 esta última é a Meta segurando por excesso de marketing; é o primeiro sinal de queda de qualidade e apareceu justamente no disparo sem trava.
+  - **Distribuição das conversas: Millena 131 · Larah 21 · Nathaly 1.** A regra de 16/09 só sorteia dona para conversa NOVA; as que já existiam mantiveram a dona antiga, e quase todas eram da Millena. 131 conversas ativas para uma pessoa não se sustenta — rever antes de repetir disparo desse tamanho.
+- **Skill criada:** `skills/odonto-operacao/SKILL.md` (227 linhas), com symlink em `~/.claude/skills/odonto-operacao`. Cobre a rotina do dia, o corte de 100 linhas e como conferir, a extração pela tela, a diferença entre `stage_entered_at` e `dt_orcamento`, as travas da importação e do disparo, a tabela de desempenho dos templates, o orçamento-fantasma e a leitura dos erros da Meta. **É para evoluir a cada sessão.**
+
+### 2026-09-21 · comercial · Template de reativação de conversa (`odonto_retomada_condicao`)
+
+- **Pedido (Danilo, 21/09):** "preciso colocar um novo template para reativação de conversa, crie o template e coloque para aprovação na Meta".
+- **Medição do público antes de escrever (SQL, base viva):** 394 conversas abertas · **128 pacientes responderam alguma vez** · **126 já conversaram e esfriaram** (última mensagem visível há mais de 24h, janela da Meta fechada). Destes, **63 têm orçamento aberto: R$ 78.063,10, ticket médio R$ 988,14** — acima do ticket do que a clínica fecha (R$ 631), o que confirma a tese "a clínica fecha o barato e perde o caro". Os outros 266 contatos nunca responderam nada: não são reativação, são cobrança fria (já coberta por `odonto_condicao_este_mes`).
+- **🔴 POR QUE ESSAS CONVERSAS MORRERAM — achado novo, não era conhecido.** A última coisa que o paciente disse antes de sumir, no maior grupo, foi **"Quero saber a condição"** (34 ocorrências no topo do ranking). Rastreado o que houve depois: **63 pacientes pediram a condição** → **55 foram respondidos pela IA**, 6 por pessoa, 2 por ninguém. A resposta da IA é sempre a mesma: *"sobre as condições eu já chamo alguém da recepção pra te explicar direitinho. Já estou chamando a recepção, em instantes alguém fala com você por aqui."* **A recepção não veio.** A conversa não morre por falta de mensagem — morre porque o paciente pediu o preço, ouviu "já te chamam" e ficou esperando. Isso liga direto à pendência de negócio aberta desde 15/09 (a condição concreta nunca foi definida).
+- **Feito:** rascunho `odonto_retomada_condicao` gravado em `whatsapp_hub.templates` (id `897e7287-0ff0-4d77-92eb-3d3a0e7db572`, org `2f61f310…`), categoria **marketing**, `pt_BR`, `status='draft'`, sem header, 1 variável `{{1}}` = nome do paciente, 3 botões de resposta rápida: *Quero ver as condições* · *Prefiro que me liguem* · *Já não tenho interesse*.
+  - **Texto (aprovado pelo Danilo sem alteração):** "Olá, {{1}}! Aqui é da Clínica Amor Saúde Itabuna - Odontologia. / Você pediu para saber as condições do seu tratamento e a nossa resposta acabou demorando. Peço desculpa por isso. / Seu plano de tratamento continua guardado com a gente, e agora consigo te passar certinho: o valor, o parcelamento e o que dá para ajustar no seu caso. / Como prefere seguir?"
+  - **Decisões de texto:** assume a demora na 2ª linha (é o que destrava conversa abandonada, e é verdade); *"Prefiro que me liguem"* abre o caminho do telefone, que é para onde vai orçamento caro com falha de WhatsApp; *"Já não tenho interesse"* limpa a base e a Meta lê como engajamento saudável; não cita preço no corpo nem promete resultado.
+  - **Conferência feita no banco antes de entregar** (a cicatriz do `Olá, {{1}}1}}` que foi para 50 pacientes): corpo com **353 caracteres** (limite 1024), **1 variável**, `body ~ '\}\}\d'` = **false** (sem o defeito), **3 botões**, maior com **22 caracteres** (limite 25). Prévia renderizada com nome completo conferida.
+- **Banco:** nenhuma migração. Só uma linha de dado de configuração, inserida com guarda `WHERE NOT EXISTS` (idempotente). **Reverter:** `delete from whatsapp_hub.templates where name='odonto_retomada_condicao' and meta_template_id is null;`
+- **Não feito — e por quê:** **a submissão à Meta não foi executada.** A Edge Function `submit-template` valida `requireAdmin`, ou seja, exige a sessão do Danilo; não existe caminho por service role. A submissão é o clique dele em **Disparos → aba Templates → botão "Submeter"** (rota `/campaigns?tab=templates`). Informado.
+- **⚠️ Alertas dados ao Danilo, registrados:** (1) o template promete *"agora consigo te passar certinho"* — **sem a condição concreta na mão da recepção, ele queima o mesmo paciente pela segunda vez**, e a segunda não volta; (2) em 18/09 a Meta segurou uma mensagem com `healthy ecosystem engagement`, primeiro sinal de queda de qualidade do número — este público é quente (já respondeu), então o risco é menor que o de base fria, mas não é zero.
+- **Próximo:** Danilo clica em "Submeter" (tela aberta para ele em 21/09); acompanhar o retorno da Meta (`sync-template-status` / webhook `template.status_updated`). Depois de aprovado, montar a campanha com o público dos 126 esfriados — **não** com o filtro "Quem não aprovou", que é outro recorte.
+
+### 2026-09-21 · configuração · Reiniciar conversa falhava com #131008 da Meta (corrigido, NÃO publicado)
+
+- **Sintoma (Danilo, 21/09, foto da tela da coordenadora):** Millena não conseguia
+  reiniciar conversa. Toast: *"Falha ao enviar template — (#131008) Required
+  parameter is missing"*, com o template `odonto_condicoes_especiais`.
+- **Causa:** o campo **Variáveis** do diálogo nasce vazio. O "Maria" que aparece é
+  `placeholder`, não valor. `TemplateRestartDialog` mandava `params: ['']` e
+  `send-operator-template` repassava `{type:'text', text:''}` à Meta, que recusa
+  parâmetro em branco. **A função publicada (v2) é idêntica ao repo — não era
+  código desatualizado.**
+- **Prova:** `function_edge_logs` 21/09 12:31 UTC → 3 POSTs, **3× 502**, nenhuma
+  mensagem gravada. E em `messages`, os **únicos** 2 envios de template por
+  operador que deram certo (06/09) são do `teste_conexao` — o único template com
+  **zero variáveis** (aí `components` vai vazio e a chave é omitida). Ou seja: o
+  botão **nunca** funcionou com template que tem `{{1}}`.
+- **Feito (código, NÃO publicado)** — `src/components/inbox/TemplateRestartDialog.tsx`, só ele:
+  - `{{1}}` passa a nascer com o **nome do cadastro do paciente**. O diálogo
+    resolve o contato pelo `conversation_id` por conta própria (2 selects), para
+    não ter de mexer em `MessageInput`/`InboxPage`, de outra frente. Campo segue editável.
+  - Efeito que preenche a `{{1}}` quando o nome chega depois (consulta assíncrona),
+    **sem** reescrever por cima se a atendente apagar de propósito.
+  - **Botão "Enviar template" bloqueado** enquanto houver variável em branco, com o
+    motivo escrito em português na tela e no toast.
+  - Prévia passa a mostrar **o texto como o paciente vai ler** (variáveis trocadas),
+    no lugar do corpo cru com `{{1}}` — mesmo critério do disparo (commit `2be5a12`).
+  - ⚠️ Corrigido de passagem um token de cor quebrado no mesmo arquivo:
+    `var(--accent-primary)` (não existe) → `var(--color-accent-primary)`. É uma cor,
+    território da frente de design — **avisar antes de publicar**.
+- **Validação:** `npx tsc -b` e `npx vite build` ok. **Tela NÃO vista no navegador**
+  (sem `.env` local, o app cai no `/setup`, que não pode ser rodado).
+- **NÃO provado:** que a Meta aceita o envio com o nome preenchido. Isso só se
+  prova enviando de verdade — proposto testar no WhatsApp do próprio Danilo, não em paciente.
+- **Solução imediata passada ao Danilo** (independe do deploy): digitar o nome do
+  paciente no campo Variáveis antes de clicar em Enviar.
+- **Não feito:** o template de reativação de conversa que o Danilo pediu no começo
+  da sessão — despriorizado por ele em favor do bug. Segue pendente.
+- **Próximo:** "pode" para publicar (git push → Vercel) e o teste de envio real.
+
+### 2026-09-22 · configuração · Extração do WebDental — setembro/2026 inteiro (aprovados + não aprovados)
+
+- **Pedido (Danilo, 22/09):** extrair do WebDental todos os orçamentos de setembro, aprovados e não aprovados.
+- **Login:** a sessão do WebDental estava expirada ("Sessão expirada! Favor logar novamente"). O login é SSO da AmorSaúde (`id.amorsaude.com.br`) e **foi feito pelo Danilo** — o agente não digita credencial.
+- **Extração pela tela, sem corte.** `POST /relatorios/relatorios_base.php` com o `FormData` do próprio formulário, `tipo='D'`, `dtini=01/09/2026`, `dtfim=30/09/2026`, duas passadas (`exibir='NA'` e `exibir='A'`). O formulário **já abre com o mês corrente preenchido** — não foi preciso mexer nas datas.
+  - **Conferência do corte de 100 linhas, feita e aprovada:** não aprovados → topo declara **240**, HTML traz **241 `<tr>`** (240 + cabeçalho) ✅; aprovados → declara **214**, traz **215** ✅. Nenhum truncamento.
+- **🔧 Dois obstáculos novos, com a solução que funcionou (vale registrar, vão repetir):**
+  1. **O retorno do `javascript_tool` trunca em ~1,3 KB.** Trazer 454 linhas em JSON pelo retorno da chamada é inviável, e comprimir em gzip+base64 (50 KB → 12,6 KB) **também não cabe**.
+  2. **A solução foi um download único:** gerar no navegador **um só** arquivo JSON com os dois conjuntos (`{NA:[...], A:[...]}`) via `Blob` + `<a download>`. Contorna de uma vez o truncamento **e** o bloqueio do Chrome ao 2º download do mesmo site (o 1º passa). Arquivo caiu em `~/Downloads/webdental_setembro_2026.json` (102 KB) e foi lido do disco.
+- **Conversão para o formato do importador:** o HTML da tela não é o do XLS (coluna "Valor" em vez de "Valor Total", "Convênio" em vez de "Tabela do Orçamento", célula a mais no cabeçalho). Script `scratchpad/gerar_xls.py`, derivado do `converter_webdental.py` de 18/09 (recuperado do scratchpad da sessão `d53d6baf`).
+- **Entregues em `~/Downloads/`:** `SETEMBRO_2026_NAO_APROVADOS.xls` e `SETEMBRO_2026_APROVADOS.xls`.
+- **Validação com o PARSER REAL do CRM** (`src/lib/webdental.ts` compilado com esbuild em CJS — em ESM o SheetJS quebra com "Dynamic require of stream"; `--alias:@=./src` para resolver o import):
+
+  | | Não aprovados | Aprovados |
+  |---|---|---|
+  | tipo detectado | `nao_aprovados` | `aprovados` |
+  | orçamentos | **240** | **214** |
+  | pacientes | 182 nomes / **176 telefones** | 169 nomes / **163 telefones** |
+  | valor | **R$ 240.971,49** | **R$ 111.241,78** |
+  | ticket médio | R$ 1.004,05 | R$ 519,82 |
+  | linhas ignoradas | 0 | 0 |
+  | vendas de plano (DENTALVIDAS) | 0 | 0 |
+
+  `externalRef` repetido entre os dois arquivos: **0** (não há colisão de chave; sem risco de card duplicado).
+- **⚠️ Achado que confirma a regra da skill, agora com número: 37 dos 214 aprovados NÃO são de setembro.** Têm `Dt Orçamento` de out/2025 (1), maio (7), junho (1), julho (3) e agosto (25) — orçamentos antigos aprovados dentro da janela. O filtro do WebDental é por **movimento na janela**, não por data do orçamento. Os não aprovados, ao contrário, são **240/240 de setembro**.
+- **⚠️ Famílias compartilhando telefone:** 182 nomes para 176 telefones nos não aprovados (6 casos). O CRM cria **um contato por telefone** — a mensagem sai saudando só um dos pacientes da casa.
+- **📉 Conversão de setembro (01 a 22), calculada só com orçamentos ORÇADOS no mês — 417 orçamentos, R$ 330.343,64:**
+  - **42,4% em quantidade** (177 de 417) · meta da franqueadora: 75%
+  - **27,1% em valor** (R$ 89.372,15 de R$ 330.343,64)
+  - Ticket do aprovado **R$ 504,93** · ticket do perdido **R$ 1.004,05** — **99% maior o que não fecha.** A tese "a clínica fecha o barato e perde o caro" não só se mantém como piorou: em agosto a diferença era 70%, agora é o dobro exato.
+- **Não feito:** **a importação no CRM não foi executada** — não foi pedida. Quando for, as duas caixas ("encerrar quem passou de 7 dias" e "sinalizar sumiço") precisam ser **desmarcadas**: o arquivo cobre o mês inteiro, não o lote do dia.
+- **Banco:** nenhuma alteração. Extração é leitura.
+- **Próximo:** decisão do Danilo sobre importar (e com quais caixas), e sobre a condição comercial concreta, que segue aberta desde 15/09.
+
+### 2026-10-06 · análise (bifurcação) · Conversas dos disparos de setembro — só leitura
+
+- **Pedido (Danilo, 06/10):** acessar o CRM e analisar todas as conversas dos disparos de setembro. Feito por SQL de leitura (MCP Supabase); nenhuma alteração no banco nem no código.
+- **Método:** cada envio vira uma "conversa" = mensagens do paciente/IA/atendente entre aquele disparo e o disparo seguinte ao mesmo paciente. Aprovação = `deals.won_at` dentro da janela (**correlação**, a aprovação vem do WebDental).
+- **Volume:** 19 campanhas (fora "Teste") · 912 envios · 107 falhas · 805 enviados ok · **248 conversas com resposta (31%)**. Por paciente: 503 no alvo, 52 nunca entregaram (R$ 112,7 mil em aberto), 451 alcançados; 135 receberam 3 ou mais disparos no mês.
+- **O que o paciente responde:** 160 das 248 primeiras respostas são o botão de condição ("Quero saber a condição/as condições/ver as condições"). 113 das 248 mandaram **uma única mensagem** (o botão) e mais nada.
+- **Quem respondeu ao paciente:** humano em 185 · só a IA em 43 · ninguém em 20. Em 57 o paciente falou por último.
+- **🔴 Achado central — a conversa não muda o resultado.** Aprovação depois do disparo: sem humano 12,7% (8/63) · humano sem passar valor 13,9% (10/72) · humano passou valor sem desconto 16,9% (12/71) · **com desconto 11,9% (5/42)**. Tempo de resposta também não separa (até 10 min 9,6% · 1–4h 20,5% · +4h 13,0%). Quem não respondeu ao disparo aprovou 4,7% (26/557).
+- **Onde trava:** das 113 conversas em que a atendente passou valor/parcelas, em 44 o paciente não escreveu mais nada e em 34 recusou ("no momento não", "ficou caro"). O roteiro é sempre valor + parcelas + "vamos agendar?"; quase nunca pergunta o motivo nem deixa retorno combinado.
+- **A "condição" existe na prática:** desde ~11/09 as atendentes oferecem 10–15% de desconto e parcelamento sem juros com prazo ("até dia 20/09", "até 11/10"). A pendência de 15/09 (condição concreta) está resolvida de fato, mas sem regra escrita.
+- **Erros vistos na leitura (amostra de 47 conversas):** valor errado passado ao paciente (R$ 2.587 no lugar de R$ 1.192, corrigido como "erro de digitação"; R$ 500 somando dois orçamentos que eram alternativos); disparo para quem já tinha agendado, já tinha feito o tratamento ou era da área médica; IA repetindo "já estou chamando a recepção" até 4 vezes; áudio do paciente sem tratamento ("não consigo ouvir áudio").
+- **Por atendente (1ª a responder):** Millena 145 conversas, 14,5% aprovaram, mediana 54 min · Larah 40, 15,0%, 75 min.
+- **Lista quente (por paciente, até 06/10):** 138 pacientes responderam, não aprovaram, não recusaram e têm orçamento aberto = **R$ 188,9 mil** (60 deles com R$ 1.000+ somam R$ 154,3 mil). 25 nunca tiveram resposta humana (R$ 36,2 mil); 22 falaram por último (R$ 22,4 mil); 91 sumiram depois da resposta da clínica (R$ 130,3 mil). 16 disseram não ter interesse.
+- **Não feito:** lista nominal não gerada (oferecida ao Danilo); nenhuma leitura integral das 248 conversas — leitura de 47, o resto por contagem e palavra-chave.
+- **Próximo:** decisão do Danilo sobre (1) lista quente para ligação, (2) regra escrita da condição, (3) segundo contato combinado depois do "vou pensar".
+
+### 2026-10-06 · configuração · Conferência da importação de outubro e disparo "Não aprovados 01 e 02/10"
+
+- **Contexto:** sessão aberta no Mac antigo. Entre 22/09 e 06/10 não há registro neste arquivo, mas o banco mostra trabalho feito no período (campanhas de 24/09 a 03/10, template `odonto_retomada_condicao` aprovado e disparado em 30/09 para 235). **Este log está com buraco de 22/09 a 06/10** — conferir se o Mac novo tem entradas que não chegaram aqui (a pasta não sincroniza e o MEMORIA.md tem alteração não commitada).
+- **Pedido (Danilo, 06/10):** conferir se o relatório do mês importado estava completo; identificar o último disparo e quem fez; estimar respostas; disparar para os pacientes de outubro que não receberam.
+- **Relatório `relatorio_paciente_tratamento.xls` (01 a 06/10, Exibir: TODOS) veio CORTADO em 100 linhas:** topo declara 105 tratamentos (45 aprovados, 60 não aprovados, R$ 109.371,40); arquivo traz 45 aprovados e **55** não aprovados (R$ 99.294,73). **Faltam 5 não aprovados (~R$ 10 mil)**, provavelmente do fim de 05/10 ou de 06/10. A importação foi fiel ao arquivo: 98 cards criados em duas levas (10:28 → orçamentos de 03–05/10; 10:36 → 01–02/10), 2 linhas DENTALVIDAS ignoradas, nenhum duplicado.
+- **Disparos de 06/10 antes desta sessão:** 10:29 "Não aprovados · importação 06/10/2026" (`odonto_condicoes_especiais`, 15 → 12 entregues, 3 respostas) e 10:31 "campanha de 03/10 a 05/10" (`odonto_condicoes_pagamento`, 48 → **46 falhas**). A das 10:31 usou "Quem não aprovou" **sem data** + trava de 7 dias: a trava barrou quem tinha recebido e sobraram os números mortos — 46 dos 48 já tinham falhado em 03/10; 43 acumulam 3+ falhas.
+- **Autor de campanha não é gravado.** Indício pelo `auth`: login de `itabuna.danilo@gmail.com` às 10:28:50 (Mac), segundos antes da sequência; Millena com sessão ativa desde 10:09. Não é prova.
+- **Os 20 pacientes da leva das 10:36 (01–02/10, R$ 72.841) ficaram sem disparo** porque entraram depois das duas campanhas.
+- **Feito, com ordem do Danilo ("faça o disparo para os 20 pacientes"):** campanha **"Não aprovados 01 e 02/10"** criada pelo assistente do CRM (sessão dele no Chrome) às 11:02 de 06/10. Template `odonto_condicoes_especiais`, `{{1}}` = nome do contato, público "Quem não aprovou" + data do orçamento 01/10 a 02/10 + trava de 7 dias. A tela mostrou **20**, igual ao SQL. Em ~1min30: **18 enviados, 16 entregues (2 lidos), 2 falhas** — Débora Santos Moura (`User's number is part of an experiment`) e Bernadete Silva Pitombo (`Message undeliverable`, orçamento de R$ 4.792 → ligação).
+- **Taxas medidas (1.212 envios desde 08/09), para estimativa:** 1º disparo 33,8% de resposta sobre enviados; 2º 16,8%; 3º+ 13,2%. Por idade do orçamento: 0–1 dia 38,5% · 2–5 dias 24,2% · 6–15 dias 24,0% · 16+ dias 16,8%. Por template: `d1_v3` 35,8% · `condicao_este_mes` 29,2% · `retomada_condicao` 20,4% · `condicoes_especiais` 13,2% no geral, mas 35,1% em 1º toque com orçamento até 5 dias.
+- **Banco:** nenhuma migração, nenhum UPDATE manual. Só a campanha criada pela tela.
+- **Não feito:** os 5 orçamentos faltantes não foram trazidos (WebDental com sessão expirada; login é do Danilo). Marilene Nogueira da Silva (R$ 3.791, orçamento de 05/10) não recebeu nada sobre o orçamento novo — barrada pela trava (recebeu em 30/09). Poliana Ferreira da Conceição: 2 falhas em 06/10.
+- **Observação técnica:** a extensão Claude in Chrome desconectou várias vezes no meio do fluxo ("tab is not in Claude's tab group"). Contorno: chamar `tabs_context_mcp` como primeira ação do mesmo `browser_batch`. Antes de repetir um clique de envio que deu erro, **conferir no banco se a campanha não foi criada** (foi o que evitou disparo duplicado).
+- **Propostas sem "pode":** (1) gravar o autor em `campaigns`; (2) trava que exclui do disparo quem já falhou 2 vezes; (3) o importador comparar linhas lidas × total do cabeçalho e avisar do corte.
+- **Próximo:** acompanhar as respostas da campanha; baixar "APENAS NÃO APROVADOS" 01–06/10 para trazer os 5 faltantes (importar com as duas caixas desmarcadas); definir a condição comercial concreta (aberta desde 15/09).
+- **Complemento (06/10, mesma frente) — por que 63 conversas ficaram sem resposta de atendente (só leitura):**
+  - **17** (15 pacientes): a conversa estava **fechada** quando o paciente respondeu — não reabre, a IA fica calada e ninguém é avisado. É a pendência #55, agora medida.
+  - **18**: resposta chegou **antes de 17/09 13:24 UTC**, quando a IA prometia a recepção sem usar `[HANDOFF]` — nenhum aviso saía para a equipe.
+  - **17**: depois da correção de 17/09 a IA passou a conversa e mesmo assim ninguém respondeu; todas da Millena, 12 em dia de disparo grande (18/09 e 30/09).
+  - **8**: conversa atribuída a Nathaly ou Andressa, que não usam o CRM (4 + 4, 100% sem resposta).
+  - **3**: IA não respondeu, causa não identificada (2) ou IA pausada por atendimento anterior (1).
+  - Não foi horário: 56 das 63 respostas chegaram em horário comercial. Sábado à tarde: 4 de 6 sem resposta.
+  - **Carga:** a partir de 15/09 só há **1 atendente ativa por dia** no CRM. Em 09/09 74 conversas com mensagem de paciente (48 respondidas), em 18/09 36 (19), em 30/09 59 (37). **Em 16/09 (quarta) 22 conversas receberam mensagem e nenhuma atendente escreveu no CRM o dia inteiro.**
+  - Limite: dona e status da conversa são os de hoje (não há histórico); "fechada" é seguro porque `closed_at` é anterior à resposta e a conversa segue fechada.
+
+### 2026-10-06 · [FRENTE: configuração — bifurcação] · Três correções pedidas depois da análise de setembro (nenhuma no ar ainda)
+
+- **Pedido (Danilo, 06/10):** "faça todas correções" — (1) reabrir conversa fechada quando o paciente escreve (#55); (2) passar para Millena/Larah as conversas de Nathaly e Andressa; (3) limitar o disparo ao que a equipe aguenta responder.
+- **Feito:**
+  - **(1) Migration `20261006120000_reabrir_conversa_fechada.sql` escrita e testada.** Gatilho `on_inbound_0_reabrir` (AFTER INSERT em `messages`): mensagem recebida do paciente em conversa `closed` reabre em `human_active` com IA pausada e `closed_at` nulo; mantém a dona, ou aplica a regra de 16/09 se estava sem dona / com dona que não atende; grava aviso `handoff` para a dona quando a IA já estava pausada (nesse caso `_on_handoff_notify` não dispara). O nome vem antes de `on_inbound_message` na ordem alfabética, então a IA não responde por cima. **Teste em transação desfeita (DO + RAISE): as duas conversas de prova reabriram e geraram 1 aviso cada.**
+  - **(3) Aviso de capacidade no `CampaignWizard.tsx`:** acima de **80 destinatários** (`LIMITE_DISPARO_DIA`) o passo de audiência mostra quantas respostas esperar (31%, `TAXA_RESPOSTA_MEDIDA`) e só libera "Próximo" com a caixa "Combinei com a equipe…" marcada. Não bloqueia, não mexe em `useCampaigns.ts` nem na Edge Function. `npx tsc -b` e `npx vite build` ok. Tela não vista no navegador.
+- **🔴 Não feito — bloqueado pela trava de permissões do Claude Code (não é erro de SQL):**
+  - `apply_migration` da (1) → negado ("Production Deploy").
+  - `UPDATE` da (2) → negado ("Modify Shared Resources"). Não tentei outro caminho.
+  - Por consequência também **não** reabri o acumulado: 27 conversas fechadas com o paciente falando por último (20 pedem resposta; 7 são só despedida).
+  - Tudo pronto para rodar à mão em `scripts/20261006_acertos_conversas.sql` (blocos A e B, com reversão e a dona anterior de cada conversa).
+- **Arquivos:** `supabase/migrations/20261006120000_reabrir_conversa_fechada.sql` (novo) · `scripts/20261006_acertos_conversas.sql` (novo) · `src/components/campaigns/CampaignWizard.tsx` · `AGENTES-ATIVOS.md` · `MEMORIA.md`.
+- **Banco:** **nenhuma alteração aplicada.**
+- **Publicado:** não. Para publicar a (3) sobem só `CampaignWizard.tsx` + a migration + registros; o diff de `TemplateRestartDialog.tsx`, `_shared/llm.ts` e `process-ai-message` é de outras frentes e fica fora.
+- **Próximo:** Danilo rodar a migration e os blocos A/B (ou liberar o agente) e dar o "pode" para publicar o aviso de capacidade. Depois de aplicada a (1), fechar a pendência #55 **só com o registro dele**.
